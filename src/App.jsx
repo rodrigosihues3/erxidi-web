@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { CartProvider, useCart } from "./context/CartContext";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import DesignSystemShowcase from "./features/dev/DesignSystemShowcase";
+import LoginView from "./features/auth/LoginView";
 
 function NavigationBar() {
   const { user, profile, signOut } = useAuth();
@@ -38,7 +39,12 @@ function NavigationBar() {
             </button>
           </div>
         ) : (
-          <span className="text-xs text-brand-muted">Invitado</span>
+          <Link
+            to="/login"
+            className="text-xs font-semibold bg-accent px-3 py-1 rounded text-white hover:bg-accent-hover transition-colors"
+          >
+            Ingresar
+          </Link>
         )}
       </div>
     </nav>
@@ -70,14 +76,14 @@ export default function App() {
               {/* Rutas Públicas */}
               <Route path="/" element={<HomeView />} />
               <Route path="/ui" element={<DesignSystemShowcase />} />
-
+              <Route path="/login" element={<LoginView />} />{" "}
+              {/* <-- Ruta agregada */}
               {/* Rutas Protegidas de Cliente */}
               <Route
                 element={
                   <ProtectedRoute allowedRoles={["customer", "owner"]} />
                 }
               >
-                {/* Rodrigo Sihues: Módulo B (Checkout) */}
                 <Route
                   path="/checkout"
                   element={<div>Vista Checkout (En desarrollo)</div>}
@@ -87,7 +93,6 @@ export default function App() {
                   element={<div>Historial de Pedidos (En desarrollo)</div>}
                 />
               </Route>
-
               {/* Rutas Protegidas de Administración (Dueña) */}
               <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
                 <Route
@@ -95,7 +100,6 @@ export default function App() {
                   element={<div>Panel de Administración (En desarrollo)</div>}
                 />
               </Route>
-
               {/* Rutas Protegidas de Logística (Repartidor) */}
               <Route element={<ProtectedRoute allowedRoles={["delivery"]} />}>
                 <Route
