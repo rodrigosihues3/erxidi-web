@@ -17,7 +17,7 @@ Antes de ejecutar el proyecto, confirma contar con el siguiente software instala
 
 ### Paso 1: Clonar el repositorio
 ```bash
-git clone <URL_DEL_REPOSITORIO>
+git clone https://github.com/rodrigosihues3/erxidi-web.git
 cd erxidi-web
 ```
 
@@ -42,8 +42,8 @@ cp .env.example .env.local
 
 Verifica que `.env.local` contenga las credenciales asignadas de Supabase:
 ```env
-VITE_SUPABASE_URL=[https://lekmmjwwapqxzuqavxof.supabase.co](https://lekmmjwwapqxzuqavxof.supabase.co)
-VITE_SUPABASE_ANON_KEY=sb_publishable_M_KRHI-OU06354l09Qx5uw_rlzTWDZX
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
 ```
 
 ### Paso 4: Iniciar servidor de desarrollo
