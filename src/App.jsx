@@ -21,6 +21,7 @@ import CatalogView from "./features/catalog/CatalogView";
 import ProductDetailView from "./features/catalog/ProductDetailView";
 import CheckoutView from "./features/checkout/CheckoutView";
 import OrderConfirmationView from "./features/checkout/OrderConfirmationView";
+import OrderTrackingView from "./features/tracking/OrderTrackingView";
 import { getProductBySlug } from "./services/api/catalogService";
 
 // Contenedor que resuelve el producto dinámicamente desde Supabase
@@ -140,6 +141,10 @@ export default function App() {
               <Route
                 path="/checkout/confirmacion/:orderNumber"
                 element={<OrderConfirmationView />}
+              />
+              <Route
+                path="/seguimiento/:orderNumber"
+                element={<OrderTrackingView />}
               />
               <Route path="/ui" element={<DesignSystemShowcase />} />
               <Route path="/login" element={<LoginView />} />

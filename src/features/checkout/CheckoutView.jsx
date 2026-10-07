@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import {
   Check,
   ShoppingBag,
@@ -15,23 +15,28 @@ import {
   Zap,
   Calendar,
   AlertCircle,
-  Banknote,
-  Lock,
   Search,
   Edit3,
-} from 'lucide-react';
-import { useCart } from '../../context/CartContext';
-import { useAuth } from '../../context/AuthContext';
-import Button from '../../components/ui/Button';
-import Badge from '../../components/ui/Badge';
-import Input from '../../components/ui/Input';
-import { fetchDni, fetchRuc } from '../../services/api/decolectaService';
-import { createOrder } from '../../services/api/checkoutService';
+  QrCode,
+  ShieldCheck,
+} from "lucide-react";
+import { useCart } from "../../context/CartContext";
+import { useAuth } from "../../context/AuthContext";
+import Button from "../../components/ui/Button";
+import Badge from "../../components/ui/Badge";
+import Input from "../../components/ui/Input";
+import { fetchDni, fetchRuc } from "../../services/api/decolectaService";
+import { createOrder } from "../../services/api/checkoutService";
+import {
+  initCulqi,
+  openCulqi,
+  closeCulqi,
+} from "../../services/payment/culqiService";
 import {
   defaultDeliveryZones,
   defaultDeliverySlots,
   pickupStoreInfo,
-} from './data/mockDeliveryZones';
+} from "./data/mockDeliveryZones";
 
 export default function CheckoutView() {
   const navigate = useNavigate();
@@ -45,11 +50,11 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 1: Identificación y Contacto
   // -------------------------------------------------------------
-  const [dni, setDni] = useState(profile?.document_number || '');
-  const [firstName, setFirstName] = useState(profile?.first_name || '');
-  const [lastName, setLastName] = useState(profile?.last_name || '');
-  const [email, setEmail] = useState(user?.email || '');
-  const [phone, setPhone] = useState(profile?.phone || '');
+  const [dni, setDni] = useState(profile?.document_number || "");
+  const [firstName, setFirstName] = useState(profile?.first_name || "");
+  const [lastName, setLastName] = useState(profile?.last_name || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [phone, setPhone] = useState(profile?.phone || "");
 
   const [isSearchingDni, setIsSearchingDni] = useState(false);
   const [isNameLocked, setIsNameLocked] = useState(false);
@@ -68,11 +73,13 @@ export default function CheckoutView() {
 
   // Función explícita para consulta de DNI (vía botón o Enter)
   const triggerDniLookup = async (dniToSearch = dni) => {
-    const clean = String(dniToSearch || '').replace(/\D/g, '').slice(0, 8);
+    const clean = String(dniToSearch || "")
+      .replace(/\D/g, "")
+      .slice(0, 8);
     if (!/^\d{8}$/.test(clean)) {
       setDniFeedback({
-        type: 'error',
-        message: 'El DNI debe contener exactamente 8 dígitos numéricos.',
+        type: "error",
+        message: "El DNI debe contener exactamente 8 dígitos numéricos.",
       });
       return;
     }
@@ -85,25 +92,27 @@ export default function CheckoutView() {
       if (res.success && res.names) {
         setFirstName(res.names);
         setLastName(
-          `${res.firstLastName || ''} ${res.secondLastName || ''}`.trim()
+          `${res.firstLastName || ""} ${res.secondLastName || ""}`.trim(),
         );
         setIsNameLocked(true);
         setDniFeedback({
-          type: 'success',
-          message: 'Identidad verificada exitosamente en RENIEC.',
+          type: "success",
+          message: "Identidad verificada exitosamente en RENIEC.",
         });
       } else {
         setIsNameLocked(false);
         setDniFeedback({
-          type: 'info',
-          message: 'No pudimos autocompletar tus datos. Ingrésalos manualmente.',
+          type: "info",
+          message:
+            "No pudimos autocompletar tus datos. Ingrésalos manualmente.",
         });
       }
     } catch (err) {
       setIsNameLocked(false);
       setDniFeedback({
-        type: 'info',
-        message: 'Servicio no disponible momentáneamente. Ingresa tus datos manualmente.',
+        type: "info",
+        message:
+          "Servicio no disponible momentáneamente. Ingresa tus datos manualmente.",
       });
     } finally {
       setIsSearchingDni(false);
@@ -112,7 +121,7 @@ export default function CheckoutView() {
 
   // Manejo de cambio en DNI con auto-lookup reactivo al 8vo dígito
   const handleDniChange = (e) => {
-    const rawVal = e.target.value.replace(/\D/g, '').slice(0, 8);
+    const rawVal = e.target.value.replace(/\D/g, "").slice(0, 8);
     setDni(rawVal);
     setDniFeedback(null);
 
@@ -125,7 +134,8 @@ export default function CheckoutView() {
 
   const isStep1Valid = useMemo(() => {
     const isDniValid = /^\d{8}$/.test(dni);
-    const isNameValid = firstName.trim().length > 1 && lastName.trim().length > 1;
+    const isNameValid =
+      firstName.trim().length > 1 && lastName.trim().length > 1;
     const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
     const isPhoneValid = /^9\d{8}$/.test(phone.trim());
     return isDniValid && isNameValid && isEmailValid && isPhoneValid;
@@ -142,14 +152,14 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 2: Método de Entrega y Horarios
   // -------------------------------------------------------------
-  const [deliveryType, setDeliveryType] = useState('scheduled');
+  const [deliveryType, setDeliveryType] = useState("scheduled");
   const [selectedZoneId, setSelectedZoneId] = useState(
-    defaultDeliveryZones[0]?.id || 1
+    defaultDeliveryZones[0]?.id || 1,
   );
-  const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [deliveryReference, setDeliveryReference] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryReference, setDeliveryReference] = useState("");
   const [scheduledTimeSlot, setScheduledTimeSlot] = useState(
-    defaultDeliverySlots[0]
+    defaultDeliverySlots[0],
   );
 
   // Cálculo dinámico de ventana de envío express (hora actual + 45min a + 90min)
@@ -158,19 +168,19 @@ export default function CheckoutView() {
     const start = new Date(now.getTime() + 45 * 60000);
     const end = new Date(now.getTime() + 90 * 60000);
     const formatH = (d) =>
-      `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     return `Tu pedido llegará hoy entre las ${formatH(start)} y ${formatH(end)} hrs`;
   }, []);
 
   const selectedZone = useMemo(
     () => defaultDeliveryZones.find((z) => z.id === Number(selectedZoneId)),
-    [selectedZoneId]
+    [selectedZoneId],
   );
 
   const deliveryCost = useMemo(() => {
-    if (deliveryType === 'pickup') return 0;
+    if (deliveryType === "pickup") return 0;
     const baseCost = selectedZone?.delivery_cost || 10.0;
-    if (deliveryType === 'express') {
+    if (deliveryType === "express") {
       return baseCost + 5.0; // Recargo express prioritario
     }
     return baseCost;
@@ -179,7 +189,7 @@ export default function CheckoutView() {
   const totalAmount = subtotal + deliveryCost;
 
   const isStep2Valid = useMemo(() => {
-    if (deliveryType === 'pickup') return true;
+    if (deliveryType === "pickup") return true;
     return deliveryAddress.trim().length >= 4;
   }, [deliveryType, deliveryAddress]);
 
@@ -194,30 +204,170 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 3: Pago y Comprobante
   // -------------------------------------------------------------
-  const [paymentMethod, setPaymentMethod] = useState('yape_plin');
-  const [yapeOpNumber, setYapeOpNumber] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState("yape_plin"); // 'yape_plin' | 'culqi_gateway'
+  const [yapeOpNumber, setYapeOpNumber] = useState("");
+  const [culqiError, setCulqiError] = useState(null);
 
-  // Simulación de tarjeta
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
-
-  // Comprobante y Facturación
-  const [receiptType, setReceiptType] = useState('boleta'); // 'none' | 'boleta' | 'factura'
-  const [ruc, setRuc] = useState('');
-  const [companyName, setCompanyName] = useState('');
-  const [fiscalAddress, setFiscalAddress] = useState('');
+  // Comprobante y Facturación: 'nota_venta' | 'boleta' | 'factura'
+  const [receiptType, setReceiptType] = useState("boleta");
+  const [ruc, setRuc] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [fiscalAddress, setFiscalAddress] = useState("");
   const [isSearchingRuc, setIsSearchingRuc] = useState(false);
+  const [isRucLocked, setIsRucLocked] = useState(false);
   const [rucFeedback, setRucFeedback] = useState(null);
+
+  // Mantener referencia actualizada para el callback global de Culqi
+  const orderContextRef = useRef({});
+  orderContextRef.current = {
+    user,
+    firstName,
+    lastName,
+    email,
+    phone,
+    deliveryType,
+    deliveryAddress,
+    deliveryReference,
+    selectedZone,
+    deliveryCost,
+    scheduledTimeSlot,
+    subtotal,
+    totalAmount,
+    receiptType,
+    ruc,
+    companyName,
+    fiscalAddress,
+    dni,
+    items,
+  };
+
+  // Callback para procesar orden con Culqi (token u orden confirmada)
+  const handleProcessCulqiOrder = async (gatewayTxId) => {
+    const ctx = orderContextRef.current;
+    const fullName = `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim();
+    const finalAddress =
+      ctx.deliveryType === "pickup"
+        ? pickupStoreInfo.address
+        : `${ctx.deliveryAddress.trim()}${
+            ctx.deliveryReference.trim()
+              ? ` (Ref: ${ctx.deliveryReference.trim()})`
+              : ""
+          } - ${ctx.selectedZone?.district_name || "Lima"}`;
+
+    const invoicePrefix =
+      ctx.receiptType === "factura"
+        ? "F001"
+        : ctx.receiptType === "boleta"
+          ? "B001"
+          : "NV01";
+    const invoiceDocNumber = `${invoicePrefix}-${Date.now().toString().slice(-6)}`;
+
+    const invoiceData = {
+      type: ctx.receiptType,
+      doc_number: invoiceDocNumber,
+      tax_id: ctx.receiptType === "factura" ? ctx.ruc.trim() : ctx.dni.trim(),
+      legal_name: ctx.receiptType === "factura" ? ctx.companyName.trim() : fullName,
+      fiscal_address:
+        ctx.receiptType === "factura"
+          ? ctx.fiscalAddress.trim() || finalAddress
+          : finalAddress,
+      issued_at: new Date().toISOString(),
+    };
+
+    const orderPayload = {
+      userId: ctx.user?.id || null,
+      customerName: fullName,
+      customerEmail: ctx.email.trim(),
+      customerPhone: ctx.phone.trim(),
+      deliveryType: ctx.deliveryType,
+      deliveryAddress: finalAddress,
+      deliveryZoneId:
+        ctx.deliveryType === "pickup" ? null : ctx.selectedZone?.id || null,
+      deliveryCost: ctx.deliveryCost,
+      scheduledTimeSlot:
+        ctx.deliveryType === "scheduled"
+          ? ctx.scheduledTimeSlot
+          : ctx.deliveryType === "express"
+            ? "Express Mismo Día"
+            : "Horario Comercial 09:00 - 18:00",
+      subtotal: ctx.subtotal,
+      totalAmount: ctx.totalAmount,
+      payment_method: "culqi_gateway",
+      paymentMethod: "culqi_gateway",
+      payment_status: "completed",
+      paymentStatus: "completed",
+      payment_gateway_tx_id: gatewayTxId,
+      paymentGatewayTxId: gatewayTxId,
+      invoice_type: ctx.receiptType,
+      invoice_data: invoiceData,
+      items: ctx.items,
+    };
+
+    try {
+      const result = await createOrder(orderPayload);
+      if (result.success && result.order) {
+        clearCart();
+        navigate(`/checkout/confirmacion/${result.order.order_number}`, {
+          state: { order: result.order },
+        });
+      } else {
+        throw new Error(result.error || "No se pudo registrar la compra.");
+      }
+    } catch (err) {
+      console.error("Error al registrar orden de Culqi:", err);
+      setCulqiError(err.message || "Error al registrar el pedido en el sistema.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Manejador Global de Respuesta de Culqi Checkout v4
+  useEffect(() => {
+    window.culqi = async () => {
+      try {
+        if (window.Culqi?.token) {
+          const token = window.Culqi.token;
+          closeCulqi();
+          setIsSubmitting(true);
+          setCulqiError(null);
+          await handleProcessCulqiOrder(token.id);
+        } else if (window.Culqi?.order) {
+          const order = window.Culqi.order;
+          closeCulqi();
+          setIsSubmitting(true);
+          setCulqiError(null);
+          await handleProcessCulqiOrder(order.id);
+        } else if (window.Culqi?.error) {
+          const errorMsg =
+            window.Culqi.error.user_message ||
+            window.Culqi.error.merchant_message ||
+            "No se pudo completar el pago con Culqi.";
+          setCulqiError(errorMsg);
+          setIsSubmitting(false);
+        }
+      } catch (err) {
+        console.error("Error en callback window.culqi:", err);
+        setCulqiError(err.message || "Error inesperado al procesar el pago.");
+        setIsSubmitting(false);
+      }
+    };
+
+    return () => {
+      window.culqi = null;
+    };
+  }, []);
 
   // Consulta de RUC con Decolecta
   const triggerRucLookup = async (rucToSearch = ruc) => {
-    const clean = String(rucToSearch || '').replace(/\D/g, '').slice(0, 11);
+    const clean = String(rucToSearch || "")
+      .replace(/\D/g, "")
+      .slice(0, 11);
     if (!/^(10|20)\d{9}$/.test(clean)) {
       setRucFeedback({
-        type: 'error',
-        message: 'El RUC debe tener 11 dígitos y empezar con 10 o 20.',
+        type: "error",
+        message: "El RUC debe tener 11 dígitos y empezar con 10 o 20.",
       });
+      setIsRucLocked(false);
       return;
     }
 
@@ -231,20 +381,23 @@ export default function CheckoutView() {
         if (res.address) {
           setFiscalAddress(res.address);
         }
+        setIsRucLocked(true);
         setRucFeedback({
-          type: 'success',
-          message: `RUC verificado: ${res.status || 'ACTIVO'}`,
+          type: "success",
+          message: `✓ RUC verificado: ${res.status || "ACTIVO"}`,
         });
       } else {
+        setIsRucLocked(false);
         setRucFeedback({
-          type: 'info',
-          message: 'Completa la Razón Social y Dirección Fiscal manualmente.',
+          type: "info",
+          message: "Completa la Razón Social y Dirección Fiscal manualmente.",
         });
       }
     } catch (err) {
+      setIsRucLocked(false);
       setRucFeedback({
-        type: 'info',
-        message: 'No pudimos consultar SUNAT. Ingrésalos manualmente.',
+        type: "info",
+        message: "No pudimos consultar SUNAT. Ingrésalos manualmente.",
       });
     } finally {
       setIsSearchingRuc(false);
@@ -252,46 +405,24 @@ export default function CheckoutView() {
   };
 
   const handleRucChange = (e) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 11);
+    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
     setRuc(val);
     setRucFeedback(null);
+    setIsRucLocked(false);
 
     if (val.length === 11 && /^(10|20)\d{9}$/.test(val)) {
       triggerRucLookup(val);
     }
   };
 
-  // Formateador de tarjeta 16 dígitos
-  const handleCardNumberChange = (e) => {
-    const clean = e.target.value.replace(/\D/g, '').slice(0, 16);
-    const formatted = clean.match(/.{1,4}/g)?.join(' ') || clean;
-    setCardNumber(formatted);
-  };
-
-  const handleExpiryChange = (e) => {
-    const clean = e.target.value.replace(/\D/g, '').slice(0, 4);
-    if (clean.length >= 3) {
-      setCardExpiry(`${clean.slice(0, 2)}/${clean.slice(2)}`);
-    } else {
-      setCardExpiry(clean);
-    }
-  };
-
   const isStep3Valid = useMemo(() => {
     // Validación según método de pago
-    if (paymentMethod === 'yape_plin') {
+    if (paymentMethod === "yape_plin") {
       if (!/^\d{6,8}$/.test(yapeOpNumber.trim())) return false;
-    } else if (paymentMethod === 'card') {
-      const cleanDigits = cardNumber.replace(/\s/g, '');
-      if (cleanDigits.length !== 16) return false;
-      if (!/^\d{2}\/\d{2}$/.test(cardExpiry)) return false;
-      if (!/^\d{3}$/.test(cardCvv)) return false;
-    } else if (paymentMethod === 'cash_on_delivery') {
-      if (!user) return false; // Regla de negocio: solo registrados
     }
 
     // Validación según comprobante
-    if (receiptType === 'factura') {
+    if (receiptType === "factura") {
       if (!/^(10|20)\d{9}$/.test(ruc.trim())) return false;
       if (companyName.trim().length < 2) return false;
     }
@@ -300,10 +431,6 @@ export default function CheckoutView() {
   }, [
     paymentMethod,
     yapeOpNumber,
-    cardNumber,
-    cardExpiry,
-    cardCvv,
-    user,
     receiptType,
     ruc,
     companyName,
@@ -312,44 +439,66 @@ export default function CheckoutView() {
   // Ejecución transaccional del pedido
   const handleConfirmOrder = async (e) => {
     e.preventDefault();
-    if (!isStep3Valid || isSubmitting) return;
+    if (isSubmitting) return;
+
+    // Validación de comprobante antes de avanzar
+    if (receiptType === "factura") {
+      if (!/^(10|20)\d{9}$/.test(ruc.trim()) || companyName.trim().length < 2) {
+        setRucFeedback({
+          type: "error",
+          message: "Por favor completa un RUC y Razón Social válidos para la Factura.",
+        });
+        return;
+      }
+    }
+
+    // Flujo Online Culqi
+    if (paymentMethod === "culqi_gateway") {
+      setCulqiError(null);
+      try {
+        initCulqi({
+          title: "ERXIDI - Confecciones",
+          amountInCents: totalAmount * 100,
+        });
+        openCulqi();
+      } catch (err) {
+        console.error("Error al iniciar Culqi:", err);
+        setCulqiError(err.message || "No se pudo abrir la pasarela Culqi.");
+      }
+      return;
+    }
+
+    // Flujo Transferencia Directa (Yape / Plin Manual)
+    if (!isStep3Valid) return;
 
     setIsSubmitting(true);
+    setCulqiError(null);
 
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
     const finalAddress =
-      deliveryType === 'pickup'
+      deliveryType === "pickup"
         ? pickupStoreInfo.address
         : `${deliveryAddress.trim()}${
-            deliveryReference.trim() ? ` (Ref: ${deliveryReference.trim()})` : ''
-          } - ${selectedZone?.district_name || 'Lima'}`;
+            deliveryReference.trim()
+              ? ` (Ref: ${deliveryReference.trim()})`
+              : ""
+          } - ${selectedZone?.district_name || "Lima"}`;
 
-    const txId =
-      paymentMethod === 'yape_plin'
-        ? `OP-${yapeOpNumber.trim()}`
-        : paymentMethod === 'card'
-        ? `AUTH-${Date.now().toString().slice(-6)}`
-        : null;
-
-    const paymentStatus =
-      paymentMethod === 'card'
-        ? 'completed'
-        : paymentMethod === 'yape_plin'
-        ? 'pending_verification'
-        : 'pending';
-
-    const invoiceDocNumber = `${
-      receiptType === 'factura' ? 'F001' : 'B001'
-    }-${Date.now().toString().slice(-6)}`;
+    const invoicePrefix =
+      receiptType === "factura"
+        ? "F001"
+        : receiptType === "boleta"
+          ? "B001"
+          : "NV01";
+    const invoiceDocNumber = `${invoicePrefix}-${Date.now().toString().slice(-6)}`;
 
     const invoiceData = {
       type: receiptType,
       doc_number: invoiceDocNumber,
-      tax_id: receiptType === 'factura' ? ruc.trim() : dni.trim(),
-      legal_name:
-        receiptType === 'factura' ? companyName.trim() : fullName,
+      tax_id: receiptType === "factura" ? ruc.trim() : dni.trim(),
+      legal_name: receiptType === "factura" ? companyName.trim() : fullName,
       fiscal_address:
-        receiptType === 'factura'
+        receiptType === "factura"
           ? fiscalAddress.trim() || finalAddress
           : finalAddress,
       issued_at: new Date().toISOString(),
@@ -362,19 +511,23 @@ export default function CheckoutView() {
       customerPhone: phone.trim(),
       deliveryType,
       deliveryAddress: finalAddress,
-      deliveryZoneId: deliveryType === 'pickup' ? null : selectedZone?.id || null,
+      deliveryZoneId:
+        deliveryType === "pickup" ? null : selectedZone?.id || null,
       deliveryCost,
       scheduledTimeSlot:
-        deliveryType === 'scheduled'
+        deliveryType === "scheduled"
           ? scheduledTimeSlot
-          : deliveryType === 'express'
-          ? 'Express Mismo Día'
-          : 'Horario Comercial 09:00 - 18:00',
+          : deliveryType === "express"
+            ? "Express Mismo Día"
+            : "Horario Comercial 09:00 - 18:00",
       subtotal,
       totalAmount,
-      paymentMethod,
-      paymentStatus,
-      paymentGatewayTxId: txId,
+      payment_method: "yape_plin",
+      paymentMethod: "yape_plin",
+      payment_status: "pending_verification",
+      paymentStatus: "pending_verification",
+      payment_gateway_tx_id: yapeOpNumber.trim(),
+      paymentGatewayTxId: yapeOpNumber.trim(),
       invoice_type: receiptType,
       invoice_data: invoiceData,
       items,
@@ -389,7 +542,7 @@ export default function CheckoutView() {
         });
       }
     } catch (err) {
-      console.error('Error al procesar la compra:', err);
+      console.error("Error al procesar la compra:", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -402,9 +555,9 @@ export default function CheckoutView() {
   };
 
   const formatCurrency = (amount) =>
-    new Intl.NumberFormat('es-PE', {
-      style: 'currency',
-      currency: 'PEN',
+    new Intl.NumberFormat("es-PE", {
+      style: "currency",
+      currency: "PEN",
     }).format(amount || 0);
 
   // -------------------------------------------------------------
@@ -421,7 +574,8 @@ export default function CheckoutView() {
             Tu carrito está vacío
           </h2>
           <p className="text-xs text-brand-secondary max-w-sm">
-            Para iniciar el proceso de checkout, primero añade prendas a tu bolsa de compras.
+            Para iniciar el proceso de checkout, primero añade prendas a tu
+            bolsa de compras.
           </p>
         </div>
         <Link to="/catalogo">
@@ -463,22 +617,22 @@ export default function CheckoutView() {
               onClick={() => handleStepClick(1)}
               className={`p-3 rounded-card border transition-all cursor-pointer select-none flex items-center gap-3 ${
                 currentStep === 1
-                  ? 'border-brand-primary bg-surface-card ring-1 ring-brand-primary'
+                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
                   : completedSteps[1]
-                  ? 'border-emerald-300 bg-emerald-50/40 hover:border-brand-primary'
-                  : 'border-border bg-surface-subtle opacity-70'
+                    ? "border-emerald-300 bg-emerald-50/40 hover:border-brand-primary"
+                    : "border-border bg-surface-subtle opacity-70"
               }`}
             >
               <div
                 className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors ${
                   completedSteps[1]
-                    ? 'bg-emerald-600 text-white'
+                    ? "bg-emerald-600 text-white"
                     : currentStep === 1
-                    ? 'bg-brand-primary text-white'
-                    : 'bg-surface-subtle text-brand-secondary border border-border'
+                      ? "bg-brand-primary text-white"
+                      : "bg-surface-subtle text-brand-secondary border border-border"
                 }`}
               >
-                {completedSteps[1] ? <Check className="w-4 h-4" /> : '1'}
+                {completedSteps[1] ? <Check className="w-4 h-4" /> : "1"}
               </div>
               <div className="min-w-0">
                 <span className="block text-[10px] uppercase font-bold tracking-wider text-brand-muted">
@@ -494,25 +648,27 @@ export default function CheckoutView() {
             <li
               onClick={() => handleStepClick(2)}
               className={`p-3 rounded-card border transition-all ${
-                completedSteps[1] ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
+                completedSteps[1]
+                  ? "cursor-pointer"
+                  : "cursor-not-allowed opacity-50"
               } select-none flex items-center gap-3 ${
                 currentStep === 2
-                  ? 'border-brand-primary bg-surface-card ring-1 ring-brand-primary'
+                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
                   : completedSteps[2]
-                  ? 'border-emerald-300 bg-emerald-50/40 hover:border-brand-primary'
-                  : 'border-border bg-surface-subtle'
+                    ? "border-emerald-300 bg-emerald-50/40 hover:border-brand-primary"
+                    : "border-border bg-surface-subtle"
               }`}
             >
               <div
                 className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors ${
                   completedSteps[2]
-                    ? 'bg-emerald-600 text-white'
+                    ? "bg-emerald-600 text-white"
                     : currentStep === 2
-                    ? 'bg-brand-primary text-white'
-                    : 'bg-surface-subtle text-brand-secondary border border-border'
+                      ? "bg-brand-primary text-white"
+                      : "bg-surface-subtle text-brand-secondary border border-border"
                 }`}
               >
-                {completedSteps[2] ? <Check className="w-4 h-4" /> : '2'}
+                {completedSteps[2] ? <Check className="w-4 h-4" /> : "2"}
               </div>
               <div className="min-w-0">
                 <span className="block text-[10px] uppercase font-bold tracking-wider text-brand-muted">
@@ -529,19 +685,19 @@ export default function CheckoutView() {
               onClick={() => handleStepClick(3)}
               className={`p-3 rounded-card border transition-all ${
                 completedSteps[1] && completedSteps[2]
-                  ? 'cursor-pointer'
-                  : 'cursor-not-allowed opacity-50'
+                  ? "cursor-pointer"
+                  : "cursor-not-allowed opacity-50"
               } select-none flex items-center gap-3 ${
                 currentStep === 3
-                  ? 'border-brand-primary bg-surface-card ring-1 ring-brand-primary'
-                  : 'border-border bg-surface-subtle'
+                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
+                  : "border-border bg-surface-subtle"
               }`}
             >
               <div
                 className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors ${
                   currentStep === 3
-                    ? 'bg-brand-primary text-white'
-                    : 'bg-surface-subtle text-brand-secondary border border-border'
+                    ? "bg-brand-primary text-white"
+                    : "bg-surface-subtle text-brand-secondary border border-border"
                 }`}
               >
                 3
@@ -573,7 +729,8 @@ export default function CheckoutView() {
                   1. Identificación y Contacto
                 </h2>
                 <p className="text-xs text-brand-secondary mt-0.5">
-                  Ingresa tus datos personales para validar tu identidad con RENIEC y coordinar el despacho.
+                  Ingresa tus datos personales para validar tu identidad con
+                  RENIEC y coordinar el despacho.
                 </p>
               </div>
 
@@ -605,7 +762,7 @@ export default function CheckoutView() {
                         value={dni}
                         onChange={handleDniChange}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                          if (e.key === "Enter") {
                             e.preventDefault();
                             triggerDniLookup();
                           }
@@ -635,12 +792,12 @@ export default function CheckoutView() {
                   {dniFeedback && (
                     <div
                       className={`mt-1.5 text-xs flex items-center gap-1.5 ${
-                        dniFeedback.type === 'success'
-                          ? 'text-emerald-600 font-medium'
-                          : 'text-amber-600'
+                        dniFeedback.type === "success"
+                          ? "text-emerald-600 font-medium"
+                          : "text-amber-600"
                       }`}
                     >
-                      {dniFeedback.type === 'success' ? (
+                      {dniFeedback.type === "success" ? (
                         <Check className="w-3.5 h-3.5" />
                       ) : (
                         <AlertCircle className="w-3.5 h-3.5" />
@@ -706,7 +863,7 @@ export default function CheckoutView() {
                       placeholder="9XXXXXXXX (9 dígitos)"
                       value={phone}
                       onChange={(e) =>
-                        setPhone(e.target.value.replace(/\D/g, '').slice(0, 9))
+                        setPhone(e.target.value.replace(/\D/g, "").slice(0, 9))
                       }
                       required
                     />
@@ -750,18 +907,18 @@ export default function CheckoutView() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Opción 1: Recojo en Tienda */}
                   <label
-                    onClick={() => setDeliveryType('pickup')}
+                    onClick={() => setDeliveryType("pickup")}
                     className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                      deliveryType === 'pickup'
-                        ? 'border-brand-primary bg-surface-subtle ring-1 ring-brand-primary'
-                        : 'border-border bg-surface-card hover:border-border-strong'
+                      deliveryType === "pickup"
+                        ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                        : "border-border bg-surface-card hover:border-border-strong"
                     }`}
                   >
                     <input
                       type="radio"
                       name="delivery-type"
-                      checked={deliveryType === 'pickup'}
-                      onChange={() => setDeliveryType('pickup')}
+                      checked={deliveryType === "pickup"}
+                      onChange={() => setDeliveryType("pickup")}
                       className="sr-only"
                     />
                     <div>
@@ -782,18 +939,18 @@ export default function CheckoutView() {
 
                   {/* Opción 2: Envío Express */}
                   <label
-                    onClick={() => setDeliveryType('express')}
+                    onClick={() => setDeliveryType("express")}
                     className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                      deliveryType === 'express'
-                        ? 'border-brand-primary bg-surface-subtle ring-1 ring-brand-primary'
-                        : 'border-border bg-surface-card hover:border-border-strong'
+                      deliveryType === "express"
+                        ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                        : "border-border bg-surface-card hover:border-border-strong"
                     }`}
                   >
                     <input
                       type="radio"
                       name="delivery-type"
-                      checked={deliveryType === 'express'}
-                      onChange={() => setDeliveryType('express')}
+                      checked={deliveryType === "express"}
+                      onChange={() => setDeliveryType("express")}
                       className="sr-only"
                     />
                     <div>
@@ -814,23 +971,26 @@ export default function CheckoutView() {
 
                   {/* Opción 3: Envío Programado */}
                   <label
-                    onClick={() => setDeliveryType('scheduled')}
+                    onClick={() => setDeliveryType("scheduled")}
                     className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                      deliveryType === 'scheduled'
-                        ? 'border-brand-primary bg-surface-subtle ring-1 ring-brand-primary'
-                        : 'border-border bg-surface-card hover:border-border-strong'
+                      deliveryType === "scheduled"
+                        ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                        : "border-border bg-surface-card hover:border-border-strong"
                     }`}
                   >
                     <input
                       type="radio"
                       name="delivery-type"
-                      checked={deliveryType === 'scheduled'}
-                      onChange={() => setDeliveryType('scheduled')}
+                      checked={deliveryType === "scheduled"}
+                      onChange={() => setDeliveryType("scheduled")}
                       className="sr-only"
                     />
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Calendar className="w-5 h-5 text-accent" />
+                        <Badge variant="success" className="text-[10px]">
+                          Gratis
+                        </Badge>
                         <Badge variant="neutral" className="text-[10px]">
                           Día Siguiente
                         </Badge>
@@ -846,7 +1006,7 @@ export default function CheckoutView() {
                 </div>
 
                 {/* Detalle de Recojo */}
-                {deliveryType === 'pickup' && (
+                {deliveryType === "pickup" && (
                   <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-2 text-xs">
                     <div className="flex items-center gap-2 font-bold text-brand-primary">
                       <Store className="w-4 h-4 text-accent" />
@@ -864,7 +1024,7 @@ export default function CheckoutView() {
                 )}
 
                 {/* Detalle de Envío Express */}
-                {deliveryType === 'express' && (
+                {deliveryType === "express" && (
                   <div className="space-y-4 pt-2 border-t border-border">
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
                       <Zap className="w-4 h-4 text-accent flex-shrink-0" />
@@ -881,12 +1041,15 @@ export default function CheckoutView() {
                       <select
                         id="checkout-express-zone"
                         value={selectedZoneId}
-                        onChange={(e) => setSelectedZoneId(Number(e.target.value))}
+                        onChange={(e) =>
+                          setSelectedZoneId(Number(e.target.value))
+                        }
                         className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
                       >
                         {defaultDeliveryZones.map((zone) => (
                           <option key={zone.id} value={zone.id}>
-                            {zone.district_name} (+S/ 5.00 Express &bull; Total: {formatCurrency(zone.delivery_cost + 5.0)})
+                            {zone.district_name} (+S/ 5.00 Express &bull; Total:{" "}
+                            {formatCurrency(zone.delivery_cost + 5.0)})
                           </option>
                         ))}
                       </select>
@@ -912,7 +1075,7 @@ export default function CheckoutView() {
                 )}
 
                 {/* Detalle de Envío Programado */}
-                {deliveryType === 'scheduled' && (
+                {deliveryType === "scheduled" && (
                   <div className="space-y-4 pt-2 border-t border-border">
                     <div>
                       <label
@@ -924,12 +1087,16 @@ export default function CheckoutView() {
                       <select
                         id="checkout-scheduled-zone"
                         value={selectedZoneId}
-                        onChange={(e) => setSelectedZoneId(Number(e.target.value))}
+                        onChange={(e) =>
+                          setSelectedZoneId(Number(e.target.value))
+                        }
                         className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
                       >
                         {defaultDeliveryZones.map((zone) => (
                           <option key={zone.id} value={zone.id}>
-                            {zone.district_name} ({formatCurrency(zone.delivery_cost)} - {zone.estimated_delivery_time})
+                            {zone.district_name} (
+                            {formatCurrency(zone.delivery_cost)} -{" "}
+                            {zone.estimated_delivery_time})
                           </option>
                         ))}
                       </select>
@@ -950,12 +1117,14 @@ export default function CheckoutView() {
                               onClick={() => setScheduledTimeSlot(slot)}
                               className={`p-3 rounded-button border text-xs font-semibold flex items-center justify-between transition-colors focus:outline-none ${
                                 isSelected
-                                  ? 'border-brand-primary bg-surface-subtle text-brand-primary ring-1 ring-brand-primary'
-                                  : 'border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary'
+                                  ? "border-brand-primary bg-surface-subtle text-brand-primary ring-1 ring-brand-primary"
+                                  : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary"
                               }`}
                             >
                               <span>{slot}</span>
-                              {isSelected && <Check className="w-4 h-4 text-accent" />}
+                              {isSelected && (
+                                <Check className="w-4 h-4 text-accent" />
+                              )}
                             </button>
                           );
                         })}
@@ -1019,225 +1188,115 @@ export default function CheckoutView() {
               </div>
 
               <form onSubmit={handleConfirmOrder} className="space-y-6">
-                {/* Selector de Método de Pago */}
+                {/* A. SECCIÓN COMPROBANTES: Tarjetas Segmentadas */}
                 <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-                    Método de Pago
-                  </label>
-
-                  <div className="space-y-3">
-                    {/* 1. Yape / Plin */}
-                    <label
-                      onClick={() => setPaymentMethod('yape_plin')}
-                      className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
-                        paymentMethod === 'yape_plin'
-                          ? 'border-brand-primary bg-surface-subtle ring-1 ring-brand-primary'
-                          : 'border-border bg-surface-card hover:border-border-strong'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="payment-method"
-                        checked={paymentMethod === 'yape_plin'}
-                        onChange={() => setPaymentMethod('yape_plin')}
-                        className="sr-only"
-                      />
-                      <CreditCard className="w-5 h-5 text-accent mt-0.5 flex-shrink-0" />
-                      <div className="flex-1">
-                        <span className="block text-sm font-bold text-brand-primary">
-                          Billetera Digital (Yape / Plin)
-                        </span>
-                        <span className="block text-xs text-brand-secondary mt-0.5">
-                          Transferencia al número <strong className="text-brand-primary">987 654 321</strong> (Titular: ERXIDI S.A.C.)
-                        </span>
-                      </div>
-                    </label>
-
-                    {/* Sub-form Yape: Número de Operación */}
-                    {paymentMethod === 'yape_plin' && (
-                      <div className="p-3.5 bg-surface-subtle border border-border rounded-card space-y-2 animate-in fade-in duration-150">
-                        <Input
-                          label="Número de Operación (6 a 8 dígitos)"
-                          id="checkout-yape-op"
-                          placeholder="Ej. 12345678"
-                          value={yapeOpNumber}
-                          onChange={(e) =>
-                            setYapeOpNumber(
-                              e.target.value.replace(/\D/g, '').slice(0, 8)
-                            )
-                          }
-                          required
-                        />
-                        <span className="text-[11px] text-brand-muted block">
-                          Ingresa el código numérico que figura en tu constancia de Yape o Plin.
-                        </span>
-                      </div>
-                    )}
-
-                    {/* 2. Tarjeta de Débito / Crédito (Simulador Demo) */}
-                    <label
-                      onClick={() => setPaymentMethod('card')}
-                      className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
-                        paymentMethod === 'card'
-                          ? 'border-brand-primary bg-surface-subtle ring-1 ring-brand-primary'
-                          : 'border-border bg-surface-card hover:border-border-strong'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="payment-method"
-                        checked={paymentMethod === 'card'}
-                        onChange={() => setPaymentMethod('card')}
-                        className="sr-only"
-                      />
-                      <CreditCard className="w-5 h-5 text-accent mt-0.5 flex-shrink-0" />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-brand-primary">
-                            Tarjeta de Débito / Crédito
-                          </span>
-                          <Badge variant="neutral" className="text-[10px]">
-                            Simulador Demo
-                          </Badge>
-                        </div>
-                        <span className="block text-xs text-brand-secondary mt-0.5">
-                          Acepta Visa, Mastercard y American Express
-                        </span>
-                      </div>
-                    </label>
-
-                    {/* Sub-form Tarjeta */}
-                    {paymentMethod === 'card' && (
-                      <div className="p-3.5 bg-surface-subtle border border-border rounded-card space-y-3 animate-in fade-in duration-150">
-                        <Input
-                          label="Número de Tarjeta"
-                          id="checkout-card-num"
-                          placeholder="4557 1234 5678 9010"
-                          value={cardNumber}
-                          onChange={handleCardNumberChange}
-                          required
-                        />
-                        <div className="grid grid-cols-2 gap-3">
-                          <Input
-                            label="Vencimiento"
-                            id="checkout-card-exp"
-                            placeholder="MM/AA"
-                            value={cardExpiry}
-                            onChange={handleExpiryChange}
-                            required
-                          />
-                          <Input
-                            label="CVV"
-                            id="checkout-card-cvv"
-                            placeholder="123"
-                            type="password"
-                            maxLength={3}
-                            value={cardCvv}
-                            onChange={(e) =>
-                              setCardCvv(
-                                e.target.value.replace(/\D/g, '').slice(0, 3)
-                              )
-                            }
-                            required
-                          />
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[11px] text-brand-muted">
-                          <Lock className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Simulación segura de pasarela de pagos.</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 3. Pago Contra Entrega en Efectivo */}
-                    <label
-                      onClick={() => {
-                        if (user) setPaymentMethod('cash_on_delivery');
-                      }}
-                      className={`p-4 rounded-card border transition-all flex items-start gap-3 select-none ${
-                        !user
-                          ? 'opacity-60 bg-surface-subtle border-border cursor-not-allowed'
-                          : paymentMethod === 'cash_on_delivery'
-                          ? 'border-brand-primary bg-surface-subtle ring-1 ring-brand-primary cursor-pointer'
-                          : 'border-border bg-surface-card hover:border-border-strong cursor-pointer'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="payment-method"
-                        disabled={!user}
-                        checked={paymentMethod === 'cash_on_delivery'}
-                        onChange={() => {
-                          if (user) setPaymentMethod('cash_on_delivery');
-                        }}
-                        className="sr-only"
-                      />
-                      <Banknote className="w-5 h-5 text-accent mt-0.5 flex-shrink-0" />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-brand-primary">
-                            Pago Contra Entrega en Efectivo
-                          </span>
-                          {!user && (
-                            <Badge variant="neutral" className="text-[10px]">
-                              Disponible solo para usuarios registrados
-                            </Badge>
-                          )}
-                        </div>
-                        <span className="block text-xs text-brand-secondary mt-0.5">
-                          Cancela en efectivo exacto al momento de recibir tus prendas.
-                        </span>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Selector de Comprobante */}
-                <div className="space-y-3 pt-3 border-t border-border">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Tipo de Comprobante
                   </label>
 
-                  <div className="flex gap-4 flex-wrap">
-                    <label className="flex items-center gap-2 text-xs font-semibold text-brand-primary cursor-pointer">
-                      <input
-                        type="radio"
-                        name="receipt-choice"
-                        value="none"
-                        checked={receiptType === 'none'}
-                        onChange={() => setReceiptType('none')}
-                        className="accent-brand-primary"
-                      />
-                      Sin comprobante
-                    </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* 1. Nota de Venta */}
+                    <div
+                      onClick={() => setReceiptType("nota_venta")}
+                      className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
+                        receiptType === "nota_venta"
+                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-bold text-brand-primary">
+                          Nota de Venta
+                        </span>
+                        {receiptType === "nota_venta" && (
+                          <Check className="w-4 h-4 text-accent" />
+                        )}
+                      </div>
+                      <span className="text-xs text-brand-secondary">
+                        Control interno de pedido
+                      </span>
+                    </div>
 
-                    <label className="flex items-center gap-2 text-xs font-semibold text-brand-primary cursor-pointer">
-                      <input
-                        type="radio"
-                        name="receipt-choice"
-                        value="boleta"
-                        checked={receiptType === 'boleta'}
-                        onChange={() => setReceiptType('boleta')}
-                        className="accent-brand-primary"
-                      />
-                      Boleta de Venta
-                    </label>
+                    {/* 2. Boleta de Venta */}
+                    <div
+                      onClick={() => setReceiptType("boleta")}
+                      className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
+                        receiptType === "boleta"
+                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-bold text-brand-primary">
+                          Boleta de Venta
+                        </span>
+                        {receiptType === "boleta" && (
+                          <Check className="w-4 h-4 text-accent" />
+                        )}
+                      </div>
+                      <span className="text-xs text-brand-secondary">
+                        Consumo personal / DNI
+                      </span>
+                    </div>
 
-                    <label className="flex items-center gap-2 text-xs font-semibold text-brand-primary cursor-pointer">
-                      <input
-                        type="radio"
-                        name="receipt-choice"
-                        value="factura"
-                        checked={receiptType === 'factura'}
-                        onChange={() => setReceiptType('factura')}
-                        className="accent-brand-primary"
-                      />
-                      Factura Electrónica
-                    </label>
+                    {/* 3. Factura Electrónica */}
+                    <div
+                      onClick={() => setReceiptType("factura")}
+                      className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
+                        receiptType === "factura"
+                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-bold text-brand-primary">
+                          Factura Electrónica
+                        </span>
+                        {receiptType === "factura" && (
+                          <Check className="w-4 h-4 text-accent" />
+                        )}
+                      </div>
+                      <span className="text-xs text-brand-secondary">
+                        Para empresas / RUC
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Campos si es Factura con Búsqueda SUNAT Decolecta */}
-                  {receiptType === 'factura' && (
-                    <div className="space-y-3 pt-2 p-4 bg-surface-subtle border border-border rounded-card animate-in fade-in duration-150">
+                  {/* Detalle Boleta: Reutilización de DNI y Nombres de Paso 1 */}
+                  {receiptType === "boleta" && (
+                    <div className="p-3.5 bg-surface-subtle border border-border rounded-card text-xs space-y-1.5 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <span className="text-brand-secondary font-medium">
+                          Titular del comprobante:
+                        </span>
+                        <span className="font-semibold text-brand-primary truncate max-w-[240px] text-right">
+                          {firstName} {lastName}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-brand-secondary font-medium">
+                          Documento de Identidad:
+                        </span>
+                        <span className="font-mono font-semibold text-brand-primary">
+                          DNI {dni}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-brand-muted pt-1 border-t border-border/60">
+                        La Boleta se emitirá automáticamente con los datos verificados en el Paso 1.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Detalle Nota de Venta */}
+                  {receiptType === "nota_venta" && (
+                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary animate-in fade-in duration-150">
+                      Comprobante para control interno y seguimiento de despacho. No tiene efectos tributarios.
+                    </div>
+                  )}
+
+                  {/* Detalle Factura: Formulario RUC, Razón Social y Dirección Fiscal */}
+                  {receiptType === "factura" && (
+                    <div className="space-y-3.5 p-4 bg-surface-subtle border border-border rounded-card animate-in fade-in duration-150">
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label
@@ -1256,7 +1315,7 @@ export default function CheckoutView() {
 
                         <div className="flex gap-2 items-center">
                           <div className="flex-1">
-                            <input
+                            <Input
                               id="checkout-ruc"
                               type="text"
                               inputMode="numeric"
@@ -1264,12 +1323,11 @@ export default function CheckoutView() {
                               value={ruc}
                               onChange={handleRucChange}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
+                                if (e.key === "Enter") {
                                   e.preventDefault();
                                   triggerRucLookup();
                                 }
                               }}
-                              className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
                               required
                             />
                           </div>
@@ -1294,15 +1352,17 @@ export default function CheckoutView() {
                         {rucFeedback && (
                           <div
                             className={`mt-1.5 text-xs flex items-center gap-1.5 ${
-                              rucFeedback.type === 'success'
-                                ? 'text-emerald-600 font-medium'
-                                : 'text-amber-600'
+                              rucFeedback.type === "success"
+                                ? "text-emerald-600 font-medium"
+                                : rucFeedback.type === "error"
+                                  ? "text-rose-600 font-medium"
+                                  : "text-amber-600"
                             }`}
                           >
-                            {rucFeedback.type === 'success' ? (
-                              <Check className="w-3.5 h-3.5" />
+                            {rucFeedback.type === "success" ? (
+                              <Check className="w-3.5 h-3.5 flex-shrink-0" />
                             ) : (
-                              <AlertCircle className="w-3.5 h-3.5" />
+                              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
                             )}
                             <span>{rucFeedback.message}</span>
                           </div>
@@ -1310,22 +1370,194 @@ export default function CheckoutView() {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Input
-                          label="Razón Social (Editable)"
-                          id="checkout-company"
-                          placeholder="Nombre comercial o razón social"
-                          value={companyName}
-                          onChange={(e) => setCompanyName(e.target.value)}
-                          required
-                        />
+                        <div className="w-full">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label
+                              htmlFor="checkout-company"
+                              className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
+                            >
+                              Razón Social
+                            </label>
+                            {isRucLocked && (
+                              <button
+                                type="button"
+                                onClick={() => setIsRucLocked(false)}
+                                className="text-xs text-accent hover:underline font-medium inline-flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                Editar manualmente
+                              </button>
+                            )}
+                          </div>
+                          <Input
+                            id="checkout-company"
+                            placeholder="Nombre comercial o razón social"
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
+                            readOnly={isRucLocked}
+                            className={
+                              isRucLocked
+                                ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                                : ""
+                            }
+                            required
+                          />
+                        </div>
 
                         <Input
-                          label="Dirección Fiscal (Editable)"
+                          label="Dirección Fiscal (Opcional)"
                           id="checkout-fiscal-address"
                           placeholder="Dirección fiscal registrada"
                           value={fiscalAddress}
                           onChange={(e) => setFiscalAddress(e.target.value)}
                         />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* B. SECCIÓN MÉTODOS DE PAGO: Dos opciones interactivas */}
+                <div className="space-y-3 pt-3 border-t border-border">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                    Método de Pago
+                  </label>
+
+                  <div className="space-y-3">
+                    {/* 1. Transferencia Directa (Yape / Plin Manual) */}
+                    <div
+                      onClick={() => setPaymentMethod("yape_plin")}
+                      className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
+                        paymentMethod === "yape_plin"
+                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/30"
+                      }`}
+                    >
+                      <div className="mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors border-brand-primary bg-brand-primary text-white">
+                        {paymentMethod === "yape_plin" ? (
+                          <div className="w-2 h-2 rounded-full bg-white" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-transparent" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-bold text-brand-primary">
+                            Transferencia Directa (Yape / Plin Manual)
+                          </span>
+                          <Badge variant="neutral" className="text-[10px]">
+                            Sin recargo
+                          </Badge>
+                        </div>
+                        <span className="block text-xs text-brand-secondary mt-1">
+                          Transfiere desde tu app bancaria e ingresa el número de operación.
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Sub-bloque Yape / Plin Manual */}
+                    {paymentMethod === "yape_plin" && (
+                      <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-4 animate-in fade-in duration-150">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                          {/* Datos institucionales */}
+                          <div className="space-y-2 text-xs">
+                            <div className="flex justify-between sm:block border-b sm:border-b-0 border-border pb-1.5 sm:pb-0">
+                              <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
+                                Número Institucional:
+                              </span>
+                              <span className="font-mono text-sm font-bold text-brand-primary">
+                                987 654 321
+                              </span>
+                            </div>
+                            <div className="flex justify-between sm:block border-b sm:border-b-0 border-border pb-1.5 sm:pb-0">
+                              <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
+                                Titular:
+                              </span>
+                              <span className="font-semibold text-brand-primary">
+                                ERXIDI S.A.C.
+                              </span>
+                            </div>
+                            <div className="flex justify-between sm:block">
+                              <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
+                                Monto a Transferir:
+                              </span>
+                              <span className="font-mono text-sm font-bold text-accent">
+                                {formatCurrency(totalAmount)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Contenedor visual sobrio para el QR */}
+                          <div className="flex flex-col items-center justify-center p-3.5 bg-surface-card border border-border rounded-card text-center space-y-1.5">
+                            <div className="w-24 h-24 rounded border border-border bg-white flex items-center justify-center p-2 shadow-xs">
+                              <QrCode className="w-20 h-20 text-brand-primary" />
+                            </div>
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-brand-muted">
+                              QR Institucional Yape / Plin
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Input Número de Operación */}
+                        <div className="pt-2 border-t border-border space-y-1.5">
+                          <Input
+                            label="Número de Operación (6 a 8 dígitos)"
+                            id="checkout-yape-op"
+                            placeholder="Ej. 12345678"
+                            value={yapeOpNumber}
+                            onChange={(e) =>
+                              setYapeOpNumber(
+                                e.target.value.replace(/\D/g, "").slice(0, 8),
+                              )
+                            }
+                            helperText="Ingresa el código numérico de 6 a 8 dígitos que figura en tu comprobante de Yape o Plin."
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. Pago Online Seguro (Culqi: Tarjetas de Débito/Crédito y Yape App) */}
+                    <div
+                      onClick={() => setPaymentMethod("culqi_gateway")}
+                      className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
+                        paymentMethod === "culqi_gateway"
+                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/30"
+                      }`}
+                    >
+                      <div className="mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors border-brand-primary bg-brand-primary text-white">
+                        {paymentMethod === "culqi_gateway" ? (
+                          <div className="w-2 h-2 rounded-full bg-white" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-transparent" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-brand-primary">
+                              Pago Online Seguro (Culqi: Tarjetas y Yape App)
+                            </span>
+                            <Badge variant="success" className="text-[10px]">
+                              Acreditación Inmediata
+                            </Badge>
+                          </div>
+                          <CreditCard className="w-4 h-4 text-accent" />
+                        </div>
+                        <p className="text-xs text-brand-secondary mt-1">
+                          Acepta Visa, Mastercard y Yape con código de aprobación. Procesado de forma segura por Culqi
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Alerta de Culqi en caso de error */}
+                  {culqiError && (
+                    <div className="p-3 bg-rose-50 border border-status-danger-border rounded-card text-xs text-status-danger-text flex items-start gap-2 animate-in fade-in duration-150">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-status-danger-text" />
+                      <div className="flex-1">
+                        <p className="font-semibold">Inconveniente con la pasarela</p>
+                        <p>{culqiError}</p>
                       </div>
                     </div>
                   )}
@@ -1351,7 +1583,9 @@ export default function CheckoutView() {
                     isLoading={isSubmitting}
                     className="bg-accent hover:bg-accent-hover text-white px-8"
                   >
-                    Confirmar Pedido {formatCurrency(totalAmount)}
+                    {paymentMethod === "culqi_gateway"
+                      ? `Pagar con Culqi ${formatCurrency(totalAmount)}`
+                      : `Confirmar Pedido ${formatCurrency(totalAmount)}`}
                   </Button>
                 </div>
               </form>
@@ -1367,7 +1601,7 @@ export default function CheckoutView() {
                 Resumen del Pedido
               </h3>
               <Badge variant="neutral" className="text-[11px] font-mono">
-                {totalUnits} {totalUnits === 1 ? 'prenda' : 'prendas'}
+                {totalUnits} {totalUnits === 1 ? "prenda" : "prendas"}
               </Badge>
             </div>
 
@@ -1397,10 +1631,10 @@ export default function CheckoutView() {
                         {item.name}
                       </p>
                       <p className="text-[11px] text-brand-secondary">
-                        Talla:{' '}
+                        Talla:{" "}
                         <span className="font-mono font-semibold">
                           {item.size}
-                        </span>{' '}
+                        </span>{" "}
                         &bull; Cant: {item.quantity}
                       </p>
                     </div>
@@ -1444,7 +1678,8 @@ export default function CheckoutView() {
             <div className="p-3 bg-surface-subtle border border-border rounded text-[11px] text-brand-secondary flex items-start gap-2 leading-relaxed">
               <ShieldAlert className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <span>
-                Por motivos de higiene, la ropa interior no admite cambios ni devoluciones una vez entregada.
+                Por motivos de higiene, la ropa interior no admite cambios ni
+                devoluciones una vez entregada.
               </span>
             </div>
           </div>
