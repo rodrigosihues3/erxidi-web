@@ -18,13 +18,18 @@ export function CartProvider({ children }) {
   }, [items]);
 
   /**
-   * Añade una variante al carrito.
+   * Añade una variante al carrito de forma segura sin excepciones.
    * payload: { variantId, productId, name, size, color, colorHex, price, stock, imageUrl }
    */
   const addItem = (item, quantity = 1) => {
-    if (item.stock <= 0) {
-      throw new Error("La variante seleccionada se encuentra agotada.");
+    if (!item || item.stock <= 0) {
+      return { success: false, reason: "out_of_stock" };
     }
+
+    const existingItem = items.find((i) => i.variantId === item.variantId);
+    const currentQty = existingItem ? existingItem.quantity : 0;
+    const requestedTotal = currentQty + quantity;
+    const isLimited = requestedTotal > item.stock;
 
     setItems((prevItems) => {
       const existingIndex = prevItems.findIndex(
@@ -32,25 +37,22 @@ export function CartProvider({ children }) {
       );
 
       if (existingIndex > -1) {
-        const existingItem = prevItems[existingIndex];
-        const updatedQuantity = existingItem.quantity + quantity;
-
-        // Impedir que la cantidad total exceda el inventario físico disponible
-        if (updatedQuantity > item.stock) {
-          throw new Error(
-            `Solo quedan ${item.stock} unidades disponibles de esta talla.`,
-          );
-        }
-
+        const prevExisting = prevItems[existingIndex];
+        const updatedQuantity = Math.min(
+          prevExisting.quantity + quantity,
+          item.stock,
+        );
         const updated = [...prevItems];
-        updated[existingIndex] = { ...existingItem, quantity: updatedQuantity };
+        updated[existingIndex] = { ...prevExisting, quantity: updatedQuantity };
         return updated;
       }
 
-      // Si no existía, validar que la cantidad inicial no exceda el stock
+      // Si no existía, limitar la cantidad al stock disponible
       const initialQuantity = Math.min(quantity, item.stock);
       return [...prevItems, { ...item, quantity: initialQuantity }];
     });
+
+    return isLimited ? { success: true, limited: true } : { success: true };
   };
 
   const updateQuantity = (variantId, newQuantity) => {
