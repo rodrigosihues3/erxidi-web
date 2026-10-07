@@ -257,7 +257,7 @@ export default function ProductDetailView({
                       </Badge>
                     ) : (
                       <Badge variant="success">
-                        En stock ({remainingStock} disp.)
+                        En stock
                       </Badge>
                     )}
                   </>

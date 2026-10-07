@@ -6,19 +6,26 @@ import {
   PackageOpen,
   RotateCcw,
   CheckCircle2,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import ProductCard from "./components/ProductCard";
 import FilterSidebar from "./components/FilterSidebar";
 import SizeMatcherModal from "./components/SizeMatcherModal";
-import {
-  mockProducts,
-  mockCategories,
-  mockMaterials,
-} from "./data/mockCatalog";
+import { useCatalog } from "./hooks/useCatalog";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 
 export default function CatalogView() {
+  const {
+    products,
+    categories,
+    materials,
+    loading,
+    error,
+    refetch,
+  } = useCatalog();
+
   const [selectedFilters, setSelectedFilters] = useState({
     categoryIds: [],
     materialIds: [],
@@ -32,7 +39,7 @@ export default function CatalogView() {
 
   // Faceted filtering logic
   const filteredProducts = useMemo(() => {
-    return mockProducts.filter((product) => {
+    return (products || []).filter((product) => {
       // 1. Filter by category
       if (
         selectedFilters.categoryIds.length > 0 &&
@@ -65,7 +72,7 @@ export default function CatalogView() {
 
       return true;
     });
-  }, [selectedFilters]);
+  }, [products, selectedFilters]);
 
   const handleResetFilters = () => {
     setSelectedFilters({
@@ -143,8 +150,8 @@ export default function CatalogView() {
         <div className="flex gap-8 items-start">
           {/* Faceted Filter Sidebar */}
           <FilterSidebar
-            categories={mockCategories}
-            materials={mockMaterials}
+            categories={categories}
+            materials={materials}
             selectedFilters={selectedFilters}
             onFilterChange={setSelectedFilters}
             onResetFilters={handleResetFilters}
@@ -154,7 +161,36 @@ export default function CatalogView() {
 
           {/* Catalog Grid Area */}
           <main className="flex-1 min-w-0">
-            {filteredProducts.length > 0 ? (
+            {loading ? (
+              <div className="flex flex-col items-center justify-center p-16 text-center bg-surface-card border border-border rounded-card space-y-3 min-h-[360px]">
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                <p className="text-xs font-semibold text-brand-secondary">
+                  Cargando catálogo...
+                </p>
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center p-12 text-center bg-surface-card border border-rose-500/30 rounded-card space-y-4">
+                <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-brand-primary">
+                    No se pudo cargar el catálogo
+                  </h3>
+                  <p className="text-xs text-brand-secondary max-w-sm">
+                    {error}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetch()}
+                >
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                  Reintentar
+                </Button>
+              </div>
+            ) : filteredProducts.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
                 {filteredProducts.map((product) => (
                   <ProductCard

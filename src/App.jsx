@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -5,27 +6,96 @@ import {
   useParams,
   useNavigate,
 } from "react-router-dom";
+import { Loader2, AlertTriangle } from "lucide-react";
 import { AuthProvider } from "./context/AuthContext";
 import { CartProvider, useCart } from "./context/CartContext";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import DesignSystemShowcase from "./features/dev/DesignSystemShowcase";
 import LoginView from "./features/auth/LoginView";
 import MainLayout from "./components/layout/MainLayout";
+import Button from "./components/ui/Button";
 
 // Home & Catálogo
 import HomeView from "./features/home/HomeView";
 import CatalogView from "./features/catalog/CatalogView";
 import ProductDetailView from "./features/catalog/ProductDetailView";
-import { mockProducts } from "./features/catalog/data/mockCatalog";
+import CheckoutView from "./features/checkout/CheckoutView";
+import OrderConfirmationView from "./features/checkout/OrderConfirmationView";
+import { getProductBySlug } from "./services/api/catalogService";
 
-// Contenedor que resuelve el producto según el slug de la URL
+// Contenedor que resuelve el producto dinámicamente desde Supabase
 function ProductDetailRouteWrapper() {
   const { slug } = useParams();
   const navigate = useNavigate();
   const { addItem } = useCart();
 
-  // Resolución desde datos mock (temporal)
-  const product = mockProducts.find((p) => p.slug === slug) || mockProducts[0];
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
+    setError(null);
+
+    getProductBySlug(slug)
+      .then((data) => {
+        if (isMounted) {
+          if (!data) {
+            setError("La prenda solicitada no se encuentra disponible.");
+          } else {
+            setProduct(data);
+          }
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err.message || "Error al conectar con la base de datos.");
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [slug]);
+
+  if (loading) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center p-12 text-center space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-accent" />
+        <p className="text-xs font-semibold text-brand-secondary">
+          Cargando prenda...
+        </p>
+      </div>
+    );
+  }
+
+  if (error || !product) {
+    return (
+      <div className="max-w-md mx-auto my-16 p-6 text-center bg-surface-card border border-border rounded-card space-y-4">
+        <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-base font-bold text-brand-primary">
+            Prenda no encontrada
+          </h2>
+          <p className="text-xs text-brand-secondary">
+            {error || "El producto que buscas no está disponible en nuestro catálogo."}
+          </p>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => navigate("/catalogo")}
+        >
+          Volver al Catálogo
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <ProductDetailView
@@ -66,6 +136,11 @@ export default function App() {
                 path="/producto/:slug"
                 element={<ProductDetailRouteWrapper />}
               />
+              <Route path="/checkout" element={<CheckoutView />} />
+              <Route
+                path="/checkout/confirmacion/:orderNumber"
+                element={<OrderConfirmationView />}
+              />
               <Route path="/ui" element={<DesignSystemShowcase />} />
               <Route path="/login" element={<LoginView />} />
 
@@ -75,12 +150,6 @@ export default function App() {
                   <ProtectedRoute allowedRoles={["customer", "owner"]} />
                 }
               >
-                <Route
-                  path="/checkout"
-                  element={
-                    <div className="p-8">Vista Checkout (En desarrollo)</div>
-                  }
-                />
                 <Route
                   path="/mis-pedidos"
                   element={
