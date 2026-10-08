@@ -15,6 +15,17 @@ import LoginView from "./features/auth/LoginView";
 import MainLayout from "./components/layout/MainLayout";
 import Button from "./components/ui/Button";
 
+//admin
+import AdminLayout from "./features/admin/components/AdminLayout";
+import AdminProtectedRoute from "./features/admin/components/ProtectedRoute";
+import DashboardView from "./features/admin/views/DashboardView";
+import OrdersListView from "./features/admin/views/OrdersListView";
+import OrderDetailView from "./features/admin/views/OrderDetailView";
+import ProductsListView from "./features/admin/views/ProductsListView";
+import ProductFormView from "./features/admin/views/ProductFormView";
+import CategoriesView from "./features/admin/views/CategoriesView";
+import DeliveryUsersView from "./features/admin/views/DeliveryUsersView";
+
 // Home & Catálogo
 import HomeView from "./features/home/HomeView";
 import CatalogView from "./features/catalog/CatalogView";
@@ -164,17 +175,21 @@ export default function App() {
                   }
                 />
               </Route>
+              </Route>
 
-              {/* Rutas Protegidas de Administración (Dueña) */}
-              <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
-                <Route
-                  path="/admin/*"
-                  element={
-                    <div className="p-8">
-                      Panel de Administración (En desarrollo)
-                    </div>
-                  }
-                />
+
+              {/* Backoffice: solo owner/admin. El esquema actual permite owner como rol administrativo. */}
+              <Route element={<AdminProtectedRoute />}>
+                <Route element={<AdminLayout />}>
+                  <Route path="/admin" element={<DashboardView />} />
+                  <Route path="/admin/pedidos" element={<OrdersListView />} />
+                  <Route path="/admin/pedidos/:orderNumber" element={<OrderDetailView />} />
+                  <Route path="/admin/productos" element={<ProductsListView />} />
+                  <Route path="/admin/productos/nuevo" element={<ProductFormView />} />
+                  <Route path="/admin/productos/:id/editar" element={<ProductFormView />} />
+                  <Route path="/admin/categorias" element={<CategoriesView />} />
+                  <Route path="/admin/repartidores" element={<DeliveryUsersView />} />
+                </Route>
               </Route>
 
               {/* Rutas Protegidas de Logística (Repartidor) */}
@@ -188,7 +203,7 @@ export default function App() {
                   }
                 />
               </Route>
-            </Route>
+            
           </Routes>
         </CartProvider>
       </AuthProvider>
