@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart,
   Menu,
@@ -7,6 +7,8 @@ import {
   User,
   LogOut,
   Ruler,
+  ChevronDown,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
@@ -15,7 +17,33 @@ import Button from '../ui/Button';
 export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
   const { user, profile, role, signOut } = useAuth();
   const { totalUnits } = useCart();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+
+  // Cerrar menú de usuario al hacer clic fuera o presionar Escape
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setUserMenuOpen(false);
+      }
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setUserMenuOpen(false);
+      }
+    }
+
+    if (userMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [userMenuOpen]);
 
   const navLinks = [
     { label: 'Inicio', path: '/' },
@@ -29,6 +57,15 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
     user?.user_metadata?.first_name ||
     user?.email?.split('@')[0] ||
     'Usuario';
+
+  const userInitial = displayName.charAt(0).toUpperCase();
+
+  const handleSignOut = async () => {
+    setUserMenuOpen(false);
+    setMobileMenuOpen(false);
+    await signOut();
+    navigate('/');
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-brand-primary/95 backdrop-blur-md border-b border-border/20 text-white">
@@ -93,25 +130,70 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
           {/* Desktop Auth Section */}
           <div className="hidden lg:flex items-center gap-3 pl-2 border-l border-border/20">
             {user ? (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-xs">
-                  <User className="w-4 h-4 text-brand-muted" />
-                  <span className="font-semibold text-white">
-                    {displayName}
-                  </span>
-                  <span className="text-[10px] font-mono uppercase bg-white/10 text-brand-muted px-1.5 py-0.5 rounded">
-                    {role || 'cliente'}
-                  </span>
-                </div>
+              <div className="relative" ref={userMenuRef}>
                 <button
                   type="button"
-                  onClick={() => signOut()}
-                  className="p-1.5 rounded-button text-brand-muted hover:text-rose-400 hover:bg-white/5 transition-colors"
-                  title="Cerrar sesión"
-                  aria-label="Cerrar sesión"
+                  onClick={() => setUserMenuOpen((prev) => !prev)}
+                  className="flex items-center gap-2 p-1.5 rounded-button text-xs hover:bg-white/10 transition-colors focus:outline-none"
+                  aria-expanded={userMenuOpen}
+                  aria-haspopup="true"
+                  aria-label="Abrir menú de usuario"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                    {userInitial}
+                  </span>
+                  <span className="font-semibold text-white max-w-[120px] truncate">
+                    {displayName}
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-brand-muted transition-transform duration-150 ${
+                      userMenuOpen ? 'rotate-180 text-white' : ''
+                    }`}
+                  />
                 </button>
+
+                {/* Dropdown Menu */}
+                {userMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-52 bg-surface-card border border-border rounded-card shadow-lg py-1.5 z-50 animate-in fade-in duration-100 text-brand-primary">
+                    <div className="px-3.5 py-2 border-b border-border">
+                      <p className="text-xs font-bold truncate text-brand-primary">
+                        {displayName}
+                      </p>
+                      <p className="text-[11px] text-brand-secondary truncate">
+                        {user.email}
+                      </p>
+                    </div>
+
+                    <Link
+                      to="/mi-cuenta"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold hover:bg-surface-subtle transition-colors"
+                    >
+                      <User className="w-4 h-4 text-accent" />
+                      Mi Perfil
+                    </Link>
+
+                    <Link
+                      to="/mi-cuenta/pedidos"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold hover:bg-surface-subtle transition-colors"
+                    >
+                      <Package className="w-4 h-4 text-accent" />
+                      Mis Pedidos
+                    </Link>
+
+                    <div className="my-1 border-t border-border" />
+
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors text-left"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <Link to="/login">
@@ -168,27 +250,49 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
           {/* Mobile Auth Divider */}
           <div className="pt-3 border-t border-border/20">
             {user ? (
-              <div className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-button">
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-brand-muted" />
-                  <span className="text-xs font-semibold text-white">
-                    {displayName}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2.5 px-3 py-2 bg-white/5 rounded-button">
+                  <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center font-bold text-xs">
+                    {userInitial}
                   </span>
-                  <span className="text-[10px] font-mono uppercase bg-white/10 text-brand-muted px-1.5 py-0.5 rounded">
-                    {role || 'cliente'}
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-white truncate">
+                      {displayName}
+                    </p>
+                    <p className="text-[10px] text-brand-muted truncate">
+                      {user.email}
+                    </p>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    signOut();
-                    setMobileMenuOpen(false);
-                  }}
-                  className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 font-semibold"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  Salir
-                </button>
+
+                <div className="flex flex-col space-y-1">
+                  <Link
+                    to="/mi-cuenta"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-brand-muted hover:text-white hover:bg-white/5 rounded-button"
+                  >
+                    <User className="w-4 h-4 text-accent" />
+                    Mi Perfil
+                  </Link>
+
+                  <Link
+                    to="/mi-cuenta/pedidos"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-brand-muted hover:text-white hover:bg-white/5 rounded-button"
+                  >
+                    <Package className="w-4 h-4 text-accent" />
+                    Mis Pedidos
+                  </Link>
+
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-white/5 rounded-button text-left"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Cerrar Sesión
+                  </button>
+                </div>
               </div>
             ) : (
               <Link

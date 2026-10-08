@@ -22,6 +22,9 @@ import ProductDetailView from "./features/catalog/ProductDetailView";
 import CheckoutView from "./features/checkout/CheckoutView";
 import OrderConfirmationView from "./features/checkout/OrderConfirmationView";
 import OrderTrackingView from "./features/tracking/OrderTrackingView";
+import ProfileView from "./features/account/ProfileView";
+import OrdersHistoryView from "./features/account/OrdersHistoryView";
+import UpdatePasswordView from "./features/auth/UpdatePasswordView";
 import { getProductBySlug } from "./services/api/catalogService";
 
 // Contenedor que resuelve el producto dinámicamente desde Supabase
@@ -148,6 +151,7 @@ export default function App() {
               />
               <Route path="/ui" element={<DesignSystemShowcase />} />
               <Route path="/login" element={<LoginView />} />
+              <Route path="/actualizar-password" element={<UpdatePasswordView />} />
 
               {/* Rutas Protegidas de Cliente */}
               <Route
@@ -155,14 +159,10 @@ export default function App() {
                   <ProtectedRoute allowedRoles={["customer", "owner"]} />
                 }
               >
-                <Route
-                  path="/mis-pedidos"
-                  element={
-                    <div className="p-8">
-                      Historial de Pedidos (En desarrollo)
-                    </div>
-                  }
-                />
+                <Route path="/mi-cuenta" element={<ProfileView />} />
+                <Route path="/perfil" element={<ProfileView />} />
+                <Route path="/mi-cuenta/pedidos" element={<OrdersHistoryView />} />
+                <Route path="/mis-pedidos" element={<OrdersHistoryView />} />
               </Route>
 
               {/* Rutas Protegidas de Administración (Dueña) */}

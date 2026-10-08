@@ -16,6 +16,10 @@ export async function createOrder(orderPayload) {
     customer_phone: orderPayload.customerPhone,
     delivery_type: orderPayload.deliveryType || "scheduled",
     delivery_address: orderPayload.deliveryAddress,
+    shipping_address_id:
+      orderPayload.shipping_address_id ||
+      orderPayload.shippingAddressId ||
+      null,
     delivery_cost: Number(orderPayload.deliveryCost || 0),
     scheduled_time_slot: orderPayload.scheduledTimeSlot || null,
     subtotal: Number(orderPayload.subtotal || 0),

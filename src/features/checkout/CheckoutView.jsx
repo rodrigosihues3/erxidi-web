@@ -19,6 +19,13 @@ import {
   Edit3,
   QrCode,
   ShieldCheck,
+  Banknote,
+  MapPin,
+  Plus,
+  Star,
+  Home,
+  Building,
+  User,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -27,11 +34,13 @@ import Badge from "../../components/ui/Badge";
 import Input from "../../components/ui/Input";
 import { fetchDni, fetchRuc } from "../../services/api/decolectaService";
 import { createOrder } from "../../services/api/checkoutService";
+import { supabase } from "../../services/supabase";
 import {
   initCulqi,
   openCulqi,
   closeCulqi,
-} from "../../services/payment/culqiService";
+  processCulqiCharge,
+} from "./services/culqiService";
 import {
   defaultDeliveryZones,
   defaultDeliverySlots,
@@ -46,6 +55,9 @@ export default function CheckoutView() {
   const [currentStep, setCurrentStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState({ 1: false, 2: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [createdOrder, setCreatedOrder] = useState(null);
+  const createdOrderRef = useRef(null);
 
   // -------------------------------------------------------------
   // PASO 1: Identificación y Contacto
@@ -64,10 +76,18 @@ export default function CheckoutView() {
   useEffect(() => {
     if (user && profile) {
       if (profile.first_name) setFirstName(profile.first_name);
-      if (profile.last_name) setLastName(profile.last_name);
+      const fullLastName =
+        profile.last_name ||
+        [profile.paternal_surname, profile.maternal_surname]
+          .filter(Boolean)
+          .join(" ");
+      if (fullLastName) setLastName(fullLastName);
       if (user.email) setEmail(user.email);
       if (profile.phone) setPhone(profile.phone);
-      if (profile.document_number) setDni(profile.document_number);
+      if (profile.dni || profile.document_number) {
+        setDni(profile.dni || profile.document_number);
+      }
+      setIsNameLocked(true);
     }
   }, [user, profile]);
 
@@ -150,9 +170,10 @@ export default function CheckoutView() {
   };
 
   // -------------------------------------------------------------
-  // PASO 2: Método de Entrega y Horarios
+  // PASO 2: Método de Entrega, Horarios y Direcciones Guardadas
   // -------------------------------------------------------------
   const [deliveryType, setDeliveryType] = useState("scheduled");
+  const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
   const [selectedZoneId, setSelectedZoneId] = useState(
     defaultDeliveryZones[0]?.id || 1,
   );
@@ -161,6 +182,119 @@ export default function CheckoutView() {
   const [scheduledTimeSlot, setScheduledTimeSlot] = useState(
     defaultDeliverySlots[0],
   );
+
+  // Gestión de Direcciones Guardadas vs Nueva Dirección
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
+  const [selectedAddressMode, setSelectedAddressMode] = useState("saved"); // 'saved' | 'new'
+  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState(null);
+  const [saveAddressForFuture, setSaveAddressForFuture] = useState(false);
+  const [newAddressAlias, setNewAddressAlias] = useState("Casa");
+
+  // Cargar zonas de despacho dinámicamente desde Supabase
+  useEffect(() => {
+    async function loadZones() {
+      try {
+        const { data, error } = await supabase
+          .from("delivery_zones")
+          .select("*")
+          .order("district_name");
+
+        if (!error && data && data.length > 0) {
+          setDeliveryZones(data);
+        }
+      } catch {
+        setDeliveryZones(defaultDeliveryZones);
+      }
+    }
+    loadZones();
+  }, []);
+
+  // Cargar direcciones del usuario autenticado y preseleccionar la principal
+  useEffect(() => {
+    async function loadUserAddresses() {
+      if (!user) {
+        setSelectedAddressMode("new");
+        setSelectedSavedAddressId(null);
+        return;
+      }
+
+      setIsLoadingAddresses(true);
+      try {
+        const { data, error } = await supabase
+          .from("addresses")
+          .select("*, delivery_zones(district_name, delivery_cost)")
+          .eq("user_id", user.id)
+          .order("is_default", { ascending: false })
+          .order("created_at", { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          setSavedAddresses(data);
+          const defaultAddr = data.find((a) => a.is_default) || data[0];
+          setSelectedSavedAddressId(defaultAddr.id);
+          setSelectedAddressMode("saved");
+          setSelectedZoneId(Number(defaultAddr.zone_id));
+          setDeliveryAddress(defaultAddr.street_address || "");
+          setDeliveryReference(defaultAddr.reference || "");
+
+          if (defaultAddr.receiver_phone) {
+            setPhone(defaultAddr.receiver_phone.replace(/\D/g, "").slice(0, 9));
+          }
+          if (defaultAddr.receiver_name) {
+            const parts = defaultAddr.receiver_name.trim().split(" ");
+            if (parts.length > 1) {
+              setFirstName(parts.slice(0, -1).join(" "));
+              setLastName(parts.slice(-1).join(" "));
+            } else if (parts[0]) {
+              setFirstName(parts[0]);
+            }
+          }
+        } else {
+          setSavedAddresses([]);
+          setSelectedAddressMode("new");
+          setSelectedSavedAddressId(null);
+        }
+      } catch (err) {
+        console.error("Error al cargar direcciones en checkout:", err);
+        setSelectedAddressMode("new");
+        setSelectedSavedAddressId(null);
+      } finally {
+        setIsLoadingAddresses(false);
+      }
+    }
+
+    loadUserAddresses();
+  }, [user]);
+
+  // Selección de dirección guardada
+  const handleSelectSavedAddress = (addr) => {
+    setSelectedSavedAddressId(addr.id);
+    setSelectedAddressMode("saved");
+    setSelectedZoneId(Number(addr.zone_id));
+    setDeliveryAddress(addr.street_address || "");
+    setDeliveryReference(addr.reference || "");
+
+    if (addr.receiver_phone) {
+      setPhone(addr.receiver_phone.replace(/\D/g, "").slice(0, 9));
+    }
+    if (addr.receiver_name) {
+      const parts = addr.receiver_name.trim().split(" ");
+      if (parts.length > 1) {
+        setFirstName(parts.slice(0, -1).join(" "));
+        setLastName(parts.slice(-1).join(" "));
+      } else if (parts[0]) {
+        setFirstName(parts[0]);
+      }
+    }
+  };
+
+  // Conmutar a modo dirección manual
+  const handleSelectNewAddressMode = () => {
+    setSelectedAddressMode("new");
+    setSelectedSavedAddressId(null);
+    setDeliveryAddress("");
+    setDeliveryReference("");
+  };
 
   // Cálculo dinámico de ventana de envío express (hora actual + 45min a + 90min)
   const expressTimeWindow = useMemo(() => {
@@ -173,8 +307,10 @@ export default function CheckoutView() {
   }, []);
 
   const selectedZone = useMemo(
-    () => defaultDeliveryZones.find((z) => z.id === Number(selectedZoneId)),
-    [selectedZoneId],
+    () =>
+      deliveryZones.find((z) => Number(z.id) === Number(selectedZoneId)) ||
+      deliveryZones[0],
+    [deliveryZones, selectedZoneId],
   );
 
   const deliveryCost = useMemo(() => {
@@ -190,8 +326,20 @@ export default function CheckoutView() {
 
   const isStep2Valid = useMemo(() => {
     if (deliveryType === "pickup") return true;
-    return deliveryAddress.trim().length >= 4;
-  }, [deliveryType, deliveryAddress]);
+    if (selectedAddressMode === "saved" && selectedSavedAddressId) {
+      return deliveryAddress.trim().length >= 4;
+    }
+    return (
+      deliveryAddress.trim().length >= 4 &&
+      deliveryReference.trim().length >= 2
+    );
+  }, [
+    deliveryType,
+    selectedAddressMode,
+    selectedSavedAddressId,
+    deliveryAddress,
+    deliveryReference,
+  ]);
 
   const handleNextFromStep2 = (e) => {
     e.preventDefault();
@@ -239,10 +387,46 @@ export default function CheckoutView() {
     fiscalAddress,
     dni,
     items,
+    selectedAddressMode,
+    selectedSavedAddressId,
+    saveAddressForFuture,
+    newAddressAlias,
+    selectedZoneId,
+    savedAddresses,
   };
 
-  // Callback para procesar orden con Culqi (token u orden confirmada)
-  const handleProcessCulqiOrder = async (gatewayTxId) => {
+  // Guardar dirección manual en la cuenta si el usuario autenticado lo solicitó
+  const maybeSaveNewAddress = async () => {
+    const ctx = orderContextRef.current;
+    if (
+      ctx.user &&
+      ctx.deliveryType !== "pickup" &&
+      ctx.selectedAddressMode === "new" &&
+      ctx.saveAddressForFuture &&
+      ctx.deliveryAddress.trim()
+    ) {
+      try {
+        await supabase.from("addresses").insert([
+          {
+            user_id: ctx.user.id,
+            alias: ctx.newAddressAlias.trim() || "Dirección de compra",
+            zone_id: Number(ctx.selectedZoneId),
+            street_address: ctx.deliveryAddress.trim(),
+            reference: ctx.deliveryReference.trim() || "Sin referencia",
+            receiver_name: `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim(),
+            receiver_phone: ctx.phone.trim(),
+            is_default: (ctx.savedAddresses || []).length === 0,
+            updated_at: new Date().toISOString(),
+          },
+        ]);
+      } catch (err) {
+        console.warn("Aviso al guardar nueva dirección:", err);
+      }
+    }
+  };
+
+  // Constructor de payload de orden para Supabase
+  const buildOrderPayload = (gatewayTxId = null, paymentStatus = "pending_verification") => {
     const ctx = orderContextRef.current;
     const fullName = `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim();
     const finalAddress =
@@ -253,6 +437,15 @@ export default function CheckoutView() {
               ? ` (Ref: ${ctx.deliveryReference.trim()})`
               : ""
           } - ${ctx.selectedZone?.district_name || "Lima"}`;
+
+    const isUsingSavedAddress =
+      ctx.deliveryType !== "pickup" &&
+      ctx.selectedAddressMode === "saved" &&
+      Boolean(ctx.selectedSavedAddressId);
+
+    const shippingAddressId = isUsingSavedAddress
+      ? ctx.selectedSavedAddressId
+      : null;
 
     const invoicePrefix =
       ctx.receiptType === "factura"
@@ -274,13 +467,15 @@ export default function CheckoutView() {
       issued_at: new Date().toISOString(),
     };
 
-    const orderPayload = {
+    return {
       userId: ctx.user?.id || null,
       customerName: fullName,
       customerEmail: ctx.email.trim(),
       customerPhone: ctx.phone.trim(),
       deliveryType: ctx.deliveryType,
       deliveryAddress: finalAddress,
+      shipping_address_id: shippingAddressId,
+      shippingAddressId: shippingAddressId,
       deliveryZoneId:
         ctx.deliveryType === "pickup" ? null : ctx.selectedZone?.id || null,
       deliveryCost: ctx.deliveryCost,
@@ -294,29 +489,73 @@ export default function CheckoutView() {
       totalAmount: ctx.totalAmount,
       payment_method: "culqi_gateway",
       paymentMethod: "culqi_gateway",
-      payment_status: "completed",
-      paymentStatus: "completed",
+      payment_status: paymentStatus,
+      paymentStatus: paymentStatus,
       payment_gateway_tx_id: gatewayTxId,
       paymentGatewayTxId: gatewayTxId,
       invoice_type: ctx.receiptType,
       invoice_data: invoiceData,
       items: ctx.items,
     };
+  };
+
+  // Procesamiento seguro de token de Culqi Checkout v4 delegando a la Edge Function
+  const handleCulqiTokenPayment = async (tokenId) => {
+    setIsProcessing(true);
+    setCulqiError(null);
+
+    const ctx = orderContextRef.current;
+    let orderToCharge = createdOrderRef.current;
 
     try {
-      const result = await createOrder(orderPayload);
-      if (result.success && result.order) {
-        clearCart();
-        navigate(`/checkout/confirmacion/${result.order.order_number}`, {
-          state: { order: result.order },
-        });
-      } else {
-        throw new Error(result.error || "No se pudo registrar la compra.");
+      // 1. Asegurar la existencia de la orden en Supabase sin destruirla en caso de reintento
+      if (!orderToCharge) {
+        await maybeSaveNewAddress();
+        const orderPayload = buildOrderPayload(null, "pending_verification");
+        const result = await createOrder(orderPayload);
+        if (!result.success || !result.order) {
+          throw new Error(result.error || "No se pudo registrar la orden en el sistema.");
+        }
+        orderToCharge = result.order;
+        createdOrderRef.current = result.order;
+        setCreatedOrder(result.order);
       }
+
+      // 2. Invocar cobro seguro mediante Edge Function create-culqi-charge
+      const chargeData = await processCulqiCharge({
+        tokenId,
+        amount: ctx.totalAmount,
+        email: ctx.email.trim(),
+        orderId: orderToCharge.id,
+      });
+
+      // 3. Confirmación exitosa: actualizar orden en Supabase
+      const chargeId = chargeData?.id || chargeData?.charge_id || tokenId;
+
+      await supabase
+        .from("orders")
+        .update({
+          status: "pending",
+          payment_status: "paid",
+          payment_gateway_tx_id: chargeId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", orderToCharge.id);
+
+      // Limpia el carrito reactivo
+      clearCart();
+
+      // Redirige a la vista de confirmación y seguimiento
+      navigate(`/seguimiento/${orderToCharge.order_number}`);
     } catch (err) {
-      console.error("Error al registrar orden de Culqi:", err);
-      setCulqiError(err.message || "Error al registrar el pedido en el sistema.");
+      console.error("Error al procesar cobro de Culqi:", err);
+      // Muestra alerta descriptiva en la UI sin destruir la orden previa
+      setCulqiError(
+        err.message ||
+          "Tu tarjeta fue rechazada o ocurrió un inconveniente con la pasarela. Inténtalo nuevamente o elige otro método."
+      );
     } finally {
+      setIsProcessing(false);
       setIsSubmitting(false);
     }
   };
@@ -328,26 +567,26 @@ export default function CheckoutView() {
         if (window.Culqi?.token) {
           const token = window.Culqi.token;
           closeCulqi();
-          setIsSubmitting(true);
-          setCulqiError(null);
-          await handleProcessCulqiOrder(token.id);
+          await handleCulqiTokenPayment(token.id);
         } else if (window.Culqi?.order) {
           const order = window.Culqi.order;
           closeCulqi();
-          setIsSubmitting(true);
-          setCulqiError(null);
-          await handleProcessCulqiOrder(order.id);
+          await handleCulqiTokenPayment(order.id);
         } else if (window.Culqi?.error) {
+          closeCulqi();
           const errorMsg =
             window.Culqi.error.user_message ||
             window.Culqi.error.merchant_message ||
+            window.Culqi.error.message ||
             "No se pudo completar el pago con Culqi.";
           setCulqiError(errorMsg);
+          setIsProcessing(false);
           setIsSubmitting(false);
         }
       } catch (err) {
         console.error("Error en callback window.culqi:", err);
         setCulqiError(err.message || "Error inesperado al procesar el pago.");
+        setIsProcessing(false);
         setIsSubmitting(false);
       }
     };
@@ -415,10 +654,14 @@ export default function CheckoutView() {
     }
   };
 
+  const isCashOnDeliveryAllowed = Boolean(user && user.email_confirmed_at);
+
   const isStep3Valid = useMemo(() => {
     // Validación según método de pago
     if (paymentMethod === "yape_plin") {
       if (!/^\d{6,8}$/.test(yapeOpNumber.trim())) return false;
+    } else if (paymentMethod === "cash_on_delivery") {
+      if (!isCashOnDeliveryAllowed) return false;
     }
 
     // Validación según comprobante
@@ -431,6 +674,7 @@ export default function CheckoutView() {
   }, [
     paymentMethod,
     yapeOpNumber,
+    isCashOnDeliveryAllowed,
     receiptType,
     ruc,
     companyName,
@@ -439,7 +683,7 @@ export default function CheckoutView() {
   // Ejecución transaccional del pedido
   const handleConfirmOrder = async (e) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || isProcessing) return;
 
     // Validación de comprobante antes de avanzar
     if (receiptType === "factura") {
@@ -456,6 +700,15 @@ export default function CheckoutView() {
     if (paymentMethod === "culqi_gateway") {
       setCulqiError(null);
       try {
+        if (!createdOrderRef.current) {
+          await maybeSaveNewAddress();
+          const payload = buildOrderPayload(null, "pending_verification");
+          const res = await createOrder(payload);
+          if (res.success && res.order) {
+            createdOrderRef.current = res.order;
+            setCreatedOrder(res.order);
+          }
+        }
         initCulqi({
           title: "ERXIDI - Confecciones",
           amountInCents: totalAmount * 100,
@@ -468,7 +721,7 @@ export default function CheckoutView() {
       return;
     }
 
-    // Flujo Transferencia Directa (Yape / Plin Manual)
+    // Flujo Transferencia Directa (Yape / Plin Manual) o Contra Entrega
     if (!isStep3Valid) return;
 
     setIsSubmitting(true);
@@ -483,6 +736,17 @@ export default function CheckoutView() {
               ? ` (Ref: ${deliveryReference.trim()})`
               : ""
           } - ${selectedZone?.district_name || "Lima"}`;
+
+    const isUsingSavedAddress =
+      deliveryType !== "pickup" &&
+      selectedAddressMode === "saved" &&
+      Boolean(selectedSavedAddressId);
+
+    const shippingAddressId = isUsingSavedAddress
+      ? selectedSavedAddressId
+      : null;
+
+    await maybeSaveNewAddress();
 
     const invoicePrefix =
       receiptType === "factura"
@@ -504,6 +768,8 @@ export default function CheckoutView() {
       issued_at: new Date().toISOString(),
     };
 
+    const isCashOnDelivery = paymentMethod === "cash_on_delivery";
+
     const orderPayload = {
       userId: user?.id || null,
       customerName: fullName,
@@ -511,6 +777,8 @@ export default function CheckoutView() {
       customerPhone: phone.trim(),
       deliveryType,
       deliveryAddress: finalAddress,
+      shipping_address_id: shippingAddressId,
+      shippingAddressId: shippingAddressId,
       deliveryZoneId:
         deliveryType === "pickup" ? null : selectedZone?.id || null,
       deliveryCost,
@@ -522,22 +790,40 @@ export default function CheckoutView() {
             : "Horario Comercial 09:00 - 18:00",
       subtotal,
       totalAmount,
-      payment_method: "yape_plin",
-      paymentMethod: "yape_plin",
-      payment_status: "pending_verification",
-      paymentStatus: "pending_verification",
-      payment_gateway_tx_id: yapeOpNumber.trim(),
-      paymentGatewayTxId: yapeOpNumber.trim(),
+      payment_method: paymentMethod,
+      paymentMethod: paymentMethod,
+      payment_status: isCashOnDelivery ? "pending" : "pending_verification",
+      paymentStatus: isCashOnDelivery ? "pending" : "pending_verification",
+      payment_gateway_tx_id: isCashOnDelivery ? null : yapeOpNumber.trim(),
+      paymentGatewayTxId: isCashOnDelivery ? null : yapeOpNumber.trim(),
       invoice_type: receiptType,
       invoice_data: invoiceData,
       items,
     };
 
     try {
+      if (createdOrderRef.current?.id) {
+        const { error: updateOrderError } = await supabase
+          .from("orders")
+          .update({
+            payment_method: paymentMethod,
+            payment_status: isCashOnDelivery ? "pending" : "pending_verification",
+            payment_gateway_tx_id: isCashOnDelivery ? null : yapeOpNumber.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", createdOrderRef.current.id);
+
+        if (!updateOrderError) {
+          clearCart();
+          navigate(`/seguimiento/${createdOrderRef.current.order_number}`);
+          return;
+        }
+      }
+
       const result = await createOrder(orderPayload);
       if (result.success && result.order) {
         clearCart();
-        navigate(`/checkout/confirmacion/${result.order.order_number}`, {
+        navigate(`/seguimiento/${result.order.order_number}`, {
           state: { order: result.order },
         });
       }
@@ -733,6 +1019,18 @@ export default function CheckoutView() {
                   RENIEC y coordinar el despacho.
                 </p>
               </div>
+
+              {user && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-card flex items-center justify-between text-xs text-emerald-900 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span>Datos precargados desde tu cuenta de cliente ERXIDI.</span>
+                  </div>
+                  <Badge variant="success" className="text-[10px]">
+                    Cuenta Vinculada
+                  </Badge>
+                </div>
+              )}
 
               <form onSubmit={handleNextFromStep1} className="space-y-4">
                 {/* DNI con Búsqueda Manual / Enter / Auto */}
@@ -1024,129 +1322,359 @@ export default function CheckoutView() {
                 )}
 
                 {/* Detalle de Envío Express */}
-                {deliveryType === "express" && (
-                  <div className="space-y-4 pt-2 border-t border-border">
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
-                      <Zap className="w-4 h-4 text-accent flex-shrink-0" />
-                      <span className="font-semibold">{expressTimeWindow}</span>
-                    </div>
+                {/* Detalle y Dirección para Envío Express o Programado */}
+                {deliveryType !== "pickup" && (
+                  <div className="space-y-5 pt-2 border-t border-border">
+                    {/* Banner de Envío Express */}
+                    {deliveryType === "express" && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-accent flex-shrink-0" />
+                        <span className="font-semibold">{expressTimeWindow}</span>
+                      </div>
+                    )}
 
-                    <div>
-                      <label
-                        htmlFor="checkout-express-zone"
-                        className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
-                      >
-                        Distrito de Lima
-                      </label>
-                      <select
-                        id="checkout-express-zone"
-                        value={selectedZoneId}
-                        onChange={(e) =>
-                          setSelectedZoneId(Number(e.target.value))
-                        }
-                        className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
-                      >
-                        {defaultDeliveryZones.map((zone) => (
-                          <option key={zone.id} value={zone.id}>
-                            {zone.district_name} (+S/ 5.00 Express &bull; Total:{" "}
-                            {formatCurrency(zone.delivery_cost + 5.0)})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {/* Ventana Horaria de Envío Programado */}
+                    {deliveryType === "scheduled" && (
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
+                          Ventana Horaria (Día Siguiente)
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {defaultDeliverySlots.map((slot) => {
+                            const isSelected = scheduledTimeSlot === slot;
+                            return (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => setScheduledTimeSlot(slot)}
+                                className={`p-3 rounded-button border text-xs font-semibold flex items-center justify-between transition-colors focus:outline-none ${
+                                  isSelected
+                                    ? "border-brand-primary bg-surface-subtle text-brand-primary ring-1 ring-brand-primary"
+                                    : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary"
+                                }`}
+                              >
+                                <span>{slot}</span>
+                                {isSelected && (
+                                  <Check className="w-4 h-4 text-accent" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
-                    <Input
-                      label="Dirección Exacta"
-                      id="checkout-express-address"
-                      placeholder="Calle / Av., Número, Interior o Departamento"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      required
-                    />
+                    {/* Selector de Dirección: Clientes con Direcciones Guardadas */}
+                    {user && savedAddresses.length > 0 ? (
+                      <div className="space-y-3 pt-2 border-t border-border">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                            Dirección de Despacho
+                          </label>
+                          <span className="text-[11px] text-brand-muted">
+                            {savedAddresses.length}{" "}
+                            {savedAddresses.length === 1
+                              ? "dirección guardada"
+                              : "direcciones guardadas"}
+                          </span>
+                        </div>
 
-                    <Input
-                      label="Referencia de Llegada"
-                      id="checkout-express-ref"
-                      placeholder="Ej. Frente al parque, puerta blanca, timbre 2"
-                      value={deliveryReference}
-                      onChange={(e) => setDeliveryReference(e.target.value)}
-                    />
-                  </div>
-                )}
+                        {isLoadingAddresses ? (
+                          <div className="p-6 text-center text-xs text-brand-muted flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                            <span>Cargando tus direcciones...</span>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {savedAddresses.map((addr) => {
+                              const isSelected =
+                                selectedAddressMode === "saved" &&
+                                selectedSavedAddressId === addr.id;
+                              const zoneInfo =
+                                addr.delivery_zones?.district_name
+                                  ? {
+                                      name: addr.delivery_zones.district_name,
+                                      cost: addr.delivery_zones.delivery_cost,
+                                    }
+                                  : deliveryZones.find(
+                                      (z) =>
+                                        Number(z.id) === Number(addr.zone_id),
+                                    ) || {
+                                      name: "Lima",
+                                      cost: 10.0,
+                                    };
 
-                {/* Detalle de Envío Programado */}
-                {deliveryType === "scheduled" && (
-                  <div className="space-y-4 pt-2 border-t border-border">
-                    <div>
-                      <label
-                        htmlFor="checkout-scheduled-zone"
-                        className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
-                      >
-                        Distrito de Lima
-                      </label>
-                      <select
-                        id="checkout-scheduled-zone"
-                        value={selectedZoneId}
-                        onChange={(e) =>
-                          setSelectedZoneId(Number(e.target.value))
-                        }
-                        className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
-                      >
-                        {defaultDeliveryZones.map((zone) => (
-                          <option key={zone.id} value={zone.id}>
-                            {zone.district_name} (
-                            {formatCurrency(zone.delivery_cost)} -{" "}
-                            {zone.estimated_delivery_time})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                              return (
+                                <div
+                                  key={addr.id}
+                                  onClick={() => handleSelectSavedAddress(addr)}
+                                  className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between text-left select-none ${
+                                    isSelected
+                                      ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary shadow-subtle"
+                                      : "border-border bg-surface-card hover:border-border-strong"
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <div className="flex items-center gap-1.5 font-bold text-xs text-brand-primary">
+                                        {addr.alias
+                                          ?.toLowerCase()
+                                          .includes("oficina") ? (
+                                          <Building className="w-3.5 h-3.5 text-accent" />
+                                        ) : (
+                                          <Home className="w-3.5 h-3.5 text-accent" />
+                                        )}
+                                        <span>{addr.alias || "Dirección"}</span>
+                                      </div>
+                                      {addr.is_default && (
+                                        <Badge
+                                          variant="success"
+                                          className="text-[9px] px-1.5 py-0 gap-0.5"
+                                        >
+                                          <Star className="w-2.5 h-2.5 fill-current" />
+                                          Principal
+                                        </Badge>
+                                      )}
+                                    </div>
 
-                    {/* Selector de Ventana Horaria */}
-                    <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
-                        Ventana Horaria (Día Siguiente)
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {defaultDeliverySlots.map((slot) => {
-                          const isSelected = scheduledTimeSlot === slot;
-                          return (
-                            <button
-                              key={slot}
-                              type="button"
-                              onClick={() => setScheduledTimeSlot(slot)}
-                              className={`p-3 rounded-button border text-xs font-semibold flex items-center justify-between transition-colors focus:outline-none ${
-                                isSelected
-                                  ? "border-brand-primary bg-surface-subtle text-brand-primary ring-1 ring-brand-primary"
-                                  : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary"
+                                    <p className="text-xs font-semibold text-brand-primary line-clamp-2">
+                                      {addr.street_address}
+                                    </p>
+                                    <p className="text-[11px] text-brand-secondary mt-0.5">
+                                      {zoneInfo.name} &bull; Flete:{" "}
+                                      <span className="font-mono font-medium text-brand-primary">
+                                        S/ {Number(zoneInfo.cost).toFixed(2)}
+                                      </span>
+                                      {deliveryType === "express" &&
+                                        " (+S/ 5.00 Express)"}
+                                    </p>
+                                    {addr.reference && (
+                                      <p className="text-[10px] text-brand-muted mt-1 italic line-clamp-1">
+                                        Ref: {addr.reference}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <div className="mt-2.5 pt-2 border-t border-border/60 flex items-center justify-between text-[10px] text-brand-muted">
+                                    <span>Recibe: {addr.receiver_name}</span>
+                                    <div
+                                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                                        isSelected
+                                          ? "border-accent bg-accent text-white"
+                                          : "border-border"
+                                      }`}
+                                    >
+                                      {isSelected && (
+                                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {/* Opción para ingresar nueva dirección */}
+                            <div
+                              onClick={handleSelectNewAddressMode}
+                              className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col items-center justify-center text-center select-none min-h-[110px] ${
+                                selectedAddressMode === "new"
+                                  ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                                  : "border-dashed border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/50"
                               }`}
                             >
-                              <span>{slot}</span>
-                              {isSelected && (
-                                <Check className="w-4 h-4 text-accent" />
+                              <div className="w-8 h-8 rounded-full bg-surface-subtle border border-border flex items-center justify-center mb-1.5 text-accent">
+                                <Plus className="w-4 h-4" />
+                              </div>
+                              <span className="text-xs font-bold text-brand-primary">
+                                ➕ Enviar a una nueva dirección
+                              </span>
+                              <span className="text-[10px] text-brand-secondary mt-0.5">
+                                Ingresar otra calle o distrito
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Formulario desplegado si seleccionó "new" */}
+                        {selectedAddressMode === "new" && (
+                          <div className="space-y-4 pt-3 border-t border-border bg-surface-subtle/40 p-4 rounded-card border mt-3 animate-in fade-in duration-150">
+                            <div className="flex items-center gap-2 text-xs font-bold text-brand-primary">
+                              <MapPin className="w-4 h-4 text-accent" />
+                              <span>Nueva Dirección de Entrega</span>
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor="checkout-new-zone"
+                                className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
+                              >
+                                Distrito de Lima
+                              </label>
+                              <select
+                                id="checkout-new-zone"
+                                value={selectedZoneId}
+                                onChange={(e) =>
+                                  setSelectedZoneId(Number(e.target.value))
+                                }
+                                className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
+                              >
+                                {deliveryZones.map((zone) => (
+                                  <option key={zone.id} value={zone.id}>
+                                    {zone.district_name} (
+                                    {formatCurrency(
+                                      zone.delivery_cost +
+                                        (deliveryType === "express" ? 5.0 : 0),
+                                    )}
+                                    {deliveryType === "express"
+                                      ? " con recargo Express"
+                                      : ""})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <Input
+                              label="Dirección Exacta"
+                              id="checkout-new-address"
+                              placeholder="Calle / Av., Número, Interior o Departamento"
+                              value={deliveryAddress}
+                              onChange={(e) =>
+                                setDeliveryAddress(e.target.value)
+                              }
+                              required
+                            />
+
+                            <Input
+                              label="Referencia de Llegada (Obligatoria)"
+                              id="checkout-new-ref"
+                              placeholder="Ej. Frente al parque, puerta blanca, timbre 2"
+                              value={deliveryReference}
+                              onChange={(e) =>
+                                setDeliveryReference(e.target.value)
+                              }
+                              required
+                            />
+
+                            <div className="pt-2 border-t border-border space-y-2">
+                              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-brand-primary select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={saveAddressForFuture}
+                                  onChange={(e) =>
+                                    setSaveAddressForFuture(e.target.checked)
+                                  }
+                                  className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
+                                />
+                                <span>
+                                  Guardar esta dirección en mi cuenta para futuras compras
+                                </span>
+                              </label>
+
+                              {saveAddressForFuture && (
+                                <div className="pl-6 max-w-xs animate-in fade-in duration-100">
+                                  <Input
+                                    label="Alias de la dirección"
+                                    id="checkout-new-alias"
+                                    placeholder="Ej. Casa de playa, Oficina"
+                                    value={newAddressAlias}
+                                    onChange={(e) =>
+                                      setNewAddressAlias(e.target.value)
+                                    }
+                                  />
+                                </div>
                               )}
-                            </button>
-                          );
-                        })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    ) : (
+                      /* Modo Dirección Manual (Invitado o Usuario sin direcciones previas) */
+                      <div className="space-y-4 pt-2 border-t border-border">
+                        <div>
+                          <label
+                            htmlFor="checkout-manual-zone"
+                            className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
+                          >
+                            Distrito de Lima
+                          </label>
+                          <select
+                            id="checkout-manual-zone"
+                            value={selectedZoneId}
+                            onChange={(e) =>
+                              setSelectedZoneId(Number(e.target.value))
+                            }
+                            className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
+                          >
+                            {deliveryZones.map((zone) => (
+                              <option key={zone.id} value={zone.id}>
+                                {zone.district_name} (
+                                {formatCurrency(
+                                  zone.delivery_cost +
+                                    (deliveryType === "express" ? 5.0 : 0),
+                                )}
+                                {deliveryType === "express"
+                                  ? " &bull; Express"
+                                  : ""})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                    <Input
-                      label="Dirección Exacta"
-                      id="checkout-scheduled-address"
-                      placeholder="Calle / Av., Número, Interior o Departamento"
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      required
-                    />
+                        <Input
+                          label="Dirección Exacta"
+                          id="checkout-manual-address"
+                          placeholder="Calle / Av., Número, Interior o Departamento"
+                          value={deliveryAddress}
+                          onChange={(e) =>
+                            setDeliveryAddress(e.target.value)
+                          }
+                          required
+                        />
 
-                    <Input
-                      label="Referencia de Entrega (Opcional)"
-                      id="checkout-scheduled-ref"
-                      placeholder="Ej. Casa verde, rejas negras"
-                      value={deliveryReference}
-                      onChange={(e) => setDeliveryReference(e.target.value)}
-                    />
+                        <Input
+                          label="Referencia de Llegada (Obligatoria)"
+                          id="checkout-manual-ref"
+                          placeholder="Ej. Frente al parque, rejas negras, timbre 2"
+                          value={deliveryReference}
+                          onChange={(e) =>
+                            setDeliveryReference(e.target.value)
+                          }
+                          required
+                        />
+
+                        {user && (
+                          <div className="pt-2 border-t border-border space-y-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-brand-primary select-none">
+                              <input
+                                type="checkbox"
+                                checked={saveAddressForFuture}
+                                onChange={(e) =>
+                                  setSaveAddressForFuture(e.target.checked)
+                                }
+                                className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
+                              />
+                              <span>
+                                Guardar esta dirección en mi cuenta para futuras compras
+                              </span>
+                            </label>
+
+                            {saveAddressForFuture && (
+                              <div className="pl-6 max-w-xs animate-in fade-in duration-100">
+                                <Input
+                                  label="Alias de la dirección"
+                                  id="checkout-manual-alias"
+                                  placeholder="Ej. Casa, Oficina"
+                                  value={newAddressAlias}
+                                  onChange={(e) =>
+                                    setNewAddressAlias(e.target.value)
+                                  }
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1549,7 +2077,80 @@ export default function CheckoutView() {
                         </p>
                       </div>
                     </div>
+
+                    {/* 3. Pago Contra Entrega (Efectivo al recibir) */}
+                    <div
+                      onClick={() => {
+                        if (isCashOnDeliveryAllowed) {
+                          setPaymentMethod("cash_on_delivery");
+                        }
+                      }}
+                      className={`p-4 rounded-card border transition-all flex items-start gap-3 select-none ${
+                        !isCashOnDeliveryAllowed
+                          ? "border-border bg-surface-subtle opacity-70 cursor-not-allowed"
+                          : paymentMethod === "cash_on_delivery"
+                            ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary cursor-pointer"
+                            : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/30 cursor-pointer"
+                      }`}
+                    >
+                      <div
+                        className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors ${
+                          !isCashOnDeliveryAllowed
+                            ? "border-border bg-surface-card text-brand-muted"
+                            : paymentMethod === "cash_on_delivery"
+                              ? "border-brand-primary bg-brand-primary text-white"
+                              : "border-brand-secondary bg-surface-card text-white"
+                        }`}
+                      >
+                        {paymentMethod === "cash_on_delivery" && isCashOnDeliveryAllowed ? (
+                          <div className="w-2 h-2 rounded-full bg-white" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-transparent" />
+                        )}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-brand-primary">
+                              Pago Contra Entrega (Efectivo al recibir)
+                            </span>
+                            {!isCashOnDeliveryAllowed && (
+                              <Badge variant="warning" className="text-[10px]">
+                                Requiere cuenta verificada
+                              </Badge>
+                            )}
+                          </div>
+                          <Banknote className="w-4 h-4 text-accent" />
+                        </div>
+
+                        <p className="text-xs text-brand-secondary mt-1">
+                          Cancela en efectivo exacto al momento de recibir tus prendas.
+                        </p>
+
+                        {!isCashOnDeliveryAllowed && (
+                          <div className="mt-2.5 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-900 flex items-start gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-700 flex-shrink-0 mt-0.5" />
+                            <span>
+                              {!user
+                                ? "Inicia sesión y verifica tu correo para habilitar pedidos con pago contra entrega."
+                                : "Verifica tu correo electrónico para habilitar pedidos con pago contra entrega."}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Estado de procesamiento en curso de Culqi */}
+                  {isProcessing && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-card text-xs text-blue-800 flex items-center gap-2 animate-in fade-in duration-150">
+                      <Loader2 className="w-4 h-4 animate-spin text-accent flex-shrink-0" />
+                      <p className="font-medium">
+                        Procesando pago seguro con Culqi. Por favor espera sin recargar la página...
+                      </p>
+                    </div>
+                  )}
 
                   {/* Alerta de Culqi en caso de error */}
                   {culqiError && (
@@ -1570,7 +2171,7 @@ export default function CheckoutView() {
                     variant="outline"
                     size="md"
                     onClick={() => setCurrentStep(2)}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isProcessing}
                   >
                     Regresar
                   </Button>
@@ -1579,11 +2180,13 @@ export default function CheckoutView() {
                     type="submit"
                     variant="primary"
                     size="md"
-                    disabled={!isStep3Valid || isSubmitting}
-                    isLoading={isSubmitting}
+                    disabled={!isStep3Valid || isSubmitting || isProcessing}
+                    isLoading={isSubmitting || isProcessing}
                     className="bg-accent hover:bg-accent-hover text-white px-8"
                   >
-                    {paymentMethod === "culqi_gateway"
+                    {isProcessing
+                      ? "Procesando pago..."
+                      : paymentMethod === "culqi_gateway"
                       ? `Pagar con Culqi ${formatCurrency(totalAmount)}`
                       : `Confirmar Pedido ${formatCurrency(totalAmount)}`}
                   </Button>

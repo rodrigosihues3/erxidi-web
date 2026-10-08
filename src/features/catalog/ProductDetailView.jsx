@@ -7,6 +7,8 @@ import {
   Minus,
   Plus,
   CheckCircle2,
+  CheckCircle,
+  AlertCircle,
 } from 'lucide-react';
 import { mockProducts } from './data/mockCatalog';
 import VariantSelector from './components/VariantSelector';
@@ -14,6 +16,13 @@ import SizeMatcherModal from './components/SizeMatcherModal';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import { useCart } from '../../context/CartContext';
+import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../services/supabase';
+import { getUserMeasurements } from './utils/sizeCalculator';
+import {
+  fetchProductSizeGuides,
+  inferSizeForProduct,
+} from './services/sizeMatcherService';
 
 export default function ProductDetailView({
   product = mockProducts[0],
@@ -22,6 +31,7 @@ export default function ProductDetailView({
 }) {
   const currentProduct = product || mockProducts[0];
   const { items: cartItems } = useCart();
+  const { profile } = useAuth();
 
   // Helper to determine initial active variant with stock
   const initialVariant = useMemo(() => {
@@ -40,6 +50,68 @@ export default function ProductDetailView({
   const [quantity, setQuantity] = useState(1);
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
   const [suggestedNotice, setSuggestedNotice] = useState(null);
+
+  // Consulta de guías de tallas en Supabase
+  const [sizeGuides, setSizeGuides] = useState(currentProduct?.size_guides || []);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchSizeGuides() {
+      if (!currentProduct?.id) return;
+      try {
+        const guides = await fetchProductSizeGuides(currentProduct.id);
+        if (isMounted) {
+          if (guides && guides.length > 0) {
+            setSizeGuides(guides);
+          } else if (currentProduct?.size_guides && currentProduct.size_guides.length > 0) {
+            setSizeGuides(currentProduct.size_guides);
+          }
+        }
+      } catch (err) {
+        if (isMounted && currentProduct?.size_guides) {
+          setSizeGuides(currentProduct.size_guides);
+        }
+      }
+    }
+
+    fetchSizeGuides();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentProduct?.id]);
+
+  // Medidas del usuario (perfil o localStorage)
+  const [userMeasureState, setUserMeasureState] = useState(() =>
+    getUserMeasurements(profile)
+  );
+
+  useEffect(() => {
+    setUserMeasureState(getUserMeasurements(profile));
+  }, [profile]);
+
+  const hasUserMeasurements = userMeasureState.hasMeasurements;
+
+  // Talla recomendada calculada (Prioridad 1: size_guides, Prioridad 2: fallback estándar)
+  const recommendedSize = useMemo(() => {
+    if (!hasUserMeasurements) return null;
+    return inferSizeForProduct({
+      userMeasurements: userMeasureState.measurements,
+      sizeGuides,
+    });
+  }, [hasUserMeasurements, userMeasureState.measurements, sizeGuides]);
+
+  // Verificación de disponibilidad de stock de la talla recomendada para el color actual
+  const isRecommendedInStock = useMemo(() => {
+    if (!recommendedSize || !currentProduct?.product_variants) return false;
+    const currentColor = selectedVariant?.color;
+    return currentProduct.product_variants.some(
+      (v) =>
+        v.color === currentColor &&
+        v.sizes?.name === recommendedSize &&
+        v.is_active !== false &&
+        (v.stock || 0) > 0
+    );
+  }, [recommendedSize, currentProduct?.product_variants, selectedVariant?.color]);
 
   // Deduce garment family from category slug for specific sizing
   const derivedFamily = useMemo(() => {
@@ -104,6 +176,9 @@ export default function ProductDetailView({
 
   // Handle Size Matcher recommendation
   const handleSizeSelected = (sizeName) => {
+    // Actualizar estado de medidas del usuario
+    setUserMeasureState(getUserMeasurements(profile));
+
     const variants = currentProduct?.product_variants || [];
     const currentColor = selectedVariant?.color;
 
@@ -119,11 +194,6 @@ export default function ProductDetailView({
     if (matchingVariant) {
       setSelectedVariant(matchingVariant);
       setQuantity(1);
-      setSuggestedNotice(`Talla recomendada ${sizeName} aplicada correctamente.`);
-    } else {
-      setSuggestedNotice(
-        `La talla ${sizeName} para el color ${currentColor || ''} no está disponible actualmente.`
-      );
     }
 
     setIsSizeMatcherOpen(false);
@@ -298,24 +368,34 @@ export default function ProductDetailView({
               {/* Size Matcher Trigger */}
               <div className="flex items-center justify-between pt-1">
                 <span className="text-xs text-brand-secondary">
-                  ¿No estás seguro de tu talla?
+                  {hasUserMeasurements
+                    ? 'Talla personalizada según tus medidas'
+                    : '¿No estás seguro de tu talla?'}
                 </span>
                 <button
                   type="button"
                   onClick={() => setIsSizeMatcherOpen(true)}
                   className="inline-flex items-center text-xs font-semibold text-accent hover:text-accent-hover transition-colors focus:outline-none"
                 >
-                  <Ruler className="w-3.5 h-3.5 mr-1" />
-                  Calculador de Talla
+                  {hasUserMeasurements
+                    ? '🔄 Modificar mis medidas / Recalcular'
+                    : '📏 ¿No estás seguro de tu talla? Calculador de Talla'}
                 </button>
               </div>
 
-              {/* Feedback Notice after matching size */}
-              {suggestedNotice && (
-                <div className="p-2.5 rounded-card bg-surface-subtle border border-border text-xs flex items-center gap-2 text-brand-primary">
-                  <CheckCircle2 className="w-4 h-4 text-accent flex-shrink-0" />
-                  <span>{suggestedNotice}</span>
-                </div>
+              {/* Banner informativo condicional según ciclo de vida */}
+              {hasUserMeasurements && recommendedSize && (
+                isRecommendedInStock ? (
+                  <div className="p-2.5 rounded-card bg-surface-subtle border border-border text-xs flex items-center gap-2 text-brand-primary animate-in fade-in duration-150">
+                    <CheckCircle className="w-4 h-4 text-accent flex-shrink-0" />
+                    <span>Según tus medidas, te sugerimos la talla {recommendedSize}.</span>
+                  </div>
+                ) : (
+                  <div className="border border-amber-500/30 bg-amber-500/10 text-amber-500 text-xs p-2.5 rounded-card flex items-center gap-2 animate-in fade-in duration-150">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                    <span>Tu talla sugerida ({recommendedSize}) no se encuentra disponible actualmente en este color.</span>
+                  </div>
+                )
               )}
             </div>
 
@@ -388,6 +468,8 @@ export default function ProductDetailView({
           onClose={() => setIsSizeMatcherOpen(false)}
           onSizeSelected={handleSizeSelected}
           garmentFamily={derivedFamily}
+          category={currentProduct?.categories?.slug || currentProduct?.category}
+          productType={derivedFamily}
         />
       </div>
     </div>

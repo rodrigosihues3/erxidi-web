@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Check,
@@ -11,8 +11,15 @@ import {
   AlertCircle,
   FileText,
   ShoppingBag,
+  Download,
+  Loader2,
 } from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
+import {
+  generateReceiptPDF,
+  generateInvoicePDF,
+} from "../../utils/pdfReceiptGenerator";
 import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import Input from "../../components/ui/Input";
@@ -70,11 +77,54 @@ const formatCurrency = (amount) =>
 
 export default function OrderTrackingView() {
   const { orderNumber } = useParams();
+  const { user } = useAuth();
   const [order, setOrder] = useState(null);
   const [identityValue, setIdentityValue] = useState("");
   const [identityError, setIdentityError] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Auto-validación si el usuario ya está autenticado y es propietario del pedido
+  useEffect(() => {
+    if (!orderNumber || !user) return;
+    let isMounted = true;
+
+    async function checkOwnership() {
+      try {
+        const { data, error } = await supabase
+          .from("orders")
+          .select(
+            "*, order_items(*, product_variants(color, size_id, products(name), sizes(name)))",
+          )
+          .eq("order_number", orderNumber)
+          .maybeSingle();
+
+        if (error) {
+          console.error(
+            "Error al cargar orden para usuario autenticado:",
+            error,
+          );
+        }
+
+        if (
+          isMounted &&
+          data &&
+          (data.customer_id === user.id || data.user_id === user.id)
+        ) {
+          setOrder(data);
+          setIsAuthenticated(true);
+        }
+      } catch (err) {
+        // En caso de contingencia continúa en flujo de verificación
+      }
+    }
+
+    checkOwnership();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [orderNumber, user]);
 
   // Comprobación de identidad y consulta a Supabase
   const handleVerify = async (e) => {
@@ -83,7 +133,9 @@ export default function OrderTrackingView() {
 
     const supplied = digitsOnly(identityValue);
     if (!supplied) {
-      setIdentityError("Ingresa tu DNI o los últimos 4 dígitos de tu teléfono.");
+      setIdentityError(
+        "Ingresa tu DNI o los últimos 4 dígitos de tu teléfono.",
+      );
       return;
     }
 
@@ -93,7 +145,9 @@ export default function OrderTrackingView() {
       // Consulta directa y real a Supabase
       const { data, error: queryError } = await supabase
         .from("orders")
-        .select("*, order_items(*)")
+        .select(
+          "*, order_items(*, product_variants(color, size_id, products(name), sizes(name)))",
+        )
         .eq("order_number", orderNumber)
         .maybeSingle();
 
@@ -103,7 +157,7 @@ export default function OrderTrackingView() {
 
       if (!data) {
         setIdentityError(
-          "No se encontró ningún pedido con el código ingresado. Verifica tu comprobante."
+          "No se encontró ningún pedido con el código ingresado. Verifica tu comprobante.",
         );
         setIsChecking(false);
         return;
@@ -111,10 +165,7 @@ export default function OrderTrackingView() {
 
       // Verificación de credencial contra datos del pedido
       const phoneDigits = digitsOnly(data.customer_phone);
-      const dniCandidates = [
-        data.customer_dni,
-        data.invoice_data?.tax_id,
-      ]
+      const dniCandidates = [data.customer_dni, data.invoice_data?.tax_id]
         .map(digitsOnly)
         .filter(Boolean);
 
@@ -128,13 +179,13 @@ export default function OrderTrackingView() {
         setIdentityError("");
       } else {
         setIdentityError(
-          "Los datos ingresados no coinciden con los registros de este pedido."
+          "Los datos ingresados no coinciden con los registros de este pedido.",
         );
       }
     } catch (err) {
       console.error("Error al consultar pedido en Supabase:", err);
       setIdentityError(
-        "No se pudo consultar el estado del pedido en este momento. Inténtalo nuevamente."
+        "No se pudo consultar el estado del pedido en este momento. Inténtalo nuevamente.",
       );
     } finally {
       setIsChecking(false);
@@ -156,12 +207,71 @@ export default function OrderTrackingView() {
 
   const invoiceTypeLabel = useMemo(() => {
     const type = String(
-      order?.invoice_type || order?.invoice_data?.type || "boleta"
+      order?.invoice_type || order?.invoice_data?.type || "boleta",
     ).toLowerCase();
     if (type === "factura") return "Factura Electrónica";
     if (type === "nota_venta") return "Nota de Venta";
     return "Boleta de Venta";
   }, [order]);
+
+  const invoiceDisplayName = useMemo(() => {
+    const rawType = order?.invoice_type;
+    if (!rawType || rawType === "none" || rawType.toLowerCase() === "boleta") {
+      return "Boleta de Venta";
+    }
+    if (rawType.toLowerCase() === "factura") return "Factura";
+    if (rawType.toLowerCase() === "nota_venta") return "Nota de Venta";
+    return rawType;
+  }, [order?.invoice_type]);
+
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadInvoice = async () => {
+    if (!order) return;
+    setIsDownloading(true);
+
+    try {
+      let orderToPrint = { ...order };
+      let currentItems = orderToPrint.order_items || orderToPrint.items || [];
+
+      // Si la orden no tiene ítems cargados en memoria, realizar consulta complementaria a order_items por order_id
+      if (!currentItems || currentItems.length === 0) {
+        const orderId = order.id;
+        if (orderId) {
+          const { data: fetchedItems, error: itemsError } = await supabase
+            .from("order_items")
+            .select("*, product_variants(color, sizes(name), products(name))")
+            .eq("order_id", orderId);
+
+          if (!itemsError && fetchedItems && fetchedItems.length > 0) {
+            currentItems = fetchedItems;
+          } else {
+            const { data: fallbackItems } = await supabase
+              .from("order_items")
+              .select("*")
+              .eq("order_id", orderId);
+
+            if (fallbackItems && fallbackItems.length > 0) {
+              currentItems = fallbackItems;
+            }
+          }
+
+          if (currentItems && currentItems.length > 0) {
+            orderToPrint.order_items = currentItems;
+            setOrder((prev) =>
+              prev ? { ...prev, order_items: currentItems } : prev,
+            );
+          }
+        }
+      }
+
+      generateReceiptPDF(orderToPrint);
+    } catch (err) {
+      console.error("Error al generar el comprobante PDF:", err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const paymentLabels = {
     culqi_gateway: "Pago Online (Culqi)",
@@ -191,8 +301,8 @@ export default function OrderTrackingView() {
               Seguimiento de Pedido
             </h1>
             <p className="text-xs leading-relaxed text-brand-secondary">
-              Para proteger tu privacidad, ingresa tu DNI o los últimos 4 dígitos
-              del teléfono con el que realizaste la compra.
+              Para proteger tu privacidad, ingresa tu DNI o los últimos 4
+              dígitos del teléfono con el que realizaste la compra.
             </p>
           </div>
 
@@ -250,7 +360,7 @@ export default function OrderTrackingView() {
   // -------------------------------------------------------------
   const items = order.order_items || [];
   const whatsappUrl = `https://wa.me/51987654321?text=${encodeURIComponent(
-    `Hola ERXIDI, necesito consultar sobre mi pedido ${order.order_number}.`
+    `Hola ERXIDI, necesito consultar sobre mi pedido ${order.order_number}.`,
   )}`;
 
   return (
@@ -374,9 +484,21 @@ export default function OrderTrackingView() {
               <dt className="text-brand-secondary font-semibold uppercase tracking-wider text-[10px]">
                 Comprobante Emitido
               </dt>
-              <dd className="text-right font-medium text-brand-primary flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-accent" />
-                {invoiceTypeLabel}
+              <dd className="text-right">
+                <button
+                  type="button"
+                  onClick={handleDownloadInvoice}
+                  disabled={isDownloading}
+                  className="inline-flex items-center gap-1.5 font-medium text-accent hover:text-accent-hover hover:underline transition-colors focus:outline-none focus:ring-1 focus:ring-accent rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  title={`Descargar ${invoiceDisplayName}`}
+                >
+                  {isDownloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  <span>Descargar {invoiceDisplayName}</span>
+                </button>
               </dd>
             </div>
 
@@ -427,8 +549,22 @@ export default function OrderTrackingView() {
                 >
                   <div className="min-w-0 pr-2">
                     <p className="font-semibold text-brand-primary truncate">
-                      {item.product_name || `Prenda #${idx + 1}`}
+                      {item.product_name ||
+                        item.product_variants?.products?.name ||
+                        `Prenda #${idx + 1}`}
                     </p>
+                    {item.product_variants && (
+                      <p className="text-[10px] text-brand-secondary">
+                        {[
+                          item.product_variants.sizes?.name &&
+                            `Talla: ${item.product_variants.sizes.name}`,
+                          item.product_variants.color &&
+                            `Color: ${item.product_variants.color}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </p>
+                    )}
                     <p className="text-[11px] text-brand-secondary">
                       Cantidad:{" "}
                       <span className="font-mono font-semibold">
@@ -442,7 +578,7 @@ export default function OrderTrackingView() {
                   </div>
                   <span className="font-mono font-bold text-brand-primary flex-shrink-0">
                     {formatCurrency(
-                      item.subtotal || item.unit_price * item.quantity
+                      item.subtotal || item.unit_price * item.quantity,
                     )}
                   </span>
                 </div>

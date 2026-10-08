@@ -1,20 +1,131 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, AlertTriangle, Sparkles, Zap, Ruler, Check, Save } from 'lucide-react';
+import { X, AlertTriangle, Sparkles, Zap, Ruler, Save } from 'lucide-react';
 import Button from '../../../components/ui/Button';
 import Badge from '../../../components/ui/Badge';
+import { useAuth } from '../../../context/AuthContext';
+import { supabase } from '../../../services/supabase';
+import { calculateShoeSize } from '../services/sizeMatcherService';
 
-const STORAGE_KEY = 'erxidi_user_profile_measurements';
+const STORAGE_KEY = 'erxidi_size_preferences';
+const LEGACY_STORAGE_KEY = 'erxidi_user_profile_measurements';
 const SIZES = ['S', 'M', 'L', 'XL'];
 const FIT_OPTIONS = ['Ajustado', 'Regular', 'Holgado'];
 
+const mapFitToLabel = (fit) => {
+  const map = { ajustado: 'Ajustado', regular: 'Regular', holgado: 'Holgado' };
+  return map[fit?.toLowerCase()] || 'Regular';
+};
+
+const mapLabelToFit = (label) => {
+  const map = { Ajustado: 'ajustado', Regular: 'regular', Holgado: 'holgado' };
+  return map[label] || 'regular';
+};
+
 function getSavedMeasurements() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (err) {
     console.error('Error al leer de localStorage:', err);
   }
   return null;
+}
+
+/**
+ * Control accesible y exacto con botones decremento [-], input editable directo y [+]
+ */
+function NumberStepper({
+  id,
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  placeholder = "Ingresa tus medidas para calcular",
+  unit = "cm",
+}) {
+  const numValue = value != null && value !== '' && !isNaN(Number(value)) ? Number(value) : null;
+
+  const handleDecrement = () => {
+    if (numValue == null) {
+      onChange(min);
+    } else {
+      const next = Math.max(min, Number((numValue - step).toFixed(1)));
+      onChange(next);
+    }
+  };
+
+  const handleIncrement = () => {
+    if (numValue == null) {
+      onChange(min);
+    } else {
+      const next = Math.min(max, Number((numValue + step).toFixed(1)));
+      onChange(next);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const raw = e.target.value;
+    if (raw === '') {
+      onChange(null);
+      return;
+    }
+    const val = Number(raw);
+    if (!isNaN(val)) {
+      onChange(val);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      {label && (
+        <label htmlFor={id} className="block text-xs font-semibold text-brand-secondary">
+          {label}
+        </label>
+      )}
+      <div className="flex items-center gap-2">
+        <div className="flex items-center border border-border rounded-button bg-surface-card overflow-hidden h-9 w-full focus-within:border-brand-primary focus-within:ring-1 focus-within:ring-brand-primary transition-all">
+          <button
+            type="button"
+            onClick={handleDecrement}
+            disabled={numValue != null && numValue <= min}
+            className="w-9 h-full flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle active:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-base font-bold select-none border-r border-border"
+            aria-label={`Disminuir ${label || ''}`}
+          >
+            -
+          </button>
+          <input
+            id={id}
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={numValue != null ? numValue : ''}
+            onChange={handleInputChange}
+            placeholder={placeholder}
+            className="flex-1 h-full text-center font-mono font-bold text-sm text-brand-primary bg-transparent outline-none px-2 placeholder:text-brand-muted placeholder:font-normal placeholder:text-[11px]"
+          />
+          <button
+            type="button"
+            onClick={handleIncrement}
+            disabled={numValue != null && numValue >= max}
+            className="w-9 h-full flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle active:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-base font-bold select-none border-l border-border"
+            aria-label={`Aumentar ${label || ''}`}
+          >
+            +
+          </button>
+        </div>
+        <span className="text-xs font-mono font-semibold text-brand-muted w-6 select-none text-right">
+          {unit}
+        </span>
+      </div>
+      <div className="flex justify-between text-[10px] text-brand-muted font-mono px-0.5">
+        <span>Mín: {min}</span>
+        <span>Máx: {max}</span>
+      </div>
+    </div>
+  );
 }
 
 export default function SizeMatcherModal({
@@ -23,39 +134,61 @@ export default function SizeMatcherModal({
   onSizeSelected,
   garmentFamily = null,
 }) {
+  const { user, profile, refreshProfile } = useAuth();
   const saved = useMemo(() => getSavedMeasurements() || {}, []);
 
   const [activeTab, setActiveTab] = useState(saved.activeTab || 'quick');
 
-  // Quick inputs
+  // Quick inputs (altura, peso, fit)
   const [height, setHeight] = useState(saved.height ?? 175);
   const [weight, setWeight] = useState(saved.weight ?? 70);
   const [fit, setFit] = useState(saved.fit ?? 'Regular');
 
-  // Precise inputs
-  const [waist, setWaist] = useState(saved.waist ?? 80);
-  const [hip, setHip] = useState(saved.hip ?? 96);
-  const [underbust, setUnderbust] = useState(saved.underbust ?? 75);
-  const [bust, setBust] = useState(saved.bust ?? 90);
-  const [footLength, setFootLength] = useState(saved.footLength ?? 26);
+  // Precise anatomical inputs (arrancan en null si no hay datos guardados previamente)
+  const [waist, setWaist] = useState(saved.waist ?? null);
+  const [hip, setHip] = useState(saved.hip ?? null);
+  const [underbust, setUnderbust] = useState(saved.under_bust ?? saved.underbust ?? null);
+  const [bust, setBust] = useState(saved.bust ?? null);
+  const [footLength, setFootLength] = useState(saved.foot_length ?? saved.footLength ?? null);
 
-  // Sync state if saved data is read upon opening
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync state con profile de Supabase o localStorage al abrir
   useEffect(() => {
     if (isOpen) {
-      const stored = getSavedMeasurements();
-      if (stored) {
-        if (stored.height) setHeight(stored.height);
-        if (stored.weight) setWeight(stored.weight);
-        if (stored.fit) setFit(stored.fit);
-        if (stored.waist) setWaist(stored.waist);
-        if (stored.hip) setHip(stored.hip);
-        if (stored.underbust) setUnderbust(stored.underbust);
-        if (stored.bust) setBust(stored.bust);
-        if (stored.footLength) setFootLength(stored.footLength);
-        if (stored.activeTab) setActiveTab(stored.activeTab);
+      if (user && profile) {
+        if (profile.height_cm) setHeight(profile.height_cm);
+        if (profile.weight_kg) setWeight(profile.weight_kg);
+        if (profile.fit_preference) setFit(mapFitToLabel(profile.fit_preference));
+
+        const bodyM = profile.body_measurements || {};
+        setWaist(bodyM.waist != null ? bodyM.waist : null);
+        setHip(bodyM.hip != null ? bodyM.hip : null);
+        setUnderbust(bodyM.under_bust != null ? bodyM.under_bust : bodyM.underbust != null ? bodyM.underbust : null);
+        setBust(bodyM.bust != null ? bodyM.bust : null);
+        setFootLength(bodyM.foot_length != null ? bodyM.foot_length : bodyM.footLength != null ? bodyM.footLength : null);
+      } else {
+        const stored = getSavedMeasurements();
+        if (stored) {
+          if (stored.height) setHeight(stored.height);
+          if (stored.weight) setWeight(stored.weight);
+          if (stored.fit) setFit(stored.fit);
+          setWaist(stored.waist != null ? stored.waist : null);
+          setHip(stored.hip != null ? stored.hip : null);
+          setUnderbust(stored.under_bust != null ? stored.under_bust : stored.underbust != null ? stored.underbust : null);
+          setBust(stored.bust != null ? stored.bust : null);
+          setFootLength(stored.foot_length != null ? stored.foot_length : stored.footLength != null ? stored.footLength : null);
+          if (stored.activeTab) setActiveTab(stored.activeTab);
+        } else {
+          setWaist(null);
+          setHip(null);
+          setUnderbust(null);
+          setBust(null);
+          setFootLength(null);
+        }
       }
     }
-  }, [isOpen]);
+  }, [isOpen, user, profile]);
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -73,8 +206,8 @@ export default function SizeMatcherModal({
 
   // 1. Quick Mode BMI & Size calculation
   const quickResult = useMemo(() => {
-    const heightInMeters = height / 100;
-    const computedImc = weight / (heightInMeters * heightInMeters);
+    const heightInMeters = (Number(height) || 175) / 100;
+    const computedImc = (Number(weight) || 70) / (heightInMeters * heightInMeters);
 
     let baseIndex = 1; // Default 'M'
     if (computedImc < 20) {
@@ -94,109 +227,160 @@ export default function SizeMatcherModal({
       finalIndex += 1;
     }
 
-    let expText = 'Recomendación equilibrada para tu complexión física.';
-    if (fit === 'Ajustado') {
-      expText =
-        finalIndex < baseIndex
-          ? `Ajuste ceñido: una talla menos sobre tu base ${SIZES[baseIndex]}.`
-          : 'Ajuste ceñido para complexión delgada.';
-    } else if (fit === 'Holgado') {
-      expText =
-        finalIndex > baseIndex
-          ? `Ajuste holgado: mayor holgura sobre tu base ${SIZES[baseIndex]}.`
-          : 'Ajuste relajado para máxima comodidad.';
-    }
-
     return {
       size: SIZES[finalIndex],
       baseSize: SIZES[baseIndex],
       imc: computedImc,
-      explanation: expText,
+      explanation: 'Recomendación equilibrada para tu complexión física.',
     };
   }, [height, weight, fit]);
 
   // 2. Precise Mode calculations by garment family
   const preciseResult = useMemo(() => {
-    // Lower body (Bóxers / Trusas)
-    let bottom = 'M';
-    if (waist <= 76 && hip <= 95) bottom = 'S';
-    else if (waist <= 84 && hip <= 101) bottom = 'M';
-    else if (waist <= 92 && hip <= 108) bottom = 'L';
-    else bottom = 'XL';
+    // 1. PRENDAS BAJAS (Bóxers / Calzones / Trusas)
+    let bottom = null;
+    if (waist != null || hip != null) {
+      const w = waist != null ? Number(waist) : (Number(hip) - 16);
+      const h = hip != null ? Number(hip) : (Number(waist) + 16);
+      if (w <= 76 && h <= 95) bottom = 'S';
+      else if (w <= 84 && h <= 101) bottom = 'M';
+      else if (w <= 92 && h <= 108) bottom = 'L';
+      else bottom = 'XL';
+    }
 
-    // Upper body (Brasiers / Tops)
-    let top = 'M';
-    if (underbust <= 72 && bust <= 86) top = 'S';
-    else if (underbust <= 77 && bust <= 92) top = 'M';
-    else if (underbust <= 82 && bust <= 98) top = 'L';
-    else top = 'XL';
+    // 2. PRENDAS ALTAS (Polos / Tops / Brasiers)
+    let top = null;
+    if (bust != null || underbust != null) {
+      const b = bust != null ? Number(bust) : (Number(underbust) + 15);
+      if (b <= 86) top = 'S';
+      else if (b <= 92) top = 'M';
+      else if (b <= 98) top = 'L';
+      else top = 'XL';
+    }
 
-    // Socks & footwear reference
-    let socks = 'M';
-    let shoeRef = '38 - 40';
-    if (footLength < 24.5) {
-      socks = 'S';
-      shoeRef = '35 - 37';
-    } else if (footLength <= 26.5) {
-      socks = 'M';
-      shoeRef = '38 - 40';
-    } else if (footLength <= 29.5) {
-      socks = 'L';
-      shoeRef = '41 - 43';
-    } else {
-      socks = 'XL';
-      shoeRef = '44 - 46';
+    // 3. CALCETERÍA (Medias)
+    let sock = null;
+    let shoeSizeRange = '—';
+    if (footLength != null) {
+      const f = Number(footLength);
+      shoeSizeRange = calculateShoeSize(f);
+      if (f < 24.5) sock = 'S';
+      else if (f <= 26.5) sock = 'M';
+      else if (f <= 29.5) sock = 'L';
+      else sock = 'XL';
     }
 
     return {
       bottomSize: bottom,
       topSize: top,
-      socksSize: socks,
-      shoeRef,
-      suggestedSize: bottom, // Primary reference
+      sockSize: sock,
+      shoeSizeRange,
     };
-  }, [waist, hip, underbust, bust, footLength]);
+  }, [waist, hip, bust, underbust, footLength]);
 
-  const targetPreciseSize = useMemo(() => {
-    if (garmentFamily === 'bottoms') return preciseResult.bottomSize;
-    if (garmentFamily === 'tops') return preciseResult.topSize;
-    if (garmentFamily === 'socks') return preciseResult.socksSize;
-    return preciseResult.suggestedSize;
-  }, [garmentFamily, preciseResult]);
+  const hasPreciseValues = waist != null || hip != null || bust != null || underbust != null || footLength != null;
 
-  const activeCalculatedSize =
-    activeTab === 'quick' ? quickResult.size : targetPreciseSize;
+  // Talla aplicable para el callback (según la pestaña activa y la familia de la prenda)
+  const applicableSelectedSize = useMemo(() => {
+    if (activeTab === 'quick') return quickResult.size;
+    if (garmentFamily === 'tops' && preciseResult.topSize) return preciseResult.topSize;
+    if (garmentFamily === 'socks' && preciseResult.sockSize) return preciseResult.sockSize;
+    if (garmentFamily === 'bottoms' && preciseResult.bottomSize) return preciseResult.bottomSize;
+    return quickResult.size;
+  }, [activeTab, garmentFamily, quickResult.size, preciseResult]);
 
   if (!isOpen) return null;
 
-  const handleApply = () => {
-    const allMeasurements = {
-      height,
-      weight,
-      fit,
-      waist,
-      hip,
-      underbust,
-      bust,
-      footLength,
-      calculatedSize: activeCalculatedSize,
-      quickSize: quickResult.size,
-      bottomSize: preciseResult.bottomSize,
-      topSize: preciseResult.topSize,
-      socksSize: preciseResult.socksSize,
-      shoeReference: preciseResult.shoeRef,
-      activeTab,
-      updatedAt: new Date().toISOString(),
-    };
+  const handleApply = async () => {
+    const generalSize = quickResult.size;
+    setIsSaving(true);
 
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(allMeasurements));
+      if (activeTab === 'quick') {
+        // En calculador rápido: guarda la base y resetea medidas complejas
+        if (user) {
+          await supabase
+            .from('profiles')
+            .update({
+              height_cm: Number(height),
+              weight_kg: Number(weight),
+              fit_preference: mapLabelToFit(fit),
+              body_measurements: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id);
+          await refreshProfile();
+        } else {
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              height: Number(height),
+              weight: Number(weight),
+              fit,
+              waist: null,
+              hip: null,
+              under_bust: null,
+              bust: null,
+              foot_length: null,
+              activeTab: 'quick',
+              updatedAt: new Date().toISOString(),
+            })
+          );
+        }
+      } else {
+        // En calculador preciso: guarda la base más el objeto body_measurements
+        const bodyMeasurementsObj = {
+          waist: waist != null ? Number(waist) : null,
+          hip: hip != null ? Number(hip) : null,
+          under_bust: underbust != null ? Number(underbust) : null,
+          bust: bust != null ? Number(bust) : null,
+          foot_length: footLength != null ? Number(footLength) : null,
+        };
+
+        if (user) {
+          await supabase
+            .from('profiles')
+            .update({
+              height_cm: Number(height),
+              weight_kg: Number(weight),
+              fit_preference: mapLabelToFit(fit),
+              body_measurements: bodyMeasurementsObj,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id);
+          await refreshProfile();
+        } else {
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              height: Number(height),
+              weight: Number(weight),
+              fit,
+              ...bodyMeasurementsObj,
+              footLength: bodyMeasurementsObj.foot_length,
+              activeTab: 'precise',
+              updatedAt: new Date().toISOString(),
+            })
+          );
+        }
+      }
     } catch (err) {
       console.error('Error al persistir mediciones:', err);
+    } finally {
+      setIsSaving(false);
+      onSizeSelected?.(applicableSelectedSize, {
+        height,
+        weight,
+        fit,
+        waist,
+        hip,
+        bust,
+        underbust,
+        foot_length: footLength,
+        activeTab,
+      });
+      onClose?.();
     }
-
-    onSizeSelected?.(activeCalculatedSize, allMeasurements);
-    onClose?.();
   };
 
   return (
@@ -268,63 +452,39 @@ export default function SizeMatcherModal({
           </button>
         </div>
 
-        {/* Tab 1: Calculador Rápido */}
+        {/* ========================================================= */}
+        {/* PESTAÑA 1: CALCULADOR RÁPIDO (VISTA MINIMALISTA) */}
+        {/* ========================================================= */}
         {activeTab === 'quick' && (
           <div className="space-y-4 animate-in fade-in duration-150">
             {/* Estatura */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-semibold">
-                <label htmlFor="height-slider" className="text-brand-secondary">
-                  Estatura
-                </label>
-                <span className="font-mono text-brand-primary font-bold">
-                  {height} cm
-                </span>
-              </div>
-              <input
-                id="height-slider"
-                type="range"
-                min={140}
-                max={200}
-                value={height}
-                onChange={(e) => setHeight(Number(e.target.value))}
-                className="w-full h-2 bg-surface-subtle border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-              />
-              <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                <span>140 cm</span>
-                <span>200 cm</span>
-              </div>
-            </div>
+            <NumberStepper
+              id="quick-height"
+              label="Estatura"
+              value={height}
+              onChange={(val) => setHeight(val ?? 175)}
+              min={120}
+              max={220}
+              step={1}
+              unit="cm"
+            />
 
             {/* Peso */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-semibold">
-                <label htmlFor="weight-slider" className="text-brand-secondary">
-                  Peso
-                </label>
-                <span className="font-mono text-brand-primary font-bold">
-                  {weight} kg
-                </span>
-              </div>
-              <input
-                id="weight-slider"
-                type="range"
-                min={45}
-                max={120}
-                value={weight}
-                onChange={(e) => setWeight(Number(e.target.value))}
-                className="w-full h-2 bg-surface-subtle border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-              />
-              <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                <span>45 kg</span>
-                <span>120 kg</span>
-              </div>
-            </div>
+            <NumberStepper
+              id="quick-weight"
+              label="Peso"
+              value={weight}
+              onChange={(val) => setWeight(val ?? 70)}
+              min={30}
+              max={160}
+              step={1}
+              unit="kg"
+            />
 
             {/* Preferencia de Ajuste (Fit) */}
             <div className="space-y-1.5">
               <span className="text-xs font-semibold text-brand-secondary block">
-                Preferencia de ajuste (Fit)
+                Preferencia de ajuste (Calce)
               </span>
               <div
                 className="grid grid-cols-3 gap-2"
@@ -352,286 +512,172 @@ export default function SizeMatcherModal({
                 })}
               </div>
             </div>
+
+            {/* Resultado Inferior Rápido: Exclusivamente UNA tarjeta central */}
+            <div className="p-4 bg-surface-subtle border border-border rounded-card text-center space-y-1.5 shadow-subtle">
+              <span className="text-xs font-bold text-brand-secondary uppercase tracking-wider block">
+                TALLA SUGERIDA
+              </span>
+              <div className="font-mono text-3xl font-extrabold text-brand-primary">
+                {quickResult.size}
+              </div>
+              <p className="text-xs text-brand-secondary leading-relaxed">
+                Recomendación equilibrada para tu complexión física.
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Tab 2: Calculador Preciso */}
+        {/* ========================================================= */}
+        {/* PESTAÑA 2: CALCULADOR PRECISO (VISTA ESTRUCTURADA Y COMPLETA) */}
+        {/* ========================================================= */}
         {activeTab === 'precise' && (
           <div className="space-y-5 animate-in fade-in duration-150">
-            {/* Bloque 1: Prendas Bajas */}
-            {(!garmentFamily || garmentFamily === 'bottoms') && (
-              <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-3">
-                <span className="text-xs font-bold text-brand-primary uppercase tracking-wider block">
-                  {garmentFamily ? 'Prendas Bajas (Bóxers / Calzones)' : '1. Prendas Bajas (Bóxers / Calzones)'}
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <label htmlFor="waist-input" className="text-brand-secondary font-semibold">
-                        Cintura (cm)
-                      </label>
-                      <span className="font-mono font-bold text-brand-primary">
-                        {waist} cm
-                      </span>
-                    </div>
-                    <input
-                      id="waist-input"
-                      type="range"
-                      min={50}
-                      max={130}
-                      value={waist}
-                      onChange={(e) => setWaist(Number(e.target.value))}
-                      className="w-full h-2 bg-surface-card border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-                    />
-                    <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                      <span>50 cm</span>
-                      <span>130 cm</span>
-                    </div>
-                  </div>
+            {/* Contexto base heredado */}
+            <div className="flex items-center justify-between px-3 py-2 bg-surface-subtle rounded-button border border-border text-xs text-brand-secondary">
+              <span>Contexto corporal: <strong className="text-brand-primary font-mono">{height} cm</strong> &bull; <strong className="text-brand-primary font-mono">{weight} kg</strong></span>
+              <Badge variant="neutral" className="text-[10px]">{fit}</Badge>
+            </div>
 
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <label htmlFor="hip-input" className="text-brand-secondary font-semibold">
-                        Cadera (cm)
-                      </label>
-                      <span className="font-mono font-bold text-brand-primary">
-                        {hip} cm
-                      </span>
-                    </div>
-                    <input
-                      id="hip-input"
-                      type="range"
-                      min={70}
-                      max={140}
-                      value={hip}
-                      onChange={(e) => setHip(Number(e.target.value))}
-                      className="w-full h-2 bg-surface-card border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-                    />
-                    <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                      <span>70 cm</span>
-                      <span>140 cm</span>
-                    </div>
-                  </div>
-                </div>
+            {/* Bloque 1: Cintura y Cadera */}
+            <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-3">
+              <span className="text-xs font-bold text-brand-primary uppercase tracking-wider block">
+                1. PRENDAS BAJAS (BÓXERS / CALZONES)
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <NumberStepper
+                  id="precise-waist"
+                  label="Cintura (cm)"
+                  value={waist}
+                  onChange={setWaist}
+                  min={45}
+                  max={115}
+                  step={1}
+                  placeholder="Ingresa tus medidas para calcular"
+                />
+                <NumberStepper
+                  id="precise-hip"
+                  label="Cadera (cm)"
+                  value={hip}
+                  onChange={setHip}
+                  min={50}
+                  max={125}
+                  step={1}
+                  placeholder="Ingresa tus medidas para calcular"
+                />
               </div>
-            )}
+            </div>
 
-            {/* Bloque 2: Prendas Altas / Busto */}
-            {(!garmentFamily || garmentFamily === 'tops') && (
-              <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-3">
-                <span className="text-xs font-bold text-brand-primary uppercase tracking-wider block">
-                  {garmentFamily ? 'Prendas Altas / Busto (Brasiers / Tops)' : '2. Prendas Altas / Busto (Brasiers / Tops)'}
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <label htmlFor="underbust-input" className="text-brand-secondary font-semibold">
-                        Bajo Busto (cm)
-                      </label>
-                      <span className="font-mono font-bold text-brand-primary">
-                        {underbust} cm
-                      </span>
-                    </div>
-                    <input
-                      id="underbust-input"
-                      type="range"
-                      min={60}
-                      max={120}
-                      value={underbust}
-                      onChange={(e) => setUnderbust(Number(e.target.value))}
-                      className="w-full h-2 bg-surface-card border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-                    />
-                    <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                      <span>60 cm</span>
-                      <span>120 cm</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <label htmlFor="bust-input" className="text-brand-secondary font-semibold">
-                        Busto / Pecho (cm)
-                      </label>
-                      <span className="font-mono font-bold text-brand-primary">
-                        {bust} cm
-                      </span>
-                    </div>
-                    <input
-                      id="bust-input"
-                      type="range"
-                      min={70}
-                      max={130}
-                      value={bust}
-                      onChange={(e) => setBust(Number(e.target.value))}
-                      className="w-full h-2 bg-surface-card border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-                    />
-                    <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                      <span>70 cm</span>
-                      <span>130 cm</span>
-                    </div>
-                  </div>
-                </div>
+            {/* Bloque 2: Bajo Busto y Busto */}
+            <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-3">
+              <span className="text-xs font-bold text-brand-primary uppercase tracking-wider block">
+                2. PRENDAS ALTAS (BRASIERS / TOPS)
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <NumberStepper
+                  id="precise-underbust"
+                  label="Bajo Busto (cm)"
+                  value={underbust}
+                  onChange={setUnderbust}
+                  min={55}
+                  max={105}
+                  step={1}
+                  placeholder="Ingresa tus medidas para calcular"
+                />
+                <NumberStepper
+                  id="precise-bust"
+                  label="Busto / Pecho (cm)"
+                  value={bust}
+                  onChange={setBust}
+                  min={60}
+                  max={120}
+                  step={1}
+                  placeholder="Ingresa tus medidas para calcular"
+                />
               </div>
-            )}
+            </div>
 
-            {/* Bloque 3: Calcetería */}
-            {(!garmentFamily || garmentFamily === 'socks') && (
-              <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-brand-primary uppercase tracking-wider">
-                    {garmentFamily ? 'Calcetería (Medias)' : '3. Calcetería (Medias)'}
-                  </span>
-                  <span className="text-[11px] font-semibold text-accent">
-                    Calzado ref: {preciseResult.shoeRef}
-                  </span>
+            {/* Bloque 3: Longitud del Pie (Calcetería) */}
+            <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-brand-primary uppercase tracking-wider">
+                  3. CALCETERÍA (MEDIAS)
+                </span>
+                <span className="text-[11px] font-semibold text-accent font-mono">
+                  Calzado ref: {footLength != null ? preciseResult.shoeSizeRange : '—'}
+                </span>
+              </div>
+              <NumberStepper
+                id="precise-foot"
+                label="Longitud del pie (cm)"
+                value={footLength}
+                onChange={setFootLength}
+                min={14.0}
+                max={31.0}
+                step={0.5}
+                placeholder="Ingresa tus medidas para calcular"
+              />
+            </div>
+
+            {/* Resultado Inferior Preciso: Exclusivamente GRID de 3 tarjetas compactas */}
+            <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-3 shadow-subtle">
+              <div className="text-center">
+                <span className="text-xs font-bold text-brand-primary uppercase tracking-wider block">
+                  TUS TALLAS SUGERIDAS POR FAMILIA DE PRENDA
+                </span>
+                <p className="text-[11px] text-brand-secondary mt-0.5">
+                  Ajuste anatómico específico calculado según tus medidas corporales
+                </p>
+              </div>
+
+              {!hasPreciseValues ? (
+                <div className="p-4 bg-surface-card rounded-card border border-border text-center">
+                  <p className="text-xs text-brand-secondary italic">
+                    Ingresa tus medidas para calcular
+                  </p>
                 </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <label htmlFor="foot-input" className="text-brand-secondary font-semibold">
-                      Longitud del pie (cm)
-                    </label>
-                    <span className="font-mono font-bold text-brand-primary">
-                      {footLength} cm
+              ) : (
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  {/* Tarjeta 1 (Prendas Bajas) */}
+                  <div className="p-3 bg-surface-card rounded-card border border-border flex flex-col justify-between space-y-1 shadow-subtle">
+                    <span className="text-[11px] font-semibold text-brand-secondary block uppercase tracking-wide">
+                      PRENDAS BAJAS
+                    </span>
+                    <span className="font-mono text-2xl font-extrabold text-brand-primary">
+                      {preciseResult.bottomSize || '—'}
+                    </span>
+                    <span className="text-[10px] text-brand-muted">
+                      Bóxers / Trusas
                     </span>
                   </div>
-                  <input
-                    id="foot-input"
-                    type="range"
-                    min={20}
-                    max={32}
-                    step={0.5}
-                    value={footLength}
-                    onChange={(e) => setFootLength(Number(e.target.value))}
-                    className="w-full h-2 bg-surface-card border border-border rounded-badge appearance-none cursor-pointer accent-accent"
-                  />
-                  <div className="flex justify-between text-[10px] text-brand-muted font-mono">
-                    <span>20 cm (~34)</span>
-                    <span>26 cm (~39)</span>
-                    <span>32 cm (~46)</span>
+
+                  {/* Tarjeta 2 (Prendas Altas) */}
+                  <div className="p-3 bg-surface-card rounded-card border border-border flex flex-col justify-between space-y-1 shadow-subtle">
+                    <span className="text-[11px] font-semibold text-brand-secondary block uppercase tracking-wide">
+                      PRENDAS ALTAS
+                    </span>
+                    <span className="font-mono text-2xl font-extrabold text-brand-primary">
+                      {preciseResult.topSize || '—'}
+                    </span>
+                    <span className="text-[10px] text-brand-muted">
+                      Polos / Tops
+                    </span>
+                  </div>
+
+                  {/* Tarjeta 3 (Calcetería) */}
+                  <div className="p-3 bg-surface-card rounded-card border border-border flex flex-col justify-between space-y-1 shadow-subtle">
+                    <span className="text-[11px] font-semibold text-brand-secondary block uppercase tracking-wide">
+                      CALCETERÍA
+                    </span>
+                    <span className="font-mono text-2xl font-extrabold text-brand-primary">
+                      {preciseResult.sockSize || '—'}
+                    </span>
+                    <span className="text-[10px] text-brand-muted">
+                      Calzado {preciseResult.shoeSizeRange}
+                    </span>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Dynamic Calculation Result Box */}
-        {activeTab === 'quick' ? (
-          <div className="p-4 bg-surface-subtle border border-border rounded-card text-center space-y-2">
-            <span className="text-xs font-semibold text-brand-secondary uppercase tracking-wider block">
-              Resultado sugerido
-            </span>
-
-            <div className="flex items-baseline justify-center gap-2">
-              <span className="text-sm font-semibold text-brand-secondary">
-                Talla recomendada:
-              </span>
-              <span className="font-mono text-3xl font-extrabold text-brand-primary">
-                {quickResult.size}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-center gap-2 pt-1">
-              <Badge variant="neutral">
-                IMC {quickResult.imc.toFixed(1)}
-              </Badge>
-              <Badge variant="neutral">
-                Base: {quickResult.baseSize}
-              </Badge>
-            </div>
-            <p className="text-xs text-brand-secondary pt-1 leading-relaxed">
-              {quickResult.explanation}
-            </p>
-          </div>
-        ) : garmentFamily ? (
-          /* Modo Preciso filtrado por familia */
-          <div className="p-4 bg-surface-subtle border border-border rounded-card text-center space-y-2">
-            <span className="text-xs font-semibold text-brand-secondary uppercase tracking-wider block">
-              Resultado sugerido (
-              {garmentFamily === 'bottoms'
-                ? 'Prendas Bajas'
-                : garmentFamily === 'tops'
-                ? 'Prendas Altas / Busto'
-                : 'Calcetería'}
-              )
-            </span>
-
-            <div className="flex items-baseline justify-center gap-2">
-              <span className="text-sm font-semibold text-brand-secondary">
-                Talla recomendada:
-              </span>
-              <span className="font-mono text-3xl font-extrabold text-brand-primary">
-                {targetPreciseSize}
-              </span>
-            </div>
-
-            {garmentFamily === 'socks' ? (
-              <div className="pt-1">
-                <Badge variant="neutral">
-                  Calzado ref: {preciseResult.shoeRef}
-                </Badge>
-              </div>
-            ) : garmentFamily === 'bottoms' ? (
-              <p className="text-xs text-brand-secondary pt-1 leading-relaxed">
-                Cintura: {waist} cm &bull; Cadera: {hip} cm
-              </p>
-            ) : (
-              <p className="text-xs text-brand-secondary pt-1 leading-relaxed">
-                Bajo Busto: {underbust} cm &bull; Busto: {bust} cm
-              </p>
-            )}
-          </div>
-        ) : (
-          /* Modo Preciso global (sin filtro de familia) */
-          <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-3">
-            <div className="text-center">
-              <span className="text-xs font-bold text-brand-primary uppercase tracking-wider block">
-                Tus tallas sugeridas por familia de prenda
-              </span>
-              <p className="text-[11px] text-brand-secondary mt-0.5">
-                Ajuste anatómico específico calculado según tus medidas corporales
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-center">
-              {/* Prendas Bajas */}
-              <div className="p-3 bg-surface-card rounded-card border border-border flex flex-col justify-between space-y-1 shadow-subtle">
-                <span className="text-[11px] font-semibold text-brand-secondary block uppercase tracking-wide">
-                  Prendas Bajas
-                </span>
-                <span className="font-mono text-2xl font-extrabold text-brand-primary">
-                  {preciseResult.bottomSize}
-                </span>
-                <span className="text-[10px] text-brand-muted">
-                  Bóxers / Trusas
-                </span>
-              </div>
-
-              {/* Prendas Altas */}
-              <div className="p-3 bg-surface-card rounded-card border border-border flex flex-col justify-between space-y-1 shadow-subtle">
-                <span className="text-[11px] font-semibold text-brand-secondary block uppercase tracking-wide">
-                  Prendas Altas
-                </span>
-                <span className="font-mono text-2xl font-extrabold text-brand-primary">
-                  {preciseResult.topSize}
-                </span>
-                <span className="text-[10px] text-brand-muted">
-                  Brasiers / Tops
-                </span>
-              </div>
-
-              {/* Calcetería */}
-              <div className="p-3 bg-surface-card rounded-card border border-border flex flex-col justify-between space-y-1 shadow-subtle">
-                <span className="text-[11px] font-semibold text-brand-secondary block uppercase tracking-wide">
-                  Calcetería
-                </span>
-                <span className="font-mono text-2xl font-extrabold text-brand-primary">
-                  {preciseResult.socksSize}
-                </span>
-                <span className="text-[10px] text-brand-muted">
-                  Calzado {preciseResult.shoeRef}
-                </span>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -650,6 +696,7 @@ export default function SizeMatcherModal({
             variant="ghost"
             size="md"
             onClick={onClose}
+            disabled={isSaving}
           >
             Cancelar
           </Button>
@@ -657,6 +704,9 @@ export default function SizeMatcherModal({
             variant="primary"
             size="md"
             onClick={handleApply}
+            isLoading={isSaving}
+            disabled={isSaving}
+            className="bg-accent hover:bg-accent-hover text-white"
           >
             <Save className="w-4 h-4 mr-2" />
             Guardar perfil y aplicar
