@@ -15,7 +15,7 @@ export default function ProtectedRoute({ allowedRoles = [] }) {
           Verificando Credenciales...
         </span>
       </div>
-    );WWW
+    );
   }
 
   // Si no está autenticado, redirigir a login guardando la ruta previa
