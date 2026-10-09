@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   ShoppingCart,
   Menu,
@@ -9,10 +9,10 @@ import {
   Ruler,
   ChevronDown,
   Package,
-} from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { useCart } from '../../context/CartContext';
-import Button from '../ui/Button';
+} from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
+import { useCart } from "../../context/CartContext";
+import Button from "../ui/Button";
 
 export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
   const { user, profile, role, signOut } = useAuth();
@@ -30,33 +30,33 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
       }
     }
     function handleKeyDown(event) {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setUserMenuOpen(false);
       }
     }
 
     if (userMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('keydown', handleKeyDown);
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
     }
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [userMenuOpen]);
 
   const navLinks = [
-    { label: 'Inicio', path: '/' },
-    { label: 'Catálogo', path: '/catalogo' },
-    { label: 'Sistema UI', path: '/ui' },
+    { label: "Inicio", path: "/" },
+    { label: "Catálogo", path: "/catalogo" },
+    { label: "Sistema UI", path: "/ui" },
   ];
 
   const displayName =
     profile?.first_name ||
     profile?.full_name ||
     user?.user_metadata?.first_name ||
-    user?.email?.split('@')[0] ||
-    'Usuario';
+    user?.email?.split("@")[0] ||
+    "Usuario";
 
   const userInitial = displayName.charAt(0).toUpperCase();
 
@@ -64,8 +64,31 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
     await signOut();
-    navigate('/');
+    navigate("/");
   };
+
+  const isDelivery = profile?.role === "delivery";
+  if (isDelivery) {
+    // Navbar minimalista exclusivo para repartidor
+    return (
+      <header className="border-b border-border bg-surface-card px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="font-extrabold text-lg text-brand-primary">
+            ERXIDI
+          </span>
+          <span className="text-[11px] font-mono uppercase bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded border border-amber-500/20 font-bold">
+            Módulo Repartidor
+          </span>
+        </div>
+        <button
+          onClick={handleSignOut}
+          className="text-xs text-brand-secondary hover:text-brand-primary underline"
+        >
+          Cerrar sesión
+        </button>
+      </header>
+    );
+  }
 
   return (
     <header className="sticky top-0 z-40 bg-brand-primary/95 backdrop-blur-md border-b border-border/20 text-white">
@@ -88,8 +111,8 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 className={({ isActive }) =>
                   `text-xs font-semibold uppercase tracking-wider transition-colors duration-150 ${
                     isActive
-                      ? 'text-accent'
-                      : 'text-brand-muted hover:text-white'
+                      ? "text-accent"
+                      : "text-brand-muted hover:text-white"
                   }`
                 }
               >
@@ -147,7 +170,7 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                   </span>
                   <ChevronDown
                     className={`w-3.5 h-3.5 text-brand-muted transition-transform duration-150 ${
-                      userMenuOpen ? 'rotate-180 text-white' : ''
+                      userMenuOpen ? "rotate-180 text-white" : ""
                     }`}
                   />
                 </button>
@@ -213,7 +236,7 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             className="lg:hidden p-2 rounded-button text-brand-muted hover:text-white hover:bg-white/5 transition-colors focus:outline-none"
-            aria-label={mobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
+            aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
             aria-expanded={mobileMenuOpen}
           >
             {mobileMenuOpen ? (
@@ -237,8 +260,8 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 className={({ isActive }) =>
                   `px-3 py-2 rounded-button text-sm font-semibold transition-colors ${
                     isActive
-                      ? 'bg-white/10 text-accent'
-                      : 'text-brand-muted hover:text-white hover:bg-white/5'
+                      ? "bg-white/10 text-accent"
+                      : "text-brand-muted hover:text-white hover:bg-white/5"
                   }`
                 }
               >

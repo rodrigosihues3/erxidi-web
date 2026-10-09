@@ -3,6 +3,7 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Outlet,
   useParams,
   useNavigate,
 } from "react-router-dom";
@@ -26,6 +27,8 @@ import ProfileView from "./features/account/ProfileView";
 import OrdersHistoryView from "./features/account/OrdersHistoryView";
 import UpdatePasswordView from "./features/auth/UpdatePasswordView";
 import { getProductBySlug } from "./services/api/catalogService";
+import { DeliveryOnlyRoute, ShopCustomerRoute } from "./components/RoleRoute";
+import DeliveryDashboard from "./features/delivery/DeliveryDashboard";
 
 // Contenedor que resuelve el producto dinámicamente desde Supabase
 function ProductDetailRouteWrapper() {
@@ -87,7 +90,8 @@ function ProductDetailRouteWrapper() {
             Prenda no encontrada
           </h2>
           <p className="text-xs text-brand-secondary">
-            {error || "El producto que buscas no está disponible en nuestro catálogo."}
+            {error ||
+              "El producto que buscas no está disponible en nuestro catálogo."}
           </p>
         </div>
         <Button
@@ -118,7 +122,7 @@ function ProductDetailRouteWrapper() {
             stock: variant.stock,
             imageUrl: product.main_image_url,
           },
-          quantity
+          quantity,
         );
       }}
     />
@@ -133,25 +137,39 @@ export default function App() {
           <Routes>
             {/* Layout Global con Navbar y Footer */}
             <Route element={<MainLayout />}>
-              {/* Rutas Públicas */}
-              <Route path="/" element={<HomeView />} />
-              <Route path="/catalogo" element={<CatalogView />} />
+              {/* Rutas Comerciales: Bloqueadas para el rol delivery */}
               <Route
-                path="/producto/:slug"
-                element={<ProductDetailRouteWrapper />}
-              />
-              <Route path="/checkout" element={<CheckoutView />} />
-              <Route
-                path="/checkout/confirmacion/:orderNumber"
-                element={<OrderConfirmationView />}
-              />
+                element={
+                  <ShopCustomerRoute>
+                    {/* Outlet implícito o render directo si ShopCustomerRoute devuelve children */}
+                    <Outlet />
+                  </ShopCustomerRoute>
+                }
+              >
+                <Route path="/" element={<HomeView />} />
+                <Route path="/catalogo" element={<CatalogView />} />
+                <Route
+                  path="/producto/:slug"
+                  element={<ProductDetailRouteWrapper />}
+                />
+                <Route path="/checkout" element={<CheckoutView />} />
+                <Route
+                  path="/checkout/confirmacion/:orderNumber"
+                  element={<OrderConfirmationView />}
+                />
+              </Route>
+
+              {/* Rutas Públicas Operativas (Accesibles por todos) */}
               <Route
                 path="/seguimiento/:orderNumber"
                 element={<OrderTrackingView />}
               />
               <Route path="/ui" element={<DesignSystemShowcase />} />
               <Route path="/login" element={<LoginView />} />
-              <Route path="/actualizar-password" element={<UpdatePasswordView />} />
+              <Route
+                path="/actualizar-password"
+                element={<UpdatePasswordView />}
+              />
 
               {/* Rutas Protegidas de Cliente */}
               <Route
@@ -161,7 +179,10 @@ export default function App() {
               >
                 <Route path="/mi-cuenta" element={<ProfileView />} />
                 <Route path="/perfil" element={<ProfileView />} />
-                <Route path="/mi-cuenta/pedidos" element={<OrdersHistoryView />} />
+                <Route
+                  path="/mi-cuenta/pedidos"
+                  element={<OrdersHistoryView />}
+                />
                 <Route path="/mis-pedidos" element={<OrdersHistoryView />} />
               </Route>
 
@@ -177,14 +198,14 @@ export default function App() {
                 />
               </Route>
 
-              {/* Rutas Protegidas de Logística (Repartidor) */}
+              {/* Ruta exclusiva de repartidor: Bloqueada para clientes comunes */}
               <Route element={<ProtectedRoute allowedRoles={["delivery"]} />}>
                 <Route
                   path="/reparto"
                   element={
-                    <div className="p-8">
-                      Bandeja de Reparto (En desarrollo)
-                    </div>
+                    <DeliveryOnlyRoute>
+                      <DeliveryDashboard />
+                    </DeliveryOnlyRoute>
                   }
                 />
               </Route>

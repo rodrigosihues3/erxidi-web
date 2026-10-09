@@ -61,10 +61,16 @@ const TRACKING_STEPS = [
 const STATUS_INDEX = {
   received: 0,
   pending: 0,
+  pendiente_pago: 0,
+  pagado: 0,
   preparing: 1,
+  en_preparacion: 1,
   dispatched: 2,
+  en_camino: 2,
   nearby: 3,
+  cerca: 3,
   delivered: 4,
+  entregado: 4,
 };
 
 const digitsOnly = (value) => String(value || "").replace(/\D/g, "");

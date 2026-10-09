@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../services/supabase";
 import { useAuth } from "../../context/AuthContext";
-import mockData from "../../data/repartidor.json";
 import {
   VISIBLE_DB_STATUSES,
   PICKUP_TYPES,
@@ -15,13 +14,13 @@ const ORDERS_SELECT = `
   id, order_number, status, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_status, created_at, updated_at,
   customer_name, customer_phone, delivery_address, scheduled_time_slot,
-  customer:profiles!orders_customer_id_fkey(
-    first_name, paternal_surname, maternal_surname, phone
-  ),
-  shipping_address:addresses!orders_shipping_address_id_fkey(*),
   items:order_items(
     id, quantity, unit_price, subtotal,
-    variant:product_variants(*, size:sizes(*), product:products(*))
+    variant:product_variants(
+      id, sku, color,
+      sizes(name),
+      products(name)
+    )
   )
 `;
 
@@ -30,6 +29,14 @@ function prepare(row) {
     ...row,
     status: normalizeStatus(row.status),
     total_items: (row.items ?? []).reduce((n, i) => n + i.quantity, 0),
+    items: (row.items ?? []).map((it) => ({
+      ...it,
+      variant: {
+        ...it.variant,
+        product: it.variant?.products || { name: "Prenda" },
+        size: it.variant?.sizes || null,
+      },
+    })),
   };
 }
 
