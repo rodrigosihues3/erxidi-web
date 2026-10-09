@@ -6,9 +6,11 @@ import Skeleton from "../../../components/ui/Skeleton";
 import Button from "../../../components/ui/Button";
 import KpiCard from "../components/KpiCard";
 import OrderStatusBadge from "../components/OrderStatusBadge";
-import { getDashboardOrders, getOrderItemsForDashboard } from "../services/adminOrders.service";
-
-const PAID_STATUSES = new Set(["pagado", "preparing", "en_preparacion", "dispatched", "en_camino", "nearby", "cerca", "delivered", "entregado"]);
+import {
+  getDashboardOrders,
+  getOrderItemsForDashboard,
+  calculateDashboardSales,
+} from "../services/adminOrders.service";
 
 function money(value) {
   return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(Number(value || 0));
@@ -16,6 +18,7 @@ function money(value) {
 
 export default function DashboardView() {
   const navigate = useNavigate();
+  const [timeRange, setTimeRange] = useState("30");
   const [orders, setOrders] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,8 +27,13 @@ export default function DashboardView() {
   useEffect(() => {
     let active = true;
     (async () => {
+      setLoading(true);
+      setError("");
       try {
-        const recent = await getDashboardOrders(30);
+        const days = Number(timeRange);
+        const ms = days === 1 ? 24 * 60 * 60 * 1000 : days * 24 * 60 * 60 * 1000;
+        const startDate = new Date(Date.now() - ms);
+        const recent = await getDashboardOrders(startDate.toISOString());
         const orderItems = await getOrderItemsForDashboard(recent.map((o) => o.id));
         if (active) {
           setOrders(recent);
@@ -38,11 +46,16 @@ export default function DashboardView() {
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [timeRange]);
 
   const metrics = useMemo(() => {
-    const paid = orders.filter((order) => PAID_STATUSES.has(order.status));
-    const sales = paid.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+    const paid = orders.filter(
+      (order) =>
+        (order.payment_status === "paid" || order.payment_status === "pagado") &&
+        order.status !== "cancelado" &&
+        order.status !== "cancelled",
+    );
+    const sales = calculateDashboardSales(orders);
     const pending = orders.filter((order) => !["entregado", "delivered", "cancelado", "cancelled"].includes(order.status)).length;
     const completed = orders.filter((order) => ["entregado", "delivered"].includes(order.status)).length;
     const units = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -75,12 +88,31 @@ export default function DashboardView() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-        <div><p className="text-xs uppercase tracking-wider text-brand-secondary font-bold">Resumen operativo</p><h1 className="text-2xl font-black text-brand-primary">Dashboard</h1><p className="text-sm text-brand-secondary mt-1">Actividad de los últimos 30 días.</p></div>
+        <div>
+          <p className="text-xs uppercase tracking-wider text-brand-secondary font-bold">Resumen operativo</p>
+          <div className="flex flex-wrap items-center gap-3 mt-1">
+            <h1 className="text-2xl font-black text-brand-primary">Dashboard</h1>
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="h-9 px-3 border border-border rounded-button bg-white text-xs font-semibold text-brand-primary cursor-pointer"
+            >
+              <option value="1">Hoy (últimas 24 horas)</option>
+              <option value="7">Últimos 7 días</option>
+              <option value="30">Últimos 30 días</option>
+            </select>
+          </div>
+          <p className="text-sm text-brand-secondary mt-1">
+            {timeRange === "1"
+              ? "Actividad de las últimas 24 horas."
+              : `Actividad de los últimos ${timeRange} días.`}
+          </p>
+        </div>
         <Button variant="outline" size="sm" onClick={() => navigate("/admin/pedidos")}>Ver pedidos <ArrowRight className="h-4 w-4 ml-2" /></Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <KpiCard title="Ventas del período" value={money(metrics.sales)} helper="Pedidos pagados o en despacho" icon={DollarSign} />
+        <KpiCard title="Ventas del período" value={money(metrics.sales)} helper="Pedidos con pago confirmado" icon={DollarSign} />
         <KpiCard title="Pedidos pendientes" value={metrics.pending} helper={`${metrics.completed} completados`} icon={ShoppingCart} />
         <KpiCard title="Ticket promedio" value={money(metrics.average)} helper="Por pedido pagado" icon={TrendingUp} />
         <KpiCard title="Prendas despachadas" value={metrics.units} helper="Unidades en pedidos del período" icon={PackageCheck} />

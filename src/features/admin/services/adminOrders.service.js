@@ -29,7 +29,7 @@ const ORDER_SELECT = `
   id, order_number, customer_id, customer_name, customer_email, customer_phone,
   delivery_address, scheduled_time_slot, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_gateway_tx_id, status, payment_status,
-  invoice_type, invoice_data, created_at, updated_at,
+  invoice_type, invoice_data, created_at, updated_at, assigned_delivery_id,
   profiles:customer_id (
     id, dni, first_name, paternal_surname, maternal_surname, email, phone
   )
@@ -104,9 +104,73 @@ export async function updateOrderStatus(orderId, status) {
   return data;
 }
 
-export async function getDashboardOrders(days = 30) {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+/**
+ * Obtiene la lista de usuarios con rol de repartidor
+ */
+export async function getDeliveryStaff() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, first_name, paternal_surname, phone")
+    .eq("role", "delivery");
+
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Actualizar datos del repartidor en tabla profiles
+ */
+export async function updateDeliveryStaff(id, payload) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      first_name: payload.first_name,
+      paternal_surname: payload.paternal_surname,
+      maternal_surname: payload.maternal_surname,
+      phone: payload.phone,
+      dni: payload.dni,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Asigna un repartidor a una orden y actualiza su estado si está en 'received'
+ */
+export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
+  const nextStatus = currentStatus === "received" ? "en_preparacion" : currentStatus;
+  
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      assigned_delivery_id: deliveryId || null,
+      status: nextStatus,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", orderId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function getDashboardOrders(rangeOrDate = 30) {
+  let since;
+  if (rangeOrDate instanceof Date) {
+    since = rangeOrDate;
+  } else if (typeof rangeOrDate === "string" && (rangeOrDate.includes("T") || rangeOrDate.includes("-"))) {
+    since = new Date(rangeOrDate);
+  } else {
+    const days = Number(rangeOrDate || 30);
+    const ms = days === 1 ? 24 * 60 * 60 * 1000 : days * 24 * 60 * 60 * 1000;
+    since = new Date(Date.now() - ms);
+  }
 
   const { data, error } = await supabase
     .from("orders")
@@ -119,6 +183,40 @@ export async function getDashboardOrders(days = 30) {
 
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Calcula el total de ventas sumando total_amount donde payment_status = 'paid' y status != 'cancelado'
+ */
+export function calculateDashboardSales(orders = []) {
+  return orders
+    .filter(
+      (order) =>
+        (order.payment_status === "paid" || order.payment_status === "pagado") &&
+        order.status !== "cancelado" &&
+        order.status !== "cancelled",
+    )
+    .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+}
+
+/**
+ * Consulta de ventas totales acumuladas en Supabase filtradas por fecha_inicio
+ */
+export async function getDashboardTotalSales(sinceDate) {
+  let query = supabase
+    .from("orders")
+    .select("total_amount, payment_status, status")
+    .in("payment_status", ["paid", "pagado"])
+    .not("status", "in", '("cancelado","cancelled")');
+
+  if (sinceDate) {
+    const iso = sinceDate instanceof Date ? sinceDate.toISOString() : sinceDate;
+    query = query.gte("created_at", iso);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
 }
 
 export async function getOrderItemsForDashboard(orderIds) {

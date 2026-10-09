@@ -198,9 +198,73 @@ export default function OrderTrackingView() {
     }
   };
 
+  const orderId = order?.id;
+
+  // Suscripción WebSocket a Supabase Realtime para actualizaciones de estado
+  useEffect(() => {
+    if (!orderId) return;
+
+    const channel = supabase
+      .channel(`order-tracking-${orderId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+          filter: `id=eq.${orderId}`,
+        },
+        (payload) => {
+          // Actualización inmediata del estado de la orden en el cliente
+          if (payload.new) {
+            setOrder((prev) => ({
+              ...prev,
+              ...payload.new,
+              // Preservar relaciones anidadas existentes si el payload no las incluye
+              order_items: prev?.order_items || payload.new.order_items,
+              addresses: prev?.addresses || payload.new.addresses,
+              items: prev?.items || payload.new.items,
+            }));
+          }
+        },
+      )
+      .subscribe((status, err) => {
+        if (status === "SUBSCRIBED") {
+          console.log(`[Realtime] Conectado al seguimiento del pedido ${orderId}`);
+        }
+        if (status === "CHANNEL_ERROR") {
+          console.error("[Realtime] Error en canal de seguimiento:", err);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [orderId]);
+
   const currentStep = useMemo(() => {
     const status = String(order?.status || "received").toLowerCase();
     return STATUS_INDEX[status] ?? STATUS_INDEX.received;
+  }, [order?.status]);
+
+  const statusBadge = useMemo(() => {
+    const status = String(order?.status || "").toLowerCase();
+    switch (status) {
+      case "delivered":
+      case "entregado":
+        return { label: "Pedido Entregado", variant: "success" };
+      case "nearby":
+      case "cerca":
+        return { label: "Cerca a tu ubicación", variant: "warning" };
+      case "dispatched":
+      case "en_camino":
+        return { label: "En Camino", variant: "warning" };
+      case "preparing":
+      case "en_preparacion":
+        return { label: "En Preparación", variant: "neutral" };
+      default:
+        return { label: "Pedido en Proceso", variant: "neutral" };
+    }
   }, [order?.status]);
 
   const deliveryTypeLabel = useMemo(() => {
@@ -375,10 +439,10 @@ export default function OrderTrackingView() {
       <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 sm:flex-row sm:items-end">
         <div className="space-y-1.5">
           <Badge
-            variant={currentStep === 4 ? "success" : "neutral"}
+            variant={statusBadge.variant}
             className="text-xs font-mono"
           >
-            {currentStep === 4 ? "Pedido Entregado" : "Pedido en Proceso"}
+            {statusBadge.label}
           </Badge>
           <h1 className="text-2xl font-bold text-brand-primary">
             Seguimiento de Pedido

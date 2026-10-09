@@ -32,6 +32,7 @@ import { useAuth } from "../../context/AuthContext";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 import Input from "../../components/ui/Input";
+import LocationPickerMap from "../../components/ui/LocationPickerMap";
 import { fetchDni, fetchRuc } from "../../services/api/decolectaService";
 import { createOrder } from "../../services/api/checkoutService";
 import { supabase } from "../../services/supabase";
@@ -190,6 +191,8 @@ export default function CheckoutView() {
   const [selectedSavedAddressId, setSelectedSavedAddressId] = useState(null);
   const [saveAddressForFuture, setSaveAddressForFuture] = useState(false);
   const [newAddressAlias, setNewAddressAlias] = useState("Casa");
+  const [deliveryLatitude, setDeliveryLatitude] = useState(null);
+  const [deliveryLongitude, setDeliveryLongitude] = useState(null);
 
   // Cargar zonas de despacho dinámicamente desde Supabase
   useEffect(() => {
@@ -236,6 +239,12 @@ export default function CheckoutView() {
           setSelectedZoneId(Number(defaultAddr.zone_id));
           setDeliveryAddress(defaultAddr.street_address || "");
           setDeliveryReference(defaultAddr.reference || "");
+          setDeliveryLatitude(
+            defaultAddr.latitude != null ? Number(defaultAddr.latitude) : null,
+          );
+          setDeliveryLongitude(
+            defaultAddr.longitude != null ? Number(defaultAddr.longitude) : null,
+          );
 
           if (defaultAddr.receiver_phone) {
             setPhone(defaultAddr.receiver_phone.replace(/\D/g, "").slice(0, 9));
@@ -273,6 +282,12 @@ export default function CheckoutView() {
     setSelectedZoneId(Number(addr.zone_id));
     setDeliveryAddress(addr.street_address || "");
     setDeliveryReference(addr.reference || "");
+    setDeliveryLatitude(
+      addr.latitude != null ? Number(addr.latitude) : null,
+    );
+    setDeliveryLongitude(
+      addr.longitude != null ? Number(addr.longitude) : null,
+    );
 
     if (addr.receiver_phone) {
       setPhone(addr.receiver_phone.replace(/\D/g, "").slice(0, 9));
@@ -294,6 +309,8 @@ export default function CheckoutView() {
     setSelectedSavedAddressId(null);
     setDeliveryAddress("");
     setDeliveryReference("");
+    setDeliveryLatitude(null);
+    setDeliveryLongitude(null);
   };
 
   // Cálculo dinámico de ventana de envío express (hora actual + 45min a + 90min)
@@ -393,6 +410,8 @@ export default function CheckoutView() {
     newAddressAlias,
     selectedZoneId,
     savedAddresses,
+    deliveryLatitude,
+    deliveryLongitude,
   };
 
   // Guardar dirección manual en la cuenta si el usuario autenticado lo solicitó
@@ -416,6 +435,8 @@ export default function CheckoutView() {
             receiver_name: `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim(),
             receiver_phone: ctx.phone.trim(),
             is_default: (ctx.savedAddresses || []).length === 0,
+            latitude: ctx.deliveryLatitude || null,
+            longitude: ctx.deliveryLongitude || null,
             updated_at: new Date().toISOString(),
           },
         ]);
@@ -447,6 +468,23 @@ export default function CheckoutView() {
       ? ctx.selectedSavedAddressId
       : null;
 
+    const selectedAddress =
+      ctx.deliveryType !== "pickup" && ctx.selectedAddressMode === "saved"
+        ? (ctx.savedAddresses || []).find(
+            (a) => a.id === ctx.selectedSavedAddressId,
+          )
+        : null;
+
+    const deliveryLatitude =
+      ctx.deliveryType === "pickup"
+        ? null
+        : (selectedAddress?.latitude ?? ctx.deliveryLatitude ?? null);
+
+    const deliveryLongitude =
+      ctx.deliveryType === "pickup"
+        ? null
+        : (selectedAddress?.longitude ?? ctx.deliveryLongitude ?? null);
+
     const invoicePrefix =
       ctx.receiptType === "factura"
         ? "F001"
@@ -474,6 +512,10 @@ export default function CheckoutView() {
       customerPhone: ctx.phone.trim(),
       deliveryType: ctx.deliveryType,
       deliveryAddress: finalAddress,
+      delivery_latitude: deliveryLatitude,
+      deliveryLatitude: deliveryLatitude,
+      delivery_longitude: deliveryLongitude,
+      deliveryLongitude: deliveryLongitude,
       shipping_address_id: shippingAddressId,
       shippingAddressId: shippingAddressId,
       deliveryZoneId:
@@ -746,6 +788,21 @@ export default function CheckoutView() {
       ? selectedSavedAddressId
       : null;
 
+    const selectedAddress =
+      deliveryType !== "pickup" && selectedAddressMode === "saved"
+        ? (savedAddresses || []).find((a) => a.id === selectedSavedAddressId)
+        : null;
+
+    const resolvedLatitude =
+      deliveryType === "pickup"
+        ? null
+        : (selectedAddress?.latitude ?? deliveryLatitude ?? null);
+
+    const resolvedLongitude =
+      deliveryType === "pickup"
+        ? null
+        : (selectedAddress?.longitude ?? deliveryLongitude ?? null);
+
     await maybeSaveNewAddress();
 
     const invoicePrefix =
@@ -777,6 +834,10 @@ export default function CheckoutView() {
       customerPhone: phone.trim(),
       deliveryType,
       deliveryAddress: finalAddress,
+      delivery_latitude: resolvedLatitude,
+      deliveryLatitude: resolvedLatitude,
+      delivery_longitude: resolvedLongitude,
+      deliveryLongitude: resolvedLongitude,
       shipping_address_id: shippingAddressId,
       shippingAddressId: shippingAddressId,
       deliveryZoneId:
@@ -1554,6 +1615,25 @@ export default function CheckoutView() {
                               }
                               required
                             />
+
+                            {/* Georreferenciación en mapa con Leaflet */}
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
+                                Ubicación en el Mapa (Pin de Entrega)
+                              </label>
+                              <LocationPickerMap
+                                latitude={deliveryLatitude}
+                                longitude={deliveryLongitude}
+                                onChange={({ lat, lng }) => {
+                                  setDeliveryLatitude(lat);
+                                  setDeliveryLongitude(lng);
+                                }}
+                                height="h-52"
+                              />
+                              <p className="mt-1 text-[11px] text-brand-muted">
+                                Puedes hacer clic en el mapa o usar tu ubicación actual para asegurar una llegada exacta.
+                              </p>
+                            </div>
 
                             <div className="pt-2 border-t border-border space-y-2">
                               <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-brand-primary select-none">

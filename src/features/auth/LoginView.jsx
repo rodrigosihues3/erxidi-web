@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
 import Button from "../../components/ui/Button";
@@ -28,10 +28,21 @@ import {
 } from "lucide-react";
 
 export default function LoginView() {
-  const [activeTab, setActiveTab] = useState("login"); // 'login' | 'register'
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") === "register" ? "register" : "login";
+  const [activeTab, setActiveTab] = useState(initialTab); // 'login' | 'register'
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "register") {
+      setActiveTab("register");
+    } else if (tabParam === "login") {
+      setActiveTab("login");
+    }
+  }, [searchParams]);
 
   const redirectPath = location.state?.from?.pathname || "/catalogo";
 
@@ -128,7 +139,7 @@ export default function LoginView() {
     setLoginLoading(true);
 
     try {
-      const { error } = await signIn(loginEmail.trim(), loginPassword);
+      const { data: authData, error } = await signIn(loginEmail.trim(), loginPassword);
       if (error) {
         if (error.message.includes("Invalid login credentials")) {
           throw new Error("El correo o la contraseña son incorrectos.");
@@ -137,7 +148,24 @@ export default function LoginView() {
           throw error;
         }
       }
-      navigate(redirectPath, { replace: true });
+
+      let dest = redirectPath;
+      if (dest === "/catalogo" || dest === "/") {
+        const uid = authData?.user?.id || (await supabase.auth.getUser()).data?.user?.id;
+        if (uid) {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", uid)
+            .maybeSingle();
+          if (prof?.role === "delivery") {
+            dest = "/reparto";
+          } else if (prof?.role === "owner") {
+            dest = "/admin";
+          }
+        }
+      }
+      navigate(dest, { replace: true });
     } catch (err) {
       setLoginError(err.message || "No se pudo iniciar sesión. Verifica tus datos.");
     } finally {

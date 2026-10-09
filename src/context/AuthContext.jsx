@@ -19,6 +19,9 @@ export function AuthProvider({ children }) {
 
       if (error) throw error;
       setProfile(data);
+      if (data?.role && typeof window !== "undefined") {
+        sessionStorage.setItem("erxidi_user_role", data.role);
+      }
     } catch (err) {
       console.error("Error al resolver perfil de usuario:", err.message);
       setProfile(null);
@@ -27,17 +30,17 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // 1. Obtener la sesión activa al montar
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
-        fetchProfile(session.user.id);
+        await fetchProfile(session.user.id);
       } else if (typeof window !== "undefined") {
         const cachedUnconfirmed = sessionStorage.getItem("erxidi_unconfirmed_user");
         if (cachedUnconfirmed) {
           try {
             const parsed = JSON.parse(cachedUnconfirmed);
             setUser(parsed);
-            fetchProfile(parsed.id);
+            await fetchProfile(parsed.id);
           } catch (e) {
             // Ignorar error de parseo
           }
@@ -140,18 +143,26 @@ export function AuthProvider({ children }) {
   const signOut = async () => {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("erxidi_unconfirmed_user");
+      sessionStorage.removeItem("erxidi_user_role");
     }
     setUser(null);
     setProfile(null);
     return supabase.auth.signOut();
   };
 
+  const cachedRole =
+    typeof window !== "undefined"
+      ? sessionStorage.getItem("erxidi_user_role")
+      : null;
+  const resolvedRole =
+    profile?.role ?? user?.user_metadata?.role ?? cachedRole ?? "customer";
+
   const value = {
     user,
     profile,
-    role: profile?.role ?? "customer",
-    isOwner: profile?.role === "owner",
-    isDelivery: profile?.role === "delivery",
+    role: resolvedRole,
+    isOwner: resolvedRole === "owner",
+    isDelivery: resolvedRole === "delivery",
     loading,
     signIn,
     signUp,

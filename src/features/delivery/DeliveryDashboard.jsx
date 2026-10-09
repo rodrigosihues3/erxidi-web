@@ -75,11 +75,14 @@ function OrderCard({ order, isOpen, onToggle, onChangeStatus, isUpdating }) {
   const addressText =
     order.delivery_address ??
     (address ? `${address.street_address}, ${address.district}` : null);
-  const mapsUrl = addressText
-    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-        `${addressText}, Lima, Perú`,
-      )}`
-    : null;
+  const mapsUrl =
+    order.delivery_latitude && order.delivery_longitude
+      ? `https://www.google.com/maps/dir/?api=1&destination=${order.delivery_latitude},${order.delivery_longitude}`
+      : addressText
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `${addressText}, Lima, Perú`,
+          )}`
+        : null;
 
   return (
     <Card className="!p-0 overflow-hidden">

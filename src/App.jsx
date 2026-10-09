@@ -196,24 +196,8 @@ export default function App() {
                 />
                 <Route path="/mis-pedidos" element={<OrdersHistoryView />} />
               </Route>
-              </Route>
 
-
-              {/* Backoffice: solo owner/admin. El esquema actual permite owner como rol administrativo. */}
-              <Route element={<AdminProtectedRoute />}>
-                <Route element={<AdminLayout />}>
-                  <Route path="/admin" element={<DashboardView />} />
-                  <Route path="/admin/pedidos" element={<OrdersListView />} />
-                  <Route path="/admin/pedidos/:orderNumber" element={<OrderDetailView />} />
-                  <Route path="/admin/productos" element={<ProductsListView />} />
-                  <Route path="/admin/productos/nuevo" element={<ProductFormView />} />
-                  <Route path="/admin/productos/:id/editar" element={<ProductFormView />} />
-                  <Route path="/admin/categorias" element={<CategoriesView />} />
-                  <Route path="/admin/repartidores" element={<DeliveryUsersView />} />
-                </Route>
-              </Route>
-
-              {/* Ruta exclusiva de repartidor: Bloqueada para clientes comunes */}
+              {/* Ruta exclusiva de repartidor: Con Navbar mediante MainLayout */}
               <Route element={<ProtectedRoute allowedRoles={["delivery"]} />}>
                 <Route
                   path="/reparto"
@@ -224,7 +208,21 @@ export default function App() {
                   }
                 />
               </Route>
-            
+            </Route>
+
+            {/* Backoffice: solo owner/admin. El esquema actual permite owner como rol administrativo. */}
+            <Route element={<AdminProtectedRoute />}>
+              <Route element={<AdminLayout />}>
+                <Route path="/admin" element={<DashboardView />} />
+                <Route path="/admin/pedidos" element={<OrdersListView />} />
+                <Route path="/admin/pedidos/:orderNumber" element={<OrderDetailView />} />
+                <Route path="/admin/productos" element={<ProductsListView />} />
+                <Route path="/admin/productos/nuevo" element={<ProductFormView />} />
+                <Route path="/admin/productos/:id/editar" element={<ProductFormView />} />
+                <Route path="/admin/categorias" element={<CategoriesView />} />
+                <Route path="/admin/repartidores" element={<DeliveryUsersView />} />
+              </Route>
+            </Route>
           </Routes>
         </CartProvider>
       </AuthProvider>

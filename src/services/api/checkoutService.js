@@ -16,6 +16,14 @@ export async function createOrder(orderPayload) {
     customer_phone: orderPayload.customerPhone,
     delivery_type: orderPayload.deliveryType || "scheduled",
     delivery_address: orderPayload.deliveryAddress,
+    delivery_latitude:
+      orderPayload.delivery_latitude ??
+      orderPayload.deliveryLatitude ??
+      null,
+    delivery_longitude:
+      orderPayload.delivery_longitude ??
+      orderPayload.deliveryLongitude ??
+      null,
     shipping_address_id:
       orderPayload.shipping_address_id ||
       orderPayload.shippingAddressId ||

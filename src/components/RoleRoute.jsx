@@ -7,21 +7,23 @@ import { useAuth } from "../context/AuthContext";
  * y protege /reparto evitando el ingreso de clientes comunes.
  */
 export function DeliveryOnlyRoute({ children }) {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, role, isDelivery, loading } = useAuth();
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
-  if (profile?.role !== "delivery") return <Navigate to="/" replace />;
+  if (role !== "delivery" && profile?.role !== "delivery" && !isDelivery) {
+    return <Navigate to="/" replace />;
+  }
 
   return children;
 }
 
 export function ShopCustomerRoute({ children }) {
-  const { profile, loading } = useAuth();
+  const { profile, role, isDelivery, loading } = useAuth();
 
   if (loading) return null;
   // Si el usuario autenticado es delivery, no puede ver el catálogo ni comprar
-  if (profile?.role === "delivery") {
+  if (role === "delivery" || profile?.role === "delivery" || isDelivery) {
     return <Navigate to="/reparto" replace />;
   }
 

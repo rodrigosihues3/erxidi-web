@@ -14,6 +14,7 @@ const ORDERS_SELECT = `
   id, order_number, status, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_status, created_at, updated_at,
   customer_name, customer_phone, delivery_address, scheduled_time_slot,
+  delivery_latitude, delivery_longitude,
   items:order_items(
     id, quantity, unit_price, subtotal,
     variant:product_variants(

@@ -5,7 +5,13 @@ import { supabase } from "../../../services/supabase";
 import Button from "../../../components/ui/Button";
 import { Card, CardHeader, CardTitle, CardContent } from "../../../components/ui/Card";
 import OrderStatusBadge from "../components/OrderStatusBadge";
-import { getOrderDetail, ORDER_STATUS, updateOrderStatus } from "../services/adminOrders.service";
+import {
+  getOrderDetail,
+  ORDER_STATUS,
+  updateOrderStatus,
+  getDeliveryStaff,
+  assignOrderDelivery,
+} from "../services/adminOrders.service";
 
 const transitions = [ORDER_STATUS.RECEIVED, ORDER_STATUS.PREPARING, ORDER_STATUS.DISPATCHED, ORDER_STATUS.DELIVERED, ORDER_STATUS.CANCELLED];
 const labels = { received: "Recibido", en_preparacion: "En preparación", en_camino: "En camino", entregado: "Entregado", cancelado: "Cancelado" };
@@ -16,6 +22,7 @@ export default function OrderDetailView() {
   const { orderNumber } = useParams();
   const navigate = useNavigate();
   const [order, setOrder] = useState(null);
+  const [deliveryStaff, setDeliveryStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -25,7 +32,12 @@ export default function OrderDetailView() {
     try {
       const { data, error: queryError } = await supabase.from("orders").select("id").eq("order_number", orderNumber).single();
       if (queryError) throw queryError;
-      setOrder(await getOrderDetail(data.id));
+      const [detail, staff] = await Promise.all([
+        getOrderDetail(data.id),
+        getDeliveryStaff().catch(() => []),
+      ]);
+      setOrder(detail);
+      setDeliveryStaff(staff);
     } catch (err) { setError(err.message || "No se pudo cargar el pedido."); }
     finally { setLoading(false); }
   }
@@ -38,8 +50,14 @@ export default function OrderDetailView() {
       try {
         const { data, error: queryError } = await supabase.from("orders").select("id").eq("order_number", orderNumber).single();
         if (queryError) throw queryError;
-        const detail = await getOrderDetail(data.id);
-        if (!cancelled) setOrder(detail);
+        const [detail, staff] = await Promise.all([
+          getOrderDetail(data.id),
+          getDeliveryStaff().catch(() => []),
+        ]);
+        if (!cancelled) {
+          setOrder(detail);
+          setDeliveryStaff(staff);
+        }
       } catch (err) {
         if (!cancelled) setError(err.message || "No se pudo cargar el pedido.");
       } finally {
@@ -68,6 +86,20 @@ export default function OrderDetailView() {
     finally { setSaving(false); }
   }
 
+  async function handleAssignDelivery(deliveryId) {
+    if (!order) return;
+    setSaving(true);
+    try {
+      const updated = await assignOrderDelivery(order.id, deliveryId, order.status);
+      setOrder((current) => ({ ...current, ...updated, assigned_delivery_id: deliveryId }));
+      window.alert("Repartidor asignado correctamente.");
+    } catch (err) {
+      window.alert(err.message || "Error al asignar repartidor.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) return <Card><p className="text-sm text-brand-secondary">Cargando pedido...</p></Card>;
   if (error) return <Card><p className="text-sm text-status-danger-text">{error}</p><Button variant="outline" size="sm" className="mt-4" onClick={load}>Reintentar</Button></Card>;
   if (!order) return null;
@@ -80,7 +112,41 @@ export default function OrderDetailView() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div className="flex items-center gap-3"><Button variant="ghost" size="sm" onClick={() => navigate("/admin/pedidos")}><ArrowLeft className="h-4 w-4 mr-1" /> Pedidos</Button><div><p className="text-xs text-brand-secondary">Detalle de pedido</p><h1 className="text-2xl font-black">#{order.order_number}</h1></div></div><Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-4 w-4 mr-2" /> Actualizar</Button></div>
 
-      <Card><CardHeader><CardTitle>Control operativo</CardTitle></CardHeader><CardContent><div className="flex flex-wrap items-center gap-3"><OrderStatusBadge status={order.status} /><select disabled={saving} value={order.status} onChange={(e) => changeStatus(e.target.value)} className="h-10 px-3 border border-border rounded-button bg-white text-sm">{transitions.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select><p className="text-xs text-brand-secondary">El cambio se refleja mediante Supabase Realtime en el seguimiento del cliente.</p></div></CardContent></Card>
+      <Card>
+        <CardHeader><CardTitle>Control operativo</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-3">
+            <OrderStatusBadge status={order.status} />
+            <select disabled={saving} value={order.status} onChange={(e) => changeStatus(e.target.value)} className="h-10 px-3 border border-border rounded-button bg-white text-sm">
+              {transitions.map((status) => <option key={status} value={status}>{labels[status]}</option>)}
+            </select>
+            <p className="text-xs text-brand-secondary">El cambio se refleja mediante Supabase Realtime en el seguimiento del cliente.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-4 pt-4 border-t border-border">
+            <label className="text-xs font-bold text-brand-primary">
+              Repartidor asignado:
+            </label>
+            <select
+              disabled={saving || order.delivery_type === "pickup"}
+              value={order.assigned_delivery_id || ""}
+              onChange={(e) => handleAssignDelivery(e.target.value)}
+              className="h-10 px-3 border border-border rounded-button bg-white text-sm"
+            >
+              <option value="">-- Sin asignar --</option>
+              {deliveryStaff.map((staff) => (
+                <option key={staff.id} value={staff.id}>
+                  {staff.first_name} {staff.paternal_surname || ""} ({staff.phone || "Sin tel."})
+                </option>
+              ))}
+            </select>
+            {order.delivery_type === "pickup" && (
+              <span className="text-xs text-brand-muted">
+                (Pedido con recojo en tienda, no requiere repartidor)
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Card><CardHeader><CardTitle>Cliente y despacho</CardTitle></CardHeader><CardContent><Info label="Nombre" value={order.customer_name || [profile?.first_name, profile?.paternal_surname, profile?.maternal_surname].filter(Boolean).join(" ")} /><Info label="DNI" value={profile?.dni} /><Info label="Teléfono" value={order.customer_phone || profile?.phone} /><Info label="Correo" value={order.customer_email || profile?.email} /><Info label="Dirección" value={order.delivery_address || address?.street_address} /><Info label="Referencia" value={address?.reference} /><Info label="Distrito" value={address?.delivery_zones?.district_name} /><Info label="Franja" value={order.scheduled_time_slot} /></CardContent></Card>

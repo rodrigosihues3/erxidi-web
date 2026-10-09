@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   ShoppingCart,
   Menu,
@@ -10,15 +10,17 @@ import {
   ChevronDown,
   Package,
   ShieldCheck,
+  Truck,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
 import Button from "../ui/Button";
 
 export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
-  const { user, profile, role, signOut } = useAuth();
+  const { user, profile, role, isDelivery: authIsDelivery, signOut } = useAuth();
   const { totalUnits } = useCart();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
@@ -65,32 +67,66 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
     await signOut();
-    navigate("/");
+    navigate("/login");
   };
 
-  const isDelivery = profile?.role === "delivery";
+  // Evaluación robusta considerando auth context, profile, metadata y ruta actual
+  const isDelivery =
+    authIsDelivery ||
+    role === "delivery" ||
+    profile?.role === "delivery" ||
+    user?.user_metadata?.role === "delivery" ||
+    user?.app_metadata?.role === "delivery" ||
+    location.pathname.startsWith("/reparto");
+
+  // -----------------------------------------------------------------
+  // 1. HEADER EXCLUSIVO PARA REPARTIDOR (Visible en Móvil y Desktop)
+  // -----------------------------------------------------------------
   if (isDelivery) {
-    // Navbar minimalista exclusivo para repartidor
     return (
-      <header className="border-b border-border bg-surface-card px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="font-extrabold text-lg text-brand-primary">
-            ERXIDI
-          </span>
-          <span className="text-[11px] font-mono uppercase bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded border border-amber-500/20 font-bold">
-            Módulo Repartidor
-          </span>
+      <header className="sticky top-0 z-40 w-full border-b border-border bg-surface-card px-4 py-3 shadow-xs">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Link
+              to="/reparto"
+              className="font-extrabold text-base sm:text-lg text-brand-primary tracking-tight hover:opacity-80 transition-opacity flex items-center gap-2"
+              aria-label="ERXIDI Reparto"
+            >
+              ERXIDI
+            </Link>
+            <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold uppercase bg-amber-500/10 text-amber-700 border border-amber-500/20 px-2 py-0.5 rounded-badge shrink-0">
+              <Truck className="w-3.5 h-3.5" />
+              Reparto
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-amber-500/20 text-amber-800 flex items-center justify-center font-bold text-xs shrink-0">
+                {userInitial}
+              </span>
+              <span className="text-xs font-semibold text-brand-primary hidden sm:inline truncate max-w-[150px]">
+                {displayName}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-button text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors cursor-pointer"
+              title="Cerrar sesión de repartidor"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Cerrar sesión</span>
+            </button>
+          </div>
         </div>
-        <button
-          onClick={handleSignOut}
-          className="text-xs text-brand-secondary hover:text-brand-primary underline"
-        >
-          Cerrar sesión
-        </button>
       </header>
     );
   }
 
+  // -----------------------------------------------------------------
+  // 2. HEADER GENERAL DE TIENDA Y ADMINISTRACIÓN
+  // -----------------------------------------------------------------
   return (
     <header className="sticky top-0 z-40 bg-brand-primary/95 backdrop-blur-md border-b border-border/20 text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -169,6 +205,18 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                   </Link>
                 )}
 
+                {/* Botón Panel Reparto para Repartidores */}
+                {(role === "delivery" || profile?.role === "delivery" || isDelivery) && (
+                  <Link
+                    to="/reparto"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-button text-xs font-semibold text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 transition-colors"
+                    title="Ir al panel de reparto"
+                  >
+                    <Truck className="w-4 h-4 text-amber-300" />
+                    <span>Panel Reparto</span>
+                  </Link>
+                )}
+
                 {/* Dropdown de Usuario con Perfil y Mis Pedidos */}
                 <div className="relative" ref={userMenuRef}>
                   <button
@@ -221,6 +269,17 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                         Mis Pedidos
                       </Link>
 
+                      {(role === "delivery" || profile?.role === "delivery" || isDelivery) && (
+                        <Link
+                          to="/reparto"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors"
+                        >
+                          <Truck className="w-4 h-4 text-amber-600" />
+                          Panel de Reparto
+                        </Link>
+                      )}
+
                       <div className="my-1 border-t border-border" />
 
                       <button
@@ -236,15 +295,26 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 </div>
               </div>
             ) : (
-              <Link to="/login">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="bg-accent hover:bg-accent-hover text-white text-xs font-semibold px-4 h-8"
-                >
-                  Ingresar
-                </Button>
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link to="/login?tab=register">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-white/20 bg-transparent text-white hover:bg-white/10 text-xs font-semibold px-3 h-8"
+                  >
+                    Registrarse
+                  </Button>
+                </Link>
+                <Link to="/login">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="bg-accent hover:bg-accent-hover text-white text-xs font-semibold px-4 h-8"
+                  >
+                    Ingresar
+                  </Button>
+                </Link>
+              </div>
             )}
           </div>
 
@@ -291,7 +361,6 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
           <div className="pt-3 border-t border-border/20">
             {user ? (
               <div className="space-y-2">
-                {/* Botón Admin en móvil si es dueña */}
                 {(role === "owner" ||
                   role === "admin" ||
                   profile?.role === "owner") && (
@@ -302,6 +371,17 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                   >
                     <ShieldCheck className="w-4 h-4 text-accent" />
                     <span>Panel Admin</span>
+                  </Link>
+                )}
+
+                {(role === "delivery" || profile?.role === "delivery" || isDelivery) && (
+                  <Link
+                    to="/reparto"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-button text-sm font-semibold text-amber-300 bg-white/10 hover:bg-accent transition-colors"
+                  >
+                    <Truck className="w-4 h-4" />
+                    <span>Panel de Reparto</span>
                   </Link>
                 )}
 
@@ -349,19 +429,34 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 </div>
               </div>
             ) : (
-              <Link
-                to="/login"
-                onClick={() => setMobileMenuOpen(false)}
-                className="block"
-              >
-                <Button
-                  variant="primary"
-                  size="md"
-                  className="w-full bg-accent hover:bg-accent-hover text-white text-sm"
+              <div className="grid grid-cols-2 gap-2">
+                <Link
+                  to="/login?tab=register"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block"
                 >
-                  Ingresar
-                </Button>
-              </Link>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-white/20 bg-transparent text-white hover:bg-white/10 text-xs font-semibold h-8"
+                  >
+                    Registrarse
+                  </Button>
+                </Link>
+                <Link
+                  to="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block"
+                >
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-8"
+                  >
+                    Ingresar
+                  </Button>
+                </Link>
+              </div>
             )}
           </div>
         </div>
