@@ -11,7 +11,7 @@ import "leaflet/dist/leaflet.css";
 import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
 import iconUrl from "leaflet/dist/images/marker-icon.png";
 import shadowUrl from "leaflet/dist/images/marker-shadow.png";
-import { Crosshair, Loader2, MapPin } from "lucide-react";
+import { Crosshair, Loader2, MapPin, Search } from "lucide-react";
 
 // Corregir el icono roto por defecto de Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -33,11 +33,16 @@ function MapEventsHandler({ onSelect }) {
   return null;
 }
 
-function MapCenterController({ position }) {
+function MapCenterController({ position, flyToTarget }) {
   const map = useMap();
   const lastPosRef = useRef(null);
 
   useEffect(() => {
+    if (flyToTarget && flyToTarget.lat && flyToTarget.lng) {
+      map.flyTo([flyToTarget.lat, flyToTarget.lng], 16, { duration: 1.2 });
+      return;
+    }
+
     if (
       position &&
       Array.isArray(position) &&
@@ -46,9 +51,9 @@ function MapCenterController({ position }) {
         lastPosRef.current[1] !== position[1])
     ) {
       lastPosRef.current = position;
-      map.setView(position, Math.max(map.getZoom(), 15));
+      map.flyTo(position, Math.max(map.getZoom(), 15), { duration: 1.2 });
     }
-  }, [position, map]);
+  }, [position, flyToTarget, map]);
 
   return null;
 }
@@ -59,9 +64,51 @@ export default function LocationPickerMap({
   onChange,
   className = "",
   height = "h-64",
+  searchQuery = "",
 }) {
   const [isLocating, setIsLocating] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [localSearchText, setLocalSearchText] = useState("");
+  const [flyToTarget, setFlyToTarget] = useState(null);
   const markerRef = useRef(null);
+  const lastExecutedSearchRef = useRef("");
+
+  const searchAddress = async (text) => {
+    const q = (text || "").trim();
+    if (!q || q.length < 5) return;
+    if (lastExecutedSearchRef.current === q) return;
+    lastExecutedSearchRef.current = q;
+    setIsSearching(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+        q + ", Lima, Peru",
+      )}&limit=1`;
+      const res = await fetch(url, {
+        headers: { "Accept-Language": "es" },
+      });
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const foundLat = parseFloat(data[0].lat);
+        const foundLng = parseFloat(data[0].lon);
+        setFlyToTarget({ lat: foundLat, lng: foundLng });
+        onChange?.({ lat: foundLat, lng: foundLng });
+      }
+    } catch (err) {
+      console.warn("Error geocodificando en LocationPickerMap:", err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Reaccionar al prop searchQuery si cambia con longitud >= 5
+  useEffect(() => {
+    if (searchQuery && searchQuery.trim().length >= 5) {
+      const timer = setTimeout(() => {
+        searchAddress(searchQuery);
+      }, 700);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery]);
 
   const isValidCoord =
     typeof latitude === "number" &&
@@ -140,18 +187,51 @@ export default function LocationPickerMap({
 
         <MapEventsHandler onSelect={handleMapClick} />
 
+        <MapCenterController
+          position={markerPosition}
+          flyToTarget={flyToTarget}
+        />
+
         {markerPosition && (
-          <>
-            <Marker
-              draggable={true}
-              eventHandlers={eventHandlers}
-              position={markerPosition}
-              ref={markerRef}
-            />
-            <MapCenterController position={markerPosition} />
-          </>
+          <Marker
+            draggable={true}
+            eventHandlers={eventHandlers}
+            position={markerPosition}
+            ref={markerRef}
+          />
         )}
       </MapContainer>
+
+      {/* Buscador de dirección rápido en la esquina superior izquierda */}
+      <div className="absolute top-2.5 left-2.5 z-[1000] max-w-[210px] sm:max-w-xs w-full">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            searchAddress(localSearchText);
+          }}
+          className="flex items-center bg-white/95 backdrop-blur-sm rounded-button border border-border shadow-md overflow-hidden"
+        >
+          <input
+            type="text"
+            placeholder="Buscar calle o ref..."
+            value={localSearchText}
+            onChange={(e) => setLocalSearchText(e.target.value)}
+            className="w-full px-2.5 py-1 text-xs text-brand-primary placeholder:text-brand-muted bg-transparent focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={isSearching || localSearchText.trim().length < 3}
+            className="p-1.5 text-brand-secondary hover:text-accent disabled:opacity-40"
+            title="Buscar dirección"
+          >
+            {isSearching ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+            ) : (
+              <Search className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </form>
+      </div>
 
       {/* Botón flotante: Usar mi ubicación actual */}
       <div className="absolute top-2.5 right-2.5 z-[1000]">

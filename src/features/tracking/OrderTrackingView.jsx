@@ -482,15 +482,21 @@ export default function OrderTrackingView() {
                 {/* Ícono de Estado */}
                 <span
                   className={`z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                    isCompleted
+                    order?.status === 'entregado' && index === TRACKING_STEPS.length - 1
                       ? "border-emerald-600 bg-emerald-600 text-white"
-                      : isActive
-                        ? "border-accent bg-accent text-white ring-2 ring-accent/30"
-                        : "border-border bg-surface-subtle text-brand-muted"
+                      : isCompleted
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : isActive
+                          ? "border-accent bg-accent text-white ring-2 ring-accent/30"
+                          : "border-border bg-surface-subtle text-brand-muted"
                   }`}
                   aria-current={isActive ? "step" : undefined}
                 >
-                  <StepIcon className="h-4 w-4" />
+                  {order?.status === 'entregado' && index === TRACKING_STEPS.length - 1 ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <StepIcon className="h-4 w-4" />
+                  )}
                 </span>
 
                 {/* Título y Detalle */}
@@ -507,11 +513,14 @@ export default function OrderTrackingView() {
                   <p className="mt-1 text-[11px] leading-relaxed text-brand-secondary">
                     {step.detail}
                   </p>
-                  {isActive && (
+                  {isActive && order?.status !== 'entregado' && (
                     <span className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] font-bold text-accent uppercase">
                       <Clock3 className="h-3 w-3" />
                       Estado actual
                     </span>
+                  )}
+                  {order?.status === 'entregado' && index === TRACKING_STEPS.length - 1 && (
+                    <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">✓ PEDIDO FINALIZADO</span>
                   )}
                 </div>
               </li>

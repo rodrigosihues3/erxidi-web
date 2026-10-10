@@ -3,7 +3,6 @@ import { useNavigate, Link } from "react-router-dom";
 import {
   Check,
   ShoppingBag,
-  Truck,
   Store,
   CreditCard,
   ShieldAlert,
@@ -18,14 +17,14 @@ import {
   Search,
   Edit3,
   QrCode,
-  ShieldCheck,
   Banknote,
   MapPin,
   Plus,
   Star,
   Home,
   Building,
-  User,
+  Navigation,
+  ExternalLink,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -47,6 +46,12 @@ import {
   defaultDeliverySlots,
   pickupStoreInfo,
 } from "./data/mockDeliveryZones";
+import { getStoreDeliverySettings } from "../admin/services/adminSettings.service";
+import {
+  isPointInPolygon,
+  calculateDistanceKm,
+  calculateDeliveryFee,
+} from "../../utils/geoUtils";
 
 export default function CheckoutView() {
   const navigate = useNavigate();
@@ -71,9 +76,8 @@ export default function CheckoutView() {
 
   const [isSearchingDni, setIsSearchingDni] = useState(false);
   const [isNameLocked, setIsNameLocked] = useState(false);
-  const [dniFeedback, setDniFeedback] = useState(null); // { type: 'success' | 'info' | 'error', message: string }
+  const [dniFeedback, setDniFeedback] = useState(null);
 
-  // Sincronizar datos si el usuario inicia sesión o carga perfil
   useEffect(() => {
     if (user && profile) {
       if (profile.first_name) setFirstName(profile.first_name);
@@ -92,7 +96,6 @@ export default function CheckoutView() {
     }
   }, [user, profile]);
 
-  // Función explícita para consulta de DNI (vía botón o Enter)
   const triggerDniLookup = async (dniToSearch = dni) => {
     const clean = String(dniToSearch || "")
       .replace(/\D/g, "")
@@ -128,7 +131,7 @@ export default function CheckoutView() {
             "No pudimos autocompletar tus datos. Ingrésalos manualmente.",
         });
       }
-    } catch (err) {
+    } catch {
       setIsNameLocked(false);
       setDniFeedback({
         type: "info",
@@ -140,7 +143,6 @@ export default function CheckoutView() {
     }
   };
 
-  // Manejo de cambio en DNI con auto-lookup reactivo al 8vo dígito
   const handleDniChange = (e) => {
     const rawVal = e.target.value.replace(/\D/g, "").slice(0, 8);
     setDni(rawVal);
@@ -171,7 +173,7 @@ export default function CheckoutView() {
   };
 
   // -------------------------------------------------------------
-  // PASO 2: Método de Entrega, Horarios y Direcciones Guardadas
+  // PASO 2: Método de Entrega, Horarios y Direcciones
   // -------------------------------------------------------------
   const [deliveryType, setDeliveryType] = useState("scheduled");
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
@@ -184,17 +186,79 @@ export default function CheckoutView() {
     defaultDeliverySlots[0],
   );
 
-  // Gestión de Direcciones Guardadas vs Nueva Dirección
   const [savedAddresses, setSavedAddresses] = useState([]);
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
-  const [selectedAddressMode, setSelectedAddressMode] = useState("saved"); // 'saved' | 'new'
+  const [selectedAddressMode, setSelectedAddressMode] = useState("saved");
   const [selectedSavedAddressId, setSelectedSavedAddressId] = useState(null);
   const [saveAddressForFuture, setSaveAddressForFuture] = useState(false);
   const [newAddressAlias, setNewAddressAlias] = useState("Casa");
   const [deliveryLatitude, setDeliveryLatitude] = useState(null);
   const [deliveryLongitude, setDeliveryLongitude] = useState(null);
+  const [isGeocoding, setIsGeocoding] = useState(false);
 
-  // Cargar zonas de despacho dinámicamente desde Supabase
+  const [coveragePolygon, setCoveragePolygon] = useState(null);
+  const [storeLocationData, setStoreLocationData] = useState(null);
+  const [deliveryPricing, setDeliveryPricing] = useState({
+    baseFee: 7.0,
+    baseKm: 3.0,
+    pricePerExtraKm: 1.5,
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    getStoreDeliverySettings()
+      .then((settings) => {
+        if (!isMounted) return;
+        if (settings.polygon && Array.isArray(settings.polygon)) {
+          setCoveragePolygon(settings.polygon);
+        }
+        if (settings.storeLocation) {
+          setStoreLocationData(settings.storeLocation);
+        }
+        if (settings.pricing) {
+          setDeliveryPricing({
+            baseFee: Number(settings.pricing.baseFee ?? 7.0),
+            baseKm: Number(settings.pricing.baseKm ?? 3.0),
+            pricePerExtraKm: Number(settings.pricing.pricePerExtraKm ?? 1.5),
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("Error al cargar configuración de cobertura:", err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const activeCoordinates = useMemo(() => {
+    if (selectedAddressMode === "saved" && selectedSavedAddressId) {
+      const addr = (savedAddresses || []).find(
+        (a) => a.id === selectedSavedAddressId,
+      );
+      if (addr && addr.latitude != null && addr.longitude != null) {
+        return [Number(addr.latitude), Number(addr.longitude)];
+      }
+    }
+    if (deliveryLatitude != null && deliveryLongitude != null) {
+      return [Number(deliveryLatitude), Number(deliveryLongitude)];
+    }
+    return null;
+  }, [
+    selectedAddressMode,
+    selectedSavedAddressId,
+    savedAddresses,
+    deliveryLatitude,
+    deliveryLongitude,
+  ]);
+
+  const isOutOfCoverage = useMemo(() => {
+    if (!activeCoordinates || !coveragePolygon || coveragePolygon.length < 3) {
+      return false;
+    }
+    return !isPointInPolygon(activeCoordinates, coveragePolygon);
+  }, [activeCoordinates, coveragePolygon]);
+
   useEffect(() => {
     async function loadZones() {
       try {
@@ -213,7 +277,6 @@ export default function CheckoutView() {
     loadZones();
   }, []);
 
-  // Cargar direcciones del usuario autenticado y preseleccionar la principal
   useEffect(() => {
     async function loadUserAddresses() {
       if (!user) {
@@ -243,7 +306,9 @@ export default function CheckoutView() {
             defaultAddr.latitude != null ? Number(defaultAddr.latitude) : null,
           );
           setDeliveryLongitude(
-            defaultAddr.longitude != null ? Number(defaultAddr.longitude) : null,
+            defaultAddr.longitude != null
+              ? Number(defaultAddr.longitude)
+              : null,
           );
 
           if (defaultAddr.receiver_phone) {
@@ -264,7 +329,7 @@ export default function CheckoutView() {
           setSelectedSavedAddressId(null);
         }
       } catch (err) {
-        console.error("Error al cargar direcciones en checkout:", err);
+        console.error("Error al cargar direcciones:", err);
         setSelectedAddressMode("new");
         setSelectedSavedAddressId(null);
       } finally {
@@ -275,16 +340,13 @@ export default function CheckoutView() {
     loadUserAddresses();
   }, [user]);
 
-  // Selección de dirección guardada
   const handleSelectSavedAddress = (addr) => {
     setSelectedSavedAddressId(addr.id);
     setSelectedAddressMode("saved");
     setSelectedZoneId(Number(addr.zone_id));
     setDeliveryAddress(addr.street_address || "");
     setDeliveryReference(addr.reference || "");
-    setDeliveryLatitude(
-      addr.latitude != null ? Number(addr.latitude) : null,
-    );
+    setDeliveryLatitude(addr.latitude != null ? Number(addr.latitude) : null);
     setDeliveryLongitude(
       addr.longitude != null ? Number(addr.longitude) : null,
     );
@@ -303,7 +365,6 @@ export default function CheckoutView() {
     }
   };
 
-  // Conmutar a modo dirección manual
   const handleSelectNewAddressMode = () => {
     setSelectedAddressMode("new");
     setSelectedSavedAddressId(null);
@@ -313,7 +374,94 @@ export default function CheckoutView() {
     setDeliveryLongitude(null);
   };
 
-  // Cálculo dinámico de ventana de envío express (hora actual + 45min a + 90min)
+  const selectedZone = useMemo(
+    () =>
+      deliveryZones.find((z) => Number(z.id) === Number(selectedZoneId)) ||
+      deliveryZones[0],
+    [deliveryZones, selectedZoneId],
+  );
+
+  // Geocodificación Inversa: El pin en el mapa manda sobre la dirección y resuelve el distrito
+  const handleMapLocationChange = async ({ lat, lng }) => {
+    setDeliveryLatitude(lat);
+    setDeliveryLongitude(lng);
+
+    try {
+      setIsGeocoding(true);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      );
+      const data = await res.json();
+      if (data && data.address) {
+        const road =
+          data.address.road ||
+          data.address.pedestrian ||
+          data.address.footway ||
+          "";
+        const houseNumber = data.address.house_number || "";
+        const fullStreet = [road, houseNumber].filter(Boolean).join(" ");
+        if (fullStreet) {
+          setDeliveryAddress(fullStreet);
+        }
+
+        const detectedDistrict =
+          data.address.suburb ||
+          data.address.city_district ||
+          data.address.neighbourhood ||
+          data.address.town ||
+          "";
+
+        if (detectedDistrict && deliveryZones?.length > 0) {
+          const matched = deliveryZones.find(
+            (z) =>
+              detectedDistrict
+                .toLowerCase()
+                .includes(z.district_name.toLowerCase()) ||
+              z.district_name
+                .toLowerCase()
+                .includes(detectedDistrict.toLowerCase()),
+          );
+          if (matched) {
+            setSelectedZoneId(Number(matched.id));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Error en reverse geocoding:", err);
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  // Geocodificación Directa de respaldo
+  const searchAddressOnMap = async (queryText) => {
+    const clean = (queryText || "").trim();
+    if (clean.length < 4) return;
+    setIsGeocoding(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          `${clean}, Lima, Perú`,
+        )}&limit=1`,
+      );
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+        setDeliveryLatitude(lat);
+        setDeliveryLongitude(lon);
+      }
+    } catch (err) {
+      console.warn("Error geocodificando dirección:", err);
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  const handleDeliveryAddressChange = (value) => {
+    setDeliveryAddress(value);
+  };
+
   const expressTimeWindow = useMemo(() => {
     const now = new Date();
     const start = new Date(now.getTime() + 45 * 60000);
@@ -323,40 +471,47 @@ export default function CheckoutView() {
     return `Tu pedido llegará hoy entre las ${formatH(start)} y ${formatH(end)} hrs`;
   }, []);
 
-  const selectedZone = useMemo(
-    () =>
-      deliveryZones.find((z) => Number(z.id) === Number(selectedZoneId)) ||
-      deliveryZones[0],
-    [deliveryZones, selectedZoneId],
-  );
+  const deliveryDistanceKm = useMemo(() => {
+    if (
+      !activeCoordinates ||
+      !storeLocationData?.lat ||
+      !storeLocationData?.lng
+    ) {
+      return null;
+    }
+    return calculateDistanceKm(
+      [storeLocationData.lat, storeLocationData.lng],
+      activeCoordinates,
+    );
+  }, [activeCoordinates, storeLocationData]);
 
   const deliveryCost = useMemo(() => {
     if (deliveryType === "pickup") return 0;
-    const baseCost = selectedZone?.delivery_cost || 10.0;
-    if (deliveryType === "express") {
-      return baseCost + 5.0; // Recargo express prioritario
+
+    let baseShippingFee = selectedZone?.delivery_cost || 10.0;
+    if (deliveryDistanceKm !== null) {
+      baseShippingFee = calculateDeliveryFee(
+        deliveryDistanceKm,
+        deliveryPricing,
+      );
     }
-    return baseCost;
-  }, [deliveryType, selectedZone]);
+
+    if (deliveryType === "express") {
+      return Number((baseShippingFee + 5.0).toFixed(2));
+    }
+    return baseShippingFee;
+  }, [deliveryType, selectedZone, deliveryDistanceKm, deliveryPricing]);
 
   const totalAmount = subtotal + deliveryCost;
 
+  // Validación: Referencia opcional, dirección y coordenadas obligatorias para envíos a domicilio
   const isStep2Valid = useMemo(() => {
     if (deliveryType === "pickup") return true;
-    if (selectedAddressMode === "saved" && selectedSavedAddressId) {
-      return deliveryAddress.trim().length >= 4;
-    }
-    return (
-      deliveryAddress.trim().length >= 4 &&
-      deliveryReference.trim().length >= 2
-    );
-  }, [
-    deliveryType,
-    selectedAddressMode,
-    selectedSavedAddressId,
-    deliveryAddress,
-    deliveryReference,
-  ]);
+    if (isOutOfCoverage) return false;
+    if (!activeCoordinates) return false;
+
+    return deliveryAddress.trim().length >= 4;
+  }, [deliveryType, isOutOfCoverage, activeCoordinates, deliveryAddress]);
 
   const handleNextFromStep2 = (e) => {
     e.preventDefault();
@@ -369,11 +524,10 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 3: Pago y Comprobante
   // -------------------------------------------------------------
-  const [paymentMethod, setPaymentMethod] = useState("yape_plin"); // 'yape_plin' | 'culqi_gateway'
+  const [paymentMethod, setPaymentMethod] = useState("yape_plin");
   const [yapeOpNumber, setYapeOpNumber] = useState("");
   const [culqiError, setCulqiError] = useState(null);
 
-  // Comprobante y Facturación: 'nota_venta' | 'boleta' | 'factura'
   const [receiptType, setReceiptType] = useState("boleta");
   const [ruc, setRuc] = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -382,7 +536,6 @@ export default function CheckoutView() {
   const [isRucLocked, setIsRucLocked] = useState(false);
   const [rucFeedback, setRucFeedback] = useState(null);
 
-  // Mantener referencia actualizada para el callback global de Culqi
   const orderContextRef = useRef({});
   orderContextRef.current = {
     user,
@@ -414,7 +567,6 @@ export default function CheckoutView() {
     deliveryLongitude,
   };
 
-  // Guardar dirección manual en la cuenta si el usuario autenticado lo solicitó
   const maybeSaveNewAddress = async () => {
     const ctx = orderContextRef.current;
     if (
@@ -432,7 +584,8 @@ export default function CheckoutView() {
             zone_id: Number(ctx.selectedZoneId),
             street_address: ctx.deliveryAddress.trim(),
             reference: ctx.deliveryReference.trim() || "Sin referencia",
-            receiver_name: `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim(),
+            receiver_name:
+              `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim(),
             receiver_phone: ctx.phone.trim(),
             is_default: (ctx.savedAddresses || []).length === 0,
             latitude: ctx.deliveryLatitude || null,
@@ -446,8 +599,10 @@ export default function CheckoutView() {
     }
   };
 
-  // Constructor de payload de orden para Supabase
-  const buildOrderPayload = (gatewayTxId = null, paymentStatus = "pending_verification") => {
+  const buildOrderPayload = (
+    gatewayTxId = null,
+    paymentStatus = "pending_verification",
+  ) => {
     const ctx = orderContextRef.current;
     const fullName = `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim();
     const finalAddress =
@@ -475,12 +630,12 @@ export default function CheckoutView() {
           )
         : null;
 
-    const deliveryLatitude =
+    const resolvedLat =
       ctx.deliveryType === "pickup"
         ? null
         : (selectedAddress?.latitude ?? ctx.deliveryLatitude ?? null);
 
-    const deliveryLongitude =
+    const resolvedLng =
       ctx.deliveryType === "pickup"
         ? null
         : (selectedAddress?.longitude ?? ctx.deliveryLongitude ?? null);
@@ -497,7 +652,8 @@ export default function CheckoutView() {
       type: ctx.receiptType,
       doc_number: invoiceDocNumber,
       tax_id: ctx.receiptType === "factura" ? ctx.ruc.trim() : ctx.dni.trim(),
-      legal_name: ctx.receiptType === "factura" ? ctx.companyName.trim() : fullName,
+      legal_name:
+        ctx.receiptType === "factura" ? ctx.companyName.trim() : fullName,
       fiscal_address:
         ctx.receiptType === "factura"
           ? ctx.fiscalAddress.trim() || finalAddress
@@ -512,19 +668,19 @@ export default function CheckoutView() {
       customerPhone: ctx.phone.trim(),
       deliveryType: ctx.deliveryType,
       deliveryAddress: finalAddress,
-      delivery_latitude: deliveryLatitude,
-      deliveryLatitude: deliveryLatitude,
-      delivery_longitude: deliveryLongitude,
-      deliveryLongitude: deliveryLongitude,
+      delivery_latitude: resolvedLat,
+      deliveryLatitude: resolvedLat,
+      delivery_longitude: resolvedLng,
+      deliveryLongitude: resolvedLng,
       shipping_address_id: shippingAddressId,
-      shippingAddressId: shippingAddressId,
+      shippingAddressId,
       deliveryZoneId:
         ctx.deliveryType === "pickup" ? null : ctx.selectedZone?.id || null,
       deliveryCost: ctx.deliveryCost,
       scheduledTimeSlot:
         ctx.deliveryType === "scheduled"
           ? ctx.scheduledTimeSlot
-          : ctx.deliveryType === "express"
+          : deliveryType === "express"
             ? "Express Mismo Día"
             : "Horario Comercial 09:00 - 18:00",
       subtotal: ctx.subtotal,
@@ -532,7 +688,7 @@ export default function CheckoutView() {
       payment_method: "culqi_gateway",
       paymentMethod: "culqi_gateway",
       payment_status: paymentStatus,
-      paymentStatus: paymentStatus,
+      paymentStatus,
       payment_gateway_tx_id: gatewayTxId,
       paymentGatewayTxId: gatewayTxId,
       invoice_type: ctx.receiptType,
@@ -541,7 +697,6 @@ export default function CheckoutView() {
     };
   };
 
-  // Procesamiento seguro de token de Culqi Checkout v4 delegando a la Edge Function
   const handleCulqiTokenPayment = async (tokenId) => {
     setIsProcessing(true);
     setCulqiError(null);
@@ -550,20 +705,20 @@ export default function CheckoutView() {
     let orderToCharge = createdOrderRef.current;
 
     try {
-      // 1. Asegurar la existencia de la orden en Supabase sin destruirla en caso de reintento
       if (!orderToCharge) {
         await maybeSaveNewAddress();
         const orderPayload = buildOrderPayload(null, "pending_verification");
         const result = await createOrder(orderPayload);
         if (!result.success || !result.order) {
-          throw new Error(result.error || "No se pudo registrar la orden en el sistema.");
+          throw new Error(
+            result.error || "No se pudo registrar la orden en el sistema.",
+          );
         }
         orderToCharge = result.order;
         createdOrderRef.current = result.order;
         setCreatedOrder(result.order);
       }
 
-      // 2. Invocar cobro seguro mediante Edge Function create-culqi-charge
       const chargeData = await processCulqiCharge({
         tokenId,
         amount: ctx.totalAmount,
@@ -571,7 +726,6 @@ export default function CheckoutView() {
         orderId: orderToCharge.id,
       });
 
-      // 3. Confirmación exitosa: actualizar orden en Supabase
       const chargeId = chargeData?.id || chargeData?.charge_id || tokenId;
 
       await supabase
@@ -584,17 +738,13 @@ export default function CheckoutView() {
         })
         .eq("id", orderToCharge.id);
 
-      // Limpia el carrito reactivo
       clearCart();
-
-      // Redirige a la vista de confirmación y seguimiento
       navigate(`/seguimiento/${orderToCharge.order_number}`);
     } catch (err) {
       console.error("Error al procesar cobro de Culqi:", err);
-      // Muestra alerta descriptiva en la UI sin destruir la orden previa
       setCulqiError(
         err.message ||
-          "Tu tarjeta fue rechazada o ocurrió un inconveniente con la pasarela. Inténtalo nuevamente o elige otro método."
+          "Tu tarjeta fue rechazada o ocurrió un inconveniente con la pasarela. Inténtalo nuevamente o elige otro método.",
       );
     } finally {
       setIsProcessing(false);
@@ -602,7 +752,6 @@ export default function CheckoutView() {
     }
   };
 
-  // Manejador Global de Respuesta de Culqi Checkout v4
   useEffect(() => {
     window.culqi = async () => {
       try {
@@ -638,7 +787,6 @@ export default function CheckoutView() {
     };
   }, []);
 
-  // Consulta de RUC con Decolecta
   const triggerRucLookup = async (rucToSearch = ruc) => {
     const clean = String(rucToSearch || "")
       .replace(/\D/g, "")
@@ -674,7 +822,7 @@ export default function CheckoutView() {
           message: "Completa la Razón Social y Dirección Fiscal manualmente.",
         });
       }
-    } catch (err) {
+    } catch {
       setIsRucLocked(false);
       setRucFeedback({
         type: "info",
@@ -699,14 +847,12 @@ export default function CheckoutView() {
   const isCashOnDeliveryAllowed = Boolean(user && user.email_confirmed_at);
 
   const isStep3Valid = useMemo(() => {
-    // Validación según método de pago
     if (paymentMethod === "yape_plin") {
       if (!/^\d{6,8}$/.test(yapeOpNumber.trim())) return false;
     } else if (paymentMethod === "cash_on_delivery") {
       if (!isCashOnDeliveryAllowed) return false;
     }
 
-    // Validación según comprobante
     if (receiptType === "factura") {
       if (!/^(10|20)\d{9}$/.test(ruc.trim())) return false;
       if (companyName.trim().length < 2) return false;
@@ -722,23 +868,21 @@ export default function CheckoutView() {
     companyName,
   ]);
 
-  // Ejecución transaccional del pedido
   const handleConfirmOrder = async (e) => {
     e.preventDefault();
     if (isSubmitting || isProcessing) return;
 
-    // Validación de comprobante antes de avanzar
     if (receiptType === "factura") {
       if (!/^(10|20)\d{9}$/.test(ruc.trim()) || companyName.trim().length < 2) {
         setRucFeedback({
           type: "error",
-          message: "Por favor completa un RUC y Razón Social válidos para la Factura.",
+          message:
+            "Por favor completa un RUC y Razón Social válidos para la Factura.",
         });
         return;
       }
     }
 
-    // Flujo Online Culqi
     if (paymentMethod === "culqi_gateway") {
       setCulqiError(null);
       try {
@@ -763,7 +907,6 @@ export default function CheckoutView() {
       return;
     }
 
-    // Flujo Transferencia Directa (Yape / Plin Manual) o Contra Entrega
     if (!isStep3Valid) return;
 
     setIsSubmitting(true);
@@ -839,7 +982,7 @@ export default function CheckoutView() {
       delivery_longitude: resolvedLongitude,
       deliveryLongitude: resolvedLongitude,
       shipping_address_id: shippingAddressId,
-      shippingAddressId: shippingAddressId,
+      shippingAddressId,
       deliveryZoneId:
         deliveryType === "pickup" ? null : selectedZone?.id || null,
       deliveryCost,
@@ -852,7 +995,7 @@ export default function CheckoutView() {
       subtotal,
       totalAmount,
       payment_method: paymentMethod,
-      paymentMethod: paymentMethod,
+      paymentMethod,
       payment_status: isCashOnDelivery ? "pending" : "pending_verification",
       paymentStatus: isCashOnDelivery ? "pending" : "pending_verification",
       payment_gateway_tx_id: isCashOnDelivery ? null : yapeOpNumber.trim(),
@@ -868,8 +1011,12 @@ export default function CheckoutView() {
           .from("orders")
           .update({
             payment_method: paymentMethod,
-            payment_status: isCashOnDelivery ? "pending" : "pending_verification",
-            payment_gateway_tx_id: isCashOnDelivery ? null : yapeOpNumber.trim(),
+            payment_status: isCashOnDelivery
+              ? "pending"
+              : "pending_verification",
+            payment_gateway_tx_id: isCashOnDelivery
+              ? null
+              : yapeOpNumber.trim(),
             updated_at: new Date().toISOString(),
           })
           .eq("id", createdOrderRef.current.id);
@@ -907,9 +1054,6 @@ export default function CheckoutView() {
       currency: "PEN",
     }).format(amount || 0);
 
-  // -------------------------------------------------------------
-  // VISTA DE CARRITO VACÍO
-  // -------------------------------------------------------------
   if (items.length === 0) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4">
@@ -936,7 +1080,7 @@ export default function CheckoutView() {
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8">
-      {/* Encabezado y Barra de Progreso */}
+      {/* Encabezado y Progreso */}
       <div>
         <div className="flex items-center justify-between pb-4 border-b border-border">
           <div className="flex items-center gap-2">
@@ -956,10 +1100,8 @@ export default function CheckoutView() {
           </Badge>
         </div>
 
-        {/* Stepper Progress Tabs */}
         <nav aria-label="Progreso de Checkout" className="pt-4">
           <ol className="grid grid-cols-3 gap-2 sm:gap-4">
-            {/* Paso 1 */}
             <li
               onClick={() => handleStepClick(1)}
               className={`p-3 rounded-card border transition-all cursor-pointer select-none flex items-center gap-3 ${
@@ -991,7 +1133,6 @@ export default function CheckoutView() {
               </div>
             </li>
 
-            {/* Paso 2 */}
             <li
               onClick={() => handleStepClick(2)}
               className={`p-3 rounded-card border transition-all ${
@@ -1027,7 +1168,6 @@ export default function CheckoutView() {
               </div>
             </li>
 
-            {/* Paso 3 */}
             <li
               onClick={() => handleStepClick(3)}
               className={`p-3 rounded-card border transition-all ${
@@ -1062,12 +1202,11 @@ export default function CheckoutView() {
         </nav>
       </div>
 
-      {/* Grid Principal a Dos Columnas */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Columna Principal: Formulario del Paso Activo (lg:col-span-8) */}
+        {/* Columna Formulario (lg:col-span-8) */}
         <div className="lg:col-span-8 space-y-6">
           {/* ========================================================= */}
-          {/* PASO 1: Identificación y Contacto */}
+          {/* PASO 1 */}
           {/* ========================================================= */}
           {currentStep === 1 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
@@ -1085,7 +1224,9 @@ export default function CheckoutView() {
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-card flex items-center justify-between text-xs text-emerald-900 animate-in fade-in duration-150">
                   <div className="flex items-center gap-2">
                     <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                    <span>Datos precargados desde tu cuenta de cliente ERXIDI.</span>
+                    <span>
+                      Datos precargados desde tu cuenta de cliente ERXIDI.
+                    </span>
                   </div>
                   <Badge variant="success" className="text-[10px]">
                     Cuenta Vinculada
@@ -1094,7 +1235,6 @@ export default function CheckoutView() {
               )}
 
               <form onSubmit={handleNextFromStep1} className="space-y-4">
-                {/* DNI con Búsqueda Manual / Enter / Auto */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label
@@ -1179,7 +1319,6 @@ export default function CheckoutView() {
                   )}
                 </div>
 
-                {/* Nombres y Apellidos */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
                     label="Nombres"
@@ -1202,7 +1341,6 @@ export default function CheckoutView() {
                   />
                 </div>
 
-                {/* Email y Teléfono WhatsApp */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
                     label="Correo Electrónico"
@@ -1262,9 +1400,27 @@ export default function CheckoutView() {
               </div>
 
               <form onSubmit={handleNextFromStep2} className="space-y-6">
-                {/* 3 Opciones de Entrega */}
+                {/* Alerta contextual si está fuera de cobertura */}
+                {deliveryType !== "pickup" && isOutOfCoverage && (
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900 animate-in fade-in duration-150">
+                    <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold">
+                        Zona fuera de cobertura a domicilio
+                      </strong>
+                      <span>
+                        La ubicación fijada en el mapa se encuentra fuera de
+                        nuestra zona de cobertura. Ubica el pin dentro de la
+                        zona delimitada o cambia a{" "}
+                        <strong>Recojo en Tienda</strong> para continuar.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3 Opciones de Entrega: Seleccionables en todo momento */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Opción 1: Recojo en Tienda */}
+                  {/* Recojo en Tienda */}
                   <label
                     onClick={() => setDeliveryType("pickup")}
                     className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
@@ -1296,7 +1452,7 @@ export default function CheckoutView() {
                     </div>
                   </label>
 
-                  {/* Opción 2: Envío Express */}
+                  {/* Envío Express */}
                   <label
                     onClick={() => setDeliveryType("express")}
                     className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
@@ -1328,7 +1484,7 @@ export default function CheckoutView() {
                     </div>
                   </label>
 
-                  {/* Opción 3: Envío Programado */}
+                  {/* Envío Programado */}
                   <label
                     onClick={() => setDeliveryType("scheduled")}
                     className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
@@ -1348,7 +1504,7 @@ export default function CheckoutView() {
                       <div className="flex items-center justify-between mb-2">
                         <Calendar className="w-5 h-5 text-accent" />
                         <Badge variant="success" className="text-[10px]">
-                          Gratis
+                          Económico
                         </Badge>
                         <Badge variant="neutral" className="text-[10px]">
                           Día Siguiente
@@ -1364,12 +1520,31 @@ export default function CheckoutView() {
                   </label>
                 </div>
 
-                {/* Detalle de Recojo */}
+                {/* Vista Recojo en Tienda */}
                 {deliveryType === "pickup" && (
-                  <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-2 text-xs">
-                    <div className="flex items-center gap-2 font-bold text-brand-primary">
-                      <Store className="w-4 h-4 text-accent" />
-                      <span>{pickupStoreInfo.address}</span>
+                  <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-3 text-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/70 pb-2.5">
+                      <div className="flex items-center gap-2 font-bold text-brand-primary">
+                        <Store className="w-4 h-4 text-accent flex-shrink-0" />
+                        <span>
+                          {storeLocationData?.name || "Taller ERXIDI Central"}{" "}
+                          &bull;{" "}
+                          {storeLocationData?.address ||
+                            pickupStoreInfo.address}
+                        </span>
+                      </div>
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${
+                          storeLocationData?.lat || -12.1215
+                        },${storeLocationData?.lng || -77.0298}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-white rounded-button font-semibold text-xs shadow-sm transition-colors self-start sm:self-auto"
+                      >
+                        <Navigation className="w-3.5 h-3.5" />
+                        <span>Cómo llegar a la tienda</span>
+                        <ExternalLink className="w-3 h-3 ml-0.5 opacity-80" />
+                      </a>
                     </div>
                     <div className="flex items-center gap-2 text-brand-secondary">
                       <Clock className="w-3.5 h-3.5" />
@@ -1382,19 +1557,18 @@ export default function CheckoutView() {
                   </div>
                 )}
 
-                {/* Detalle de Envío Express */}
-                {/* Detalle y Dirección para Envío Express o Programado */}
+                {/* Vista Envío Express o Programado */}
                 {deliveryType !== "pickup" && (
                   <div className="space-y-5 pt-2 border-t border-border">
-                    {/* Banner de Envío Express */}
                     {deliveryType === "express" && (
                       <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
                         <Zap className="w-4 h-4 text-accent flex-shrink-0" />
-                        <span className="font-semibold">{expressTimeWindow}</span>
+                        <span className="font-semibold">
+                          {expressTimeWindow}
+                        </span>
                       </div>
                     )}
 
-                    {/* Ventana Horaria de Envío Programado */}
                     {deliveryType === "scheduled" && (
                       <div>
                         <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
@@ -1425,7 +1599,7 @@ export default function CheckoutView() {
                       </div>
                     )}
 
-                    {/* Selector de Dirección: Clientes con Direcciones Guardadas */}
+                    {/* Selector de Dirección Guardada */}
                     {user && savedAddresses.length > 0 ? (
                       <div className="space-y-3 pt-2 border-t border-border">
                         <div className="flex items-center justify-between">
@@ -1451,19 +1625,19 @@ export default function CheckoutView() {
                               const isSelected =
                                 selectedAddressMode === "saved" &&
                                 selectedSavedAddressId === addr.id;
-                              const zoneInfo =
-                                addr.delivery_zones?.district_name
-                                  ? {
-                                      name: addr.delivery_zones.district_name,
-                                      cost: addr.delivery_zones.delivery_cost,
-                                    }
-                                  : deliveryZones.find(
-                                      (z) =>
-                                        Number(z.id) === Number(addr.zone_id),
-                                    ) || {
-                                      name: "Lima",
-                                      cost: 10.0,
-                                    };
+                              const zoneInfo = addr.delivery_zones
+                                ?.district_name
+                                ? {
+                                    name: addr.delivery_zones.district_name,
+                                    cost: addr.delivery_zones.delivery_cost,
+                                  }
+                                : deliveryZones.find(
+                                    (z) =>
+                                      Number(z.id) === Number(addr.zone_id),
+                                  ) || {
+                                    name: "Lima",
+                                    cost: 10.0,
+                                  };
 
                               return (
                                 <div
@@ -1504,7 +1678,10 @@ export default function CheckoutView() {
                                     <p className="text-[11px] text-brand-secondary mt-0.5">
                                       {zoneInfo.name} &bull; Flete:{" "}
                                       <span className="font-mono font-medium text-brand-primary">
-                                        S/ {Number(zoneInfo.cost).toFixed(2)}
+                                        S/{" "}
+                                        {isSelected
+                                          ? deliveryCost.toFixed(2)
+                                          : Number(zoneInfo.cost).toFixed(2)}
                                       </span>
                                       {deliveryType === "express" &&
                                         " (+S/ 5.00 Express)"}
@@ -1534,7 +1711,6 @@ export default function CheckoutView() {
                               );
                             })}
 
-                            {/* Opción para ingresar nueva dirección */}
                             <div
                               onClick={handleSelectNewAddressMode}
                               className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col items-center justify-center text-center select-none min-h-[110px] ${
@@ -1550,13 +1726,13 @@ export default function CheckoutView() {
                                 ➕ Enviar a una nueva dirección
                               </span>
                               <span className="text-[10px] text-brand-secondary mt-0.5">
-                                Ingresar otra calle o distrito
+                                Fijar en el mapa
                               </span>
                             </div>
                           </div>
                         )}
 
-                        {/* Formulario desplegado si seleccionó "new" */}
+                        {/* Nueva Dirección: Mapa como fuente de verdad (Sin selector de distrito) */}
                         {selectedAddressMode === "new" && (
                           <div className="space-y-4 pt-3 border-t border-border bg-surface-subtle/40 p-4 rounded-card border mt-3 animate-in fade-in duration-150">
                             <div className="flex items-center gap-2 text-xs font-bold text-brand-primary">
@@ -1564,76 +1740,62 @@ export default function CheckoutView() {
                               <span>Nueva Dirección de Entrega</span>
                             </div>
 
+                            {/* 1. MAPA PRIMERO (Reverse Geocoding) */}
                             <div>
-                              <label
-                                htmlFor="checkout-new-zone"
-                                className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
-                              >
-                                Distrito de Lima
-                              </label>
-                              <select
-                                id="checkout-new-zone"
-                                value={selectedZoneId}
-                                onChange={(e) =>
-                                  setSelectedZoneId(Number(e.target.value))
-                                }
-                                className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
-                              >
-                                {deliveryZones.map((zone) => (
-                                  <option key={zone.id} value={zone.id}>
-                                    {zone.district_name} (
-                                    {formatCurrency(
-                                      zone.delivery_cost +
-                                        (deliveryType === "express" ? 5.0 : 0),
-                                    )}
-                                    {deliveryType === "express"
-                                      ? " con recargo Express"
-                                      : ""})
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                                  Ubicación en el Mapa (Mueve el Pin)
+                                </label>
+                                {isGeocoding && (
+                                  <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Obteniendo dirección...
+                                  </span>
+                                )}
+                              </div>
+
+                              <LocationPickerMap
+                                latitude={deliveryLatitude}
+                                longitude={deliveryLongitude}
+                                onChange={handleMapLocationChange}
+                                height="h-56"
+                              />
+                              <p className="mt-1 text-[11px] text-brand-muted">
+                                Mueve el marcador o pulsa «Usar mi ubicación
+                                actual» para rellenar automáticamente tu
+                                dirección y calcular el flete.
+                              </p>
                             </div>
 
+                            {/* 2. DIRECCIÓN EXACTA (Autocompletada) */}
                             <Input
                               label="Dirección Exacta"
                               id="checkout-new-address"
-                              placeholder="Calle / Av., Número, Interior o Departamento"
+                              placeholder="Calle / Av. y número (se completa al mover el pin)"
                               value={deliveryAddress}
                               onChange={(e) =>
-                                setDeliveryAddress(e.target.value)
+                                handleDeliveryAddressChange(e.target.value)
                               }
+                              onBlur={() => {
+                                if (deliveryAddress.trim().length >= 4) {
+                                  searchAddressOnMap(
+                                    `${deliveryAddress}, ${selectedZone?.district_name || ""}`,
+                                  );
+                                }
+                              }}
                               required
                             />
 
+                            {/* 3. REFERENCIA (Opcional) */}
                             <Input
-                              label="Referencia de Llegada (Obligatoria)"
+                              label="Referencia de Llegada (Opcional)"
                               id="checkout-new-ref"
-                              placeholder="Ej. Frente al parque, puerta blanca, timbre 2"
+                              placeholder="Ej. Dpto 402, frente al parque, timbre blanco"
                               value={deliveryReference}
                               onChange={(e) =>
                                 setDeliveryReference(e.target.value)
                               }
-                              required
                             />
-
-                            {/* Georreferenciación en mapa con Leaflet */}
-                            <div>
-                              <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
-                                Ubicación en el Mapa (Pin de Entrega)
-                              </label>
-                              <LocationPickerMap
-                                latitude={deliveryLatitude}
-                                longitude={deliveryLongitude}
-                                onChange={({ lat, lng }) => {
-                                  setDeliveryLatitude(lat);
-                                  setDeliveryLongitude(lng);
-                                }}
-                                height="h-52"
-                              />
-                              <p className="mt-1 text-[11px] text-brand-muted">
-                                Puedes hacer clic en el mapa o usar tu ubicación actual para asegurar una llegada exacta.
-                              </p>
-                            </div>
 
                             <div className="pt-2 border-t border-border space-y-2">
                               <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-brand-primary select-none">
@@ -1646,7 +1808,8 @@ export default function CheckoutView() {
                                   className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
                                 />
                                 <span>
-                                  Guardar esta dirección en mi cuenta para futuras compras
+                                  Guardar esta dirección en mi cuenta para
+                                  futuras compras
                                 </span>
                               </label>
 
@@ -1668,58 +1831,61 @@ export default function CheckoutView() {
                         )}
                       </div>
                     ) : (
-                      /* Modo Dirección Manual (Invitado o Usuario sin direcciones previas) */
+                      /* Modo Dirección Manual (Invitados o sin direcciones registradas, sin selector de distrito) */
                       <div className="space-y-4 pt-2 border-t border-border">
+                        {/* 1. MAPA PRIMERO */}
                         <div>
-                          <label
-                            htmlFor="checkout-manual-zone"
-                            className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
-                          >
-                            Distrito de Lima
-                          </label>
-                          <select
-                            id="checkout-manual-zone"
-                            value={selectedZoneId}
-                            onChange={(e) =>
-                              setSelectedZoneId(Number(e.target.value))
-                            }
-                            className="w-full h-10 px-3 bg-surface-card border border-border rounded-button text-sm text-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
-                          >
-                            {deliveryZones.map((zone) => (
-                              <option key={zone.id} value={zone.id}>
-                                {zone.district_name} (
-                                {formatCurrency(
-                                  zone.delivery_cost +
-                                    (deliveryType === "express" ? 5.0 : 0),
-                                )}
-                                {deliveryType === "express"
-                                  ? " &bull; Express"
-                                  : ""})
-                              </option>
-                            ))}
-                          </select>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                              Ubicación en el Mapa (Mueve el Pin)
+                            </label>
+                            {isGeocoding && (
+                              <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Obteniendo dirección...
+                              </span>
+                            )}
+                          </div>
+
+                          <LocationPickerMap
+                            latitude={deliveryLatitude}
+                            longitude={deliveryLongitude}
+                            onChange={handleMapLocationChange}
+                            height="h-56"
+                          />
+                          <p className="mt-1 text-[11px] text-brand-muted">
+                            Mueve el marcador o pulsa «Usar mi ubicación actual»
+                            para rellenar automáticamente tu dirección y
+                            calcular el flete.
+                          </p>
                         </div>
 
+                        {/* 2. DIRECCIÓN EXACTA */}
                         <Input
                           label="Dirección Exacta"
                           id="checkout-manual-address"
-                          placeholder="Calle / Av., Número, Interior o Departamento"
+                          placeholder="Calle / Av. y número (se completa al mover el pin)"
                           value={deliveryAddress}
                           onChange={(e) =>
-                            setDeliveryAddress(e.target.value)
+                            handleDeliveryAddressChange(e.target.value)
                           }
+                          onBlur={() => {
+                            if (deliveryAddress.trim().length >= 4) {
+                              searchAddressOnMap(
+                                `${deliveryAddress}, ${selectedZone?.district_name || ""}`,
+                              );
+                            }
+                          }}
                           required
                         />
 
+                        {/* 3. REFERENCIA (Opcional) */}
                         <Input
-                          label="Referencia de Llegada (Obligatoria)"
+                          label="Referencia de Llegada (Opcional)"
                           id="checkout-manual-ref"
-                          placeholder="Ej. Frente al parque, rejas negras, timbre 2"
+                          placeholder="Ej. Dpto 402, frente al parque, timbre blanco"
                           value={deliveryReference}
-                          onChange={(e) =>
-                            setDeliveryReference(e.target.value)
-                          }
-                          required
+                          onChange={(e) => setDeliveryReference(e.target.value)}
                         />
 
                         {user && (
@@ -1734,7 +1900,8 @@ export default function CheckoutView() {
                                 className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
                               />
                               <span>
-                                Guardar esta dirección en mi cuenta para futuras compras
+                                Guardar esta dirección en mi cuenta para futuras
+                                compras
                               </span>
                             </label>
 
@@ -1758,7 +1925,8 @@ export default function CheckoutView() {
                   </div>
                 )}
 
-                <div className="pt-4 flex justify-between">
+                {/* Acciones Paso 2 */}
+                <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <Button
                     type="button"
                     variant="outline"
@@ -1767,15 +1935,30 @@ export default function CheckoutView() {
                   >
                     Regresar
                   </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    size="md"
-                    disabled={!isStep2Valid}
-                  >
-                    Continuar al Pago
-                    <ChevronRight className="w-4 h-4 ml-1.5" />
-                  </Button>
+
+                  <div className="flex flex-col items-end gap-1">
+                    {deliveryType !== "pickup" && isOutOfCoverage && (
+                      <span className="text-xs text-rose-600 font-semibold text-right">
+                        Ubicación fuera de cobertura para entrega a domicilio.
+                      </span>
+                    )}
+                    {deliveryType !== "pickup" &&
+                      !activeCoordinates &&
+                      deliveryAddress.trim().length >= 4 && (
+                        <span className="text-xs text-amber-600 font-medium text-right">
+                          Fija el pin en el mapa para validar la cobertura.
+                        </span>
+                      )}
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="md"
+                      disabled={!isStep2Valid}
+                    >
+                      Continuar al Pago
+                      <ChevronRight className="w-4 h-4 ml-1.5" />
+                    </Button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -1796,14 +1979,12 @@ export default function CheckoutView() {
               </div>
 
               <form onSubmit={handleConfirmOrder} className="space-y-6">
-                {/* A. SECCIÓN COMPROBANTES: Tarjetas Segmentadas */}
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Tipo de Comprobante
                   </label>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {/* 1. Nota de Venta */}
                     <div
                       onClick={() => setReceiptType("nota_venta")}
                       className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
@@ -1825,7 +2006,6 @@ export default function CheckoutView() {
                       </span>
                     </div>
 
-                    {/* 2. Boleta de Venta */}
                     <div
                       onClick={() => setReceiptType("boleta")}
                       className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
@@ -1847,7 +2027,6 @@ export default function CheckoutView() {
                       </span>
                     </div>
 
-                    {/* 3. Factura Electrónica */}
                     <div
                       onClick={() => setReceiptType("factura")}
                       className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
@@ -1870,7 +2049,6 @@ export default function CheckoutView() {
                     </div>
                   </div>
 
-                  {/* Detalle Boleta: Reutilización de DNI y Nombres de Paso 1 */}
                   {receiptType === "boleta" && (
                     <div className="p-3.5 bg-surface-subtle border border-border rounded-card text-xs space-y-1.5 animate-in fade-in duration-150">
                       <div className="flex items-center justify-between">
@@ -1890,19 +2068,19 @@ export default function CheckoutView() {
                         </span>
                       </div>
                       <p className="text-[11px] text-brand-muted pt-1 border-t border-border/60">
-                        La Boleta se emitirá automáticamente con los datos verificados en el Paso 1.
+                        La Boleta se emitirá automáticamente con los datos
+                        verificados en el Paso 1.
                       </p>
                     </div>
                   )}
 
-                  {/* Detalle Nota de Venta */}
                   {receiptType === "nota_venta" && (
                     <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary animate-in fade-in duration-150">
-                      Comprobante para control interno y seguimiento de despacho. No tiene efectos tributarios.
+                      Comprobante para control interno y seguimiento de
+                      despacho. No tiene efectos tributarios.
                     </div>
                   )}
 
-                  {/* Detalle Factura: Formulario RUC, Razón Social y Dirección Fiscal */}
                   {receiptType === "factura" && (
                     <div className="space-y-3.5 p-4 bg-surface-subtle border border-border rounded-card animate-in fade-in duration-150">
                       <div>
@@ -1992,7 +2170,7 @@ export default function CheckoutView() {
                                 onClick={() => setIsRucLocked(false)}
                                 className="text-xs text-accent hover:underline font-medium inline-flex items-center gap-1"
                               >
-                                <Edit3 className="w-3 h-3" />
+                                <Edit3 className="w-3.5 h-3.5" />
                                 Editar manualmente
                               </button>
                             )}
@@ -2024,14 +2202,13 @@ export default function CheckoutView() {
                   )}
                 </div>
 
-                {/* B. SECCIÓN MÉTODOS DE PAGO: Dos opciones interactivas */}
+                {/* Métodos de Pago */}
                 <div className="space-y-3 pt-3 border-t border-border">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Método de Pago
                   </label>
 
                   <div className="space-y-3">
-                    {/* 1. Transferencia Directa (Yape / Plin Manual) */}
                     <div
                       onClick={() => setPaymentMethod("yape_plin")}
                       className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
@@ -2057,16 +2234,15 @@ export default function CheckoutView() {
                           </Badge>
                         </div>
                         <span className="block text-xs text-brand-secondary mt-1">
-                          Transfiere desde tu app bancaria e ingresa el número de operación.
+                          Transfiere desde tu app bancaria e ingresa el número
+                          de operación.
                         </span>
                       </div>
                     </div>
 
-                    {/* Sub-bloque Yape / Plin Manual */}
                     {paymentMethod === "yape_plin" && (
                       <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-4 animate-in fade-in duration-150">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                          {/* Datos institucionales */}
                           <div className="space-y-2 text-xs">
                             <div className="flex justify-between sm:block border-b sm:border-b-0 border-border pb-1.5 sm:pb-0">
                               <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
@@ -2094,7 +2270,6 @@ export default function CheckoutView() {
                             </div>
                           </div>
 
-                          {/* Contenedor visual sobrio para el QR */}
                           <div className="flex flex-col items-center justify-center p-3.5 bg-surface-card border border-border rounded-card text-center space-y-1.5">
                             <div className="w-24 h-24 rounded border border-border bg-white flex items-center justify-center p-2 shadow-xs">
                               <QrCode className="w-20 h-20 text-brand-primary" />
@@ -2105,7 +2280,6 @@ export default function CheckoutView() {
                           </div>
                         </div>
 
-                        {/* Input Número de Operación */}
                         <div className="pt-2 border-t border-border space-y-1.5">
                           <Input
                             label="Número de Operación (6 a 8 dígitos)"
@@ -2124,7 +2298,6 @@ export default function CheckoutView() {
                       </div>
                     )}
 
-                    {/* 2. Pago Online Seguro (Culqi: Tarjetas de Débito/Crédito y Yape App) */}
                     <div
                       onClick={() => setPaymentMethod("culqi_gateway")}
                       className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
@@ -2153,12 +2326,12 @@ export default function CheckoutView() {
                           <CreditCard className="w-4 h-4 text-accent" />
                         </div>
                         <p className="text-xs text-brand-secondary mt-1">
-                          Acepta Visa, Mastercard y Yape con código de aprobación. Procesado de forma segura por Culqi
+                          Acepta Visa, Mastercard y Yape con código de
+                          aprobación. Procesado de forma segura por Culqi.
                         </p>
                       </div>
                     </div>
 
-                    {/* 3. Pago Contra Entrega (Efectivo al recibir) */}
                     <div
                       onClick={() => {
                         if (isCashOnDeliveryAllowed) {
@@ -2182,7 +2355,8 @@ export default function CheckoutView() {
                               : "border-brand-secondary bg-surface-card text-white"
                         }`}
                       >
-                        {paymentMethod === "cash_on_delivery" && isCashOnDeliveryAllowed ? (
+                        {paymentMethod === "cash_on_delivery" &&
+                        isCashOnDeliveryAllowed ? (
                           <div className="w-2 h-2 rounded-full bg-white" />
                         ) : (
                           <div className="w-2 h-2 rounded-full bg-transparent" />
@@ -2205,7 +2379,8 @@ export default function CheckoutView() {
                         </div>
 
                         <p className="text-xs text-brand-secondary mt-1">
-                          Cancela en efectivo exacto al momento de recibir tus prendas.
+                          Cancela en efectivo exacto al momento de recibir tus
+                          prendas.
                         </p>
 
                         {!isCashOnDeliveryAllowed && (
@@ -2222,29 +2397,29 @@ export default function CheckoutView() {
                     </div>
                   </div>
 
-                  {/* Estado de procesamiento en curso de Culqi */}
                   {isProcessing && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-card text-xs text-blue-800 flex items-center gap-2 animate-in fade-in duration-150">
                       <Loader2 className="w-4 h-4 animate-spin text-accent flex-shrink-0" />
                       <p className="font-medium">
-                        Procesando pago seguro con Culqi. Por favor espera sin recargar la página...
+                        Procesando pago seguro con Culqi. Por favor espera sin
+                        recargar la página...
                       </p>
                     </div>
                   )}
 
-                  {/* Alerta de Culqi en caso de error */}
                   {culqiError && (
                     <div className="p-3 bg-rose-50 border border-status-danger-border rounded-card text-xs text-status-danger-text flex items-start gap-2 animate-in fade-in duration-150">
                       <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-status-danger-text" />
                       <div className="flex-1">
-                        <p className="font-semibold">Inconveniente con la pasarela</p>
+                        <p className="font-semibold">
+                          Inconveniente con la pasarela
+                        </p>
                         <p>{culqiError}</p>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Acciones Finales */}
                 <div className="pt-4 flex justify-between items-center">
                   <Button
                     type="button"
@@ -2267,8 +2442,8 @@ export default function CheckoutView() {
                     {isProcessing
                       ? "Procesando pago..."
                       : paymentMethod === "culqi_gateway"
-                      ? `Pagar con Culqi ${formatCurrency(totalAmount)}`
-                      : `Confirmar Pedido ${formatCurrency(totalAmount)}`}
+                        ? `Pagar con Culqi ${formatCurrency(totalAmount)}`
+                        : `Confirmar Pedido ${formatCurrency(totalAmount)}`}
                   </Button>
                 </div>
               </form>
@@ -2276,7 +2451,7 @@ export default function CheckoutView() {
           )}
         </div>
 
-        {/* Columna Lateral: Resumen Financiero Inmutable (lg:col-span-4) */}
+        {/* Resumen Lateral */}
         <aside className="lg:col-span-4">
           <div className="bg-surface-card border border-border rounded-card p-5 space-y-5 sticky top-24 shadow-subtle">
             <div className="border-b border-border pb-3 flex items-center justify-between">
@@ -2288,7 +2463,6 @@ export default function CheckoutView() {
               </Badge>
             </div>
 
-            {/* Lista compacta de items */}
             <div className="max-h-60 overflow-y-auto space-y-3 pr-1">
               {items.map((item) => (
                 <div
@@ -2329,7 +2503,6 @@ export default function CheckoutView() {
               ))}
             </div>
 
-            {/* Desglose Financiero */}
             <div className="border-t border-border pt-4 space-y-2 text-xs">
               <div className="flex justify-between text-brand-secondary">
                 <span>Subtotal prendas:</span>
@@ -2357,7 +2530,6 @@ export default function CheckoutView() {
               </div>
             </div>
 
-            {/* Aviso Sanitario Obligatorio */}
             <div className="p-3 bg-surface-subtle border border-border rounded text-[11px] text-brand-secondary flex items-start gap-2 leading-relaxed">
               <ShieldAlert className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <span>

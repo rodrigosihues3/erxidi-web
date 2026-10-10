@@ -1,4 +1,4 @@
-import { LayoutDashboard, ShoppingBag, Package, Tags, Store, X, Truck } from "lucide-react";
+import { LayoutDashboard, ShoppingBag, Package, Tags, Store, X, Truck, MapPin } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const items = [
@@ -7,7 +7,7 @@ const items = [
   { label: "Productos", path: "/admin/productos", icon: Package },
   { label: "Categorías", path: "/admin/categorias", icon: Tags },
   { label: "Repartidores", path: "/admin/repartidores", icon: Truck },
-  
+  { label: "Zona de Cobertura", path: "/admin/cobertura", icon: MapPin },
 ];
 
 export default function AdminSidebar({ open, onClose }) {

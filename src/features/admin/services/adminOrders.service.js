@@ -160,25 +160,53 @@ export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
   return data;
 }
 
-export async function getDashboardOrders(rangeOrDate = 30) {
-  let since;
-  if (rangeOrDate instanceof Date) {
-    since = rangeOrDate;
-  } else if (typeof rangeOrDate === "string" && (rangeOrDate.includes("T") || rangeOrDate.includes("-"))) {
-    since = new Date(rangeOrDate);
-  } else {
-    const days = Number(rangeOrDate || 30);
-    const ms = days === 1 ? 24 * 60 * 60 * 1000 : days * 24 * 60 * 60 * 1000;
-    since = new Date(Date.now() - ms);
-  }
-
-  const { data, error } = await supabase
+export async function getDashboardOrders(filterRange = "30days") {
+  let query = supabase
     .from("orders")
     .select(`
       id, order_number, status, total_amount, delivery_type,
       payment_status, created_at, customer_name, customer_email
     `)
-    .gte("created_at", since.toISOString())
+    .order("created_at", { ascending: false });
+
+  let since = null;
+  if (filterRange === "today" || filterRange === "1") {
+    since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+  } else if (filterRange === "7days" || filterRange === "7") {
+    since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  } else if (filterRange === "30days" || filterRange === "30") {
+    since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  } else if (filterRange === "all") {
+    since = null;
+  } else if (filterRange instanceof Date) {
+    since = filterRange.toISOString();
+  } else if (typeof filterRange === "string" && (filterRange.includes("T") || filterRange.includes("-"))) {
+    since = new Date(filterRange).toISOString();
+  }
+
+  if (since) {
+    query = query.gte("created_at", since);
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Consulta de pedidos para la Cola de Despacho Inmediato:
+ * Filtra únicamente pedidos operativos en estado 'received' o 'en_preparacion'.
+ */
+export async function getImmediateDispatchOrders() {
+  const { data, error } = await supabase
+    .from("orders")
+    .select(`
+      id, order_number, status, total_amount, delivery_type,
+      payment_status, created_at, customer_name, customer_email,
+      customer_phone, delivery_address, scheduled_time_slot
+    `)
+    .in("status", ["received", "en_preparacion"])
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -186,15 +214,16 @@ export async function getDashboardOrders(rangeOrDate = 30) {
 }
 
 /**
- * Calcula el total de ventas sumando total_amount donde payment_status = 'paid' y status != 'cancelado'
+ * Calcula el total de ventas sumando total_amount sobre todos los pedidos
+ * donde status !== 'cancelado' y status !== 'cancelled' y payment_status !== 'failed'
  */
 export function calculateDashboardSales(orders = []) {
   return orders
     .filter(
       (order) =>
-        (order.payment_status === "paid" || order.payment_status === "pagado") &&
         order.status !== "cancelado" &&
-        order.status !== "cancelled",
+        order.status !== "cancelled" &&
+        order.payment_status !== "failed",
     )
     .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
 }
