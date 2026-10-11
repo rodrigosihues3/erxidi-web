@@ -6,6 +6,7 @@ import {
   Outlet,
   useParams,
   useNavigate,
+  Navigate,
 } from "react-router-dom";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { AuthProvider } from "./context/AuthContext";
@@ -16,7 +17,7 @@ import LoginView from "./features/auth/LoginView";
 import MainLayout from "./components/layout/MainLayout";
 import Button from "./components/ui/Button";
 
-//admin
+// Admin
 import AdminLayout from "./features/admin/components/AdminLayout";
 import AdminProtectedRoute from "./features/admin/components/ProtectedRoute";
 import DashboardView from "./features/admin/views/DashboardView";
@@ -42,7 +43,6 @@ import { getProductBySlug } from "./services/api/catalogService";
 import { DeliveryOnlyRoute, ShopCustomerRoute } from "./components/RoleRoute";
 import DeliveryDashboard from "./features/delivery/DeliveryDashboard";
 
-// Contenedor que resuelve el producto dinámicamente desde Supabase
 function ProductDetailRouteWrapper() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -153,7 +153,6 @@ export default function App() {
               <Route
                 element={
                   <ShopCustomerRoute>
-                    {/* Outlet implícito o render directo si ShopCustomerRoute devuelve children */}
                     <Outlet />
                   </ShopCustomerRoute>
                 }
@@ -171,7 +170,7 @@ export default function App() {
                 />
               </Route>
 
-              {/* Rutas Públicas Operativas (Accesibles por todos) */}
+              {/* Rutas Públicas Operativas */}
               <Route
                 path="/seguimiento/:orderNumber"
                 element={<OrderTrackingView />}
@@ -198,7 +197,7 @@ export default function App() {
                 <Route path="/mis-pedidos" element={<OrdersHistoryView />} />
               </Route>
 
-              {/* Ruta exclusiva de repartidor: Con Navbar mediante MainLayout */}
+              {/* Ruta exclusiva de repartidor */}
               <Route element={<ProtectedRoute allowedRoles={["delivery"]} />}>
                 <Route
                   path="/reparto"
@@ -211,20 +210,38 @@ export default function App() {
               </Route>
             </Route>
 
-            {/* Backoffice: solo owner/admin. El esquema actual permite owner como rol administrativo. */}
+            {/* Backoffice: Administrador / Owner */}
             <Route element={<AdminProtectedRoute />}>
               <Route element={<AdminLayout />}>
                 <Route path="/admin" element={<DashboardView />} />
                 <Route path="/admin/pedidos" element={<OrdersListView />} />
-                <Route path="/admin/pedidos/:orderNumber" element={<OrderDetailView />} />
+                <Route
+                  path="/admin/pedidos/:orderNumber"
+                  element={<OrderDetailView />}
+                />
                 <Route path="/admin/productos" element={<ProductsListView />} />
-                <Route path="/admin/productos/nuevo" element={<ProductFormView />} />
-                <Route path="/admin/productos/:id/editar" element={<ProductFormView />} />
+                <Route
+                  path="/admin/productos/nuevo"
+                  element={<ProductFormView />}
+                />
+                <Route
+                  path="/admin/productos/:id/editar"
+                  element={<ProductFormView />}
+                />
                 <Route path="/admin/categorias" element={<CategoriesView />} />
-                <Route path="/admin/repartidores" element={<DeliveryUsersView />} />
-                <Route path="/admin/cobertura" element={<CoverageSettingsView />} />
+                <Route
+                  path="/admin/repartidores"
+                  element={<DeliveryUsersView />}
+                />
+                <Route
+                  path="/admin/cobertura"
+                  element={<CoverageSettingsView />}
+                />
               </Route>
             </Route>
+
+            {/* Fallback Global: Redirección inmediata al Home ante cualquier ruta inexistente */}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </CartProvider>
       </AuthProvider>

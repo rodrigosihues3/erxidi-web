@@ -51,7 +51,7 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
   const navLinks = [
     { label: "Inicio", path: "/" },
     { label: "Catálogo", path: "/catalogo" },
-    { label: "Sistema UI", path: "/ui" },
+    // { label: "Sistema UI", path: "/ui" },
   ];
 
   const displayName =
