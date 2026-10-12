@@ -105,32 +105,104 @@ export async function createProduct(payload) {
   return getProduct(data.id);
 }
 
+
 export async function updateProduct(id, payload) {
   const { variants = [], ...product } = payload;
-  const { error } = await supabase
+
+  // 1. Actualizar los datos generales del producto.
+  const { error: productError } = await supabase
     .from("products")
-    .update({ ...product, updated_at: new Date().toISOString() })
+    .update({
+      ...product,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id);
 
-  if (error) throw error;
+  if (productError) throw productError;
 
-  const { error: deleteError } = await supabase
-    .from("product_variants")
-    .delete()
-    .eq("product_id", id);
-
-  if (deleteError) throw deleteError;
-
-  if (variants.length) {
-    const { error: variantsError } = await supabase
+  // 2. Consultar las variantes que ya existen.
+  const { data: existingVariants, error: fetchError } =
+    await supabase
       .from("product_variants")
-      .insert(variants.map((variant) => ({ ...variant, product_id: id })));
+      .select("*")
+      .eq("product_id", id);
 
-    if (variantsError) throw variantsError;
+  if (fetchError) throw fetchError;
+
+  const existingById = new Map(
+    (existingVariants || []).map((variant) => [
+      String(variant.id),
+      variant,
+    ])
+  );
+
+  const retainedIds = new Set();
+
+  // 3. Actualizar las existentes o insertar las nuevas.
+  for (const variant of variants) {
+    const { id: variantId, ...variantData } = variant;
+
+    if (variantId && existingById.has(String(variantId))) {
+      const existing = existingById.get(String(variantId));
+
+      if (String(existing.product_id) !== String(id)) {
+        throw new Error(
+          "La variante no pertenece a este producto."
+        );
+      }
+
+      const { error: updateError } = await supabase
+        .from("product_variants")
+        .update({
+          ...variantData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", variantId)
+        .eq("product_id", id);
+
+      if (updateError) throw updateError;
+
+      retainedIds.add(String(variantId));
+    } else {
+      // Una variante nueva se inserta sin reutilizar un ID antiguo.
+      const { data: inserted, error: insertError } =
+        await supabase
+          .from("product_variants")
+          .insert({
+            ...variantData,
+            product_id: id,
+          })
+          .select("id")
+          .single();
+
+      if (insertError) throw insertError;
+
+      retainedIds.add(String(inserted.id));
+    }
+  }
+
+  // 4. Desactivar las variantes retiradas.
+  // Nunca eliminarlas: pueden estar vinculadas a pedidos anteriores.
+  const removedVariants = (existingVariants || []).filter(
+    (variant) => !retainedIds.has(String(variant.id))
+  );
+
+  for (const variant of removedVariants) {
+    const { error: deactivateError } = await supabase
+      .from("product_variants")
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", variant.id)
+      .eq("product_id", id);
+
+    if (deactivateError) throw deactivateError;
   }
 
   return getProduct(id);
 }
+
 
 export async function setProductActive(id, isActive) {
   const { error } = await supabase
