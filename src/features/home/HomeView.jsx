@@ -109,7 +109,7 @@ export default function HomeView() {
       icon: Truck,
       title: "Ruta Local Directa",
       highlight: "Tarifa métrica real",
-      desc: "Despacho ágil en zona de cobertura y opción de recojo en taller sin costo.",
+      desc: "Despacho ágil en zona de cobertura y opción de recojo sin costo.",
     },
     {
       icon: Package,
@@ -131,21 +131,16 @@ export default function HomeView() {
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center relative z-10">
           {/* Columna Izquierda: Mensaje y Acciones */}
           <div className="lg:col-span-6 space-y-6 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-badge bg-white/10 border border-white/20 text-xs font-semibold text-slate-200">
-              <Sparkles className="w-3.5 h-3.5 text-accent" />
-              <span>Confección Local &bull; Venta Directa en Lima Norte</span>
-            </div>
 
             <h1 className="text-3xl sm:text-5xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
               El verdadero confort comienza{" "}
               <span className="text-accent underline decoration-accent/40 decoration-wavy">
                 en tu primera capa
               </span>
-              .
             </h1>
 
             <p className="text-sm sm:text-base text-slate-300 max-w-xl mx-auto lg:mx-0 leading-relaxed">
-              Prendas íntimas esenciales elaboradas en algodón nacional con
+              Prendas íntimas elaboradas en algodón nacional con
               calce ergonómico. Comodidad duradera y elasticidad equilibrada
               para acompañar tu jornada diaria sin molestias.
             </p>
@@ -240,7 +235,6 @@ export default function HomeView() {
 
               {/* Indicador inferior sutil */}
               <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-slate-400">
-                <ShieldCheck className="w-3.5 h-3.5 text-accent" />
                 <span>Toca los puntos (+) para inspeccionar acabados</span>
               </div>
             </div>
@@ -251,15 +245,12 @@ export default function HomeView() {
       {/* 2. Sección de Propuesta de Valor con Encabezado Completo */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-xl mx-auto mb-10 space-y-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-accent">
-            Formalización &bull; Cadena Textil Local
-          </span>
           <h2 className="text-2xl sm:text-3xl font-bold text-brand-primary">
-            Ropa interior esencial directa de taller
+            Ropa interior directa de taller
           </h2>
           <p className="text-xs text-brand-secondary">
             Conectamos la confección nacional con el cliente final sin
-            sobrecostos de intermediarios ni promesas falsas.
+            sobrecostos de intermediarios.
           </p>
         </div>
 
@@ -301,9 +292,6 @@ export default function HomeView() {
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-brand-primary">
               Prendas Destacadas
             </h2>
-            <p className="text-xs text-brand-secondary mt-1">
-              Esenciales anatómicos confeccionados en corte boxer brief.
-            </p>
           </div>
 
           <Link
