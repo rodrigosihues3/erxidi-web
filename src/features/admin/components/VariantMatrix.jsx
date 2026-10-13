@@ -276,7 +276,7 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
               </p>
             )}
 
-            <form onSubmit={handleAddColorSubmit} className="space-y-4">
+            <div onSubmit={handleAddColorSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1">
                   Nombre del Color
@@ -373,11 +373,16 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" variant="primary" size="sm">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleAddColorSubmit}
+                >
                   Agregar a Matriz
                 </Button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

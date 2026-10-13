@@ -48,16 +48,76 @@ export default function ProductFormView() {
 
   function handleNameChange(value) { setForm((prev) => ({ ...prev, name: value, slug: editing ? prev.slug : slugify(value) })); }
 
-  function buildPayload() {
-    const gallery = form.gallery_urls || [];
-    const main = form.main_image_url || gallery[0];
-    if (!main) throw new Error("Debes cargar al menos una imagen y definir la imagen principal.");
-    if (!form.category_id || !form.material_id || !form.name.trim() || !form.description.trim() || Number(form.price) <= 0) throw new Error("Completa los campos obligatorios del producto.");
-    if (!form.slug.trim()) throw new Error("El slug es obligatorio.");
-    const seen = new Set();
-    const cleanVariants = variants.map((variant) => ({ size_id: Number(variant.size_id), color: variant.color.trim(), color_hex: variant.color_hex || "#000000", stock: Math.max(0, Number(variant.stock) || 0), sku: variant.sku.trim(), is_active: variant.is_active !== false })).filter((variant) => { const key = `${variant.size_id}-${variant.color.toLowerCase()}`; if (!variant.color || !variant.sku || seen.has(key)) return false; seen.add(key); return true; });
-    return { category_id: Number(form.category_id), material_id: Number(form.material_id), name: form.name.trim(), slug: form.slug.trim(), description: form.description.trim(), price: Number(form.price), main_image_url: main, gallery_urls: gallery, has_size_guide: Boolean(form.has_size_guide), is_featured: Boolean(form.is_featured), is_active: Boolean(form.is_active), target_gender: form.target_gender, variants: cleanVariants };
+  
+function buildPayload() {
+  const gallery = form.gallery_urls || [];
+  const main = form.main_image_url || gallery[0];
+
+  if (!main) {
+    throw new Error(
+      "Debes cargar al menos una imagen y definir la imagen principal."
+    );
   }
+
+  if (
+    !form.category_id ||
+    !form.material_id ||
+    !form.name.trim() ||
+    !form.description.trim() ||
+    Number(form.price) <= 0
+  ) {
+    throw new Error(
+      "Completa los campos obligatorios del producto."
+    );
+  }
+
+  if (!form.slug.trim()) {
+    throw new Error("El slug es obligatorio.");
+  }
+
+  const seen = new Set();
+
+  const cleanVariants = variants
+    .map((variant) => ({
+      // Conservar el ID para identificar variantes existentes.
+      ...(variant.id != null ? { id: variant.id } : {}),
+
+      size_id: Number(variant.size_id),
+      color: variant.color.trim(),
+      color_hex: variant.color_hex || "#000000",
+      stock: Math.max(0, Number(variant.stock) || 0),
+      sku: variant.sku.trim(),
+      is_active: variant.is_active !== false,
+    }))
+    .filter((variant) => {
+      const key =
+        `${variant.size_id}-${variant.color.toLowerCase()}`;
+
+      if (!variant.color || !variant.sku || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+
+  return {
+    category_id: Number(form.category_id),
+    material_id: Number(form.material_id),
+    name: form.name.trim(),
+    slug: form.slug.trim(),
+    description: form.description.trim(),
+    price: Number(form.price),
+    main_image_url: main,
+    gallery_urls: gallery,
+    has_size_guide: Boolean(form.has_size_guide),
+    is_featured: Boolean(form.is_featured),
+    is_active: Boolean(form.is_active),
+    target_gender: form.target_gender,
+    variants: cleanVariants,
+  };
+}
+
 
   async function submit(e) {
     e.preventDefault(); setSaving(true); setError("");
