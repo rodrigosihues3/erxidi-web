@@ -429,7 +429,7 @@ export default function OrderTrackingView() {
   // FASE 2: Visualización Completa del Pedido Desbloqueado
   // -------------------------------------------------------------
   const items = order.order_items || [];
-  const whatsappUrl = `https://wa.me/51987654321?text=${encodeURIComponent(
+  const whatsappUrl = `https://wa.me/51961211119?text=${encodeURIComponent(
     `Hola ERXIDI, necesito consultar sobre mi pedido ${order.order_number}.`,
   )}`;
 
