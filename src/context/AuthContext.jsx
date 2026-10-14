@@ -27,13 +27,13 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // 1. Obtener la sesión activa al montar
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      }
-      setLoading(false);
-    });
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+  setUser(session?.user ?? null);
+  if (session?.user) {
+    await fetchProfile(session.user.id);
+  }
+  setLoading(false);
+});
 
     // 2. Escuchar cambios de estado (LOGIN, LOGOUT, TOKEN_REFRESHED)
     const {

@@ -1,0 +1,545 @@
+{
+  "id": "00000001-0000-4000-8000-000000000001",
+  "first_name": "Carlos",
+  "paternal_surname": "Ramírez",
+  "maternal_surname": "Díaz",
+  "email": "carlos.ramirez@erxidi.pe",
+  "phone": "987654321",
+  "role": "delivery",
+  "pedidos": [
+    {
+      "id": "000003e9-0000-4000-8000-0000000003e9",
+      "order_number": "ERX-00105",
+      "customer_id": "00000065-0000-4000-8000-000000000065",
+      "shipping_address_id": 501,
+      "assigned_delivery_id": "00000001-0000-4000-8000-000000000001",
+      "delivery_type": "express",
+      "delivery_cost": 8.0,
+      "subtotal": 89.9,
+      "total_amount": 97.9,
+      "payment_method": "pasarela_digital",
+      "payment_gateway_tx_id": "SBX-7F3A91",
+      "status": "en_camino",
+      "created_at": "2026-09-30T08:10:00-05:00",
+      "updated_at": "2026-09-30T10:05:00-05:00",
+      "customer": {
+        "id": "00000065-0000-4000-8000-000000000065",
+        "first_name": "Ana",
+        "paternal_surname": "Torres",
+        "maternal_surname": "Quispe",
+        "phone": "955111222"
+      },
+      "shipping_address": {
+        "id": 501,
+        "user_id": "00000065-0000-4000-8000-000000000065",
+        "alias": "Casa",
+        "receiver_name": "Ana Torres Quispe",
+        "receiver_phone": "955111222",
+        "department": "Lima",
+        "province": "Lima",
+        "district": "San Isidro",
+        "street_address": "Av. Los Olivos 123",
+        "reference": "Frente al parque El Olivar, edificio blanco",
+        "is_default": true
+      },
+      "items": [
+        {
+          "id": 1,
+          "order_id": "000003e9-0000-4000-8000-0000000003e9",
+          "variant_id": 11,
+          "quantity": 1,
+          "unit_price": 49.9,
+          "subtotal": 49.9,
+          "variant": {
+            "id": 11,
+            "sku": "CLE-ROS-M",
+            "color": "Rosa",
+            "color_hex": "#D6336C",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 1,
+              "name": "Conjunto de lencería de encaje",
+              "slug": "conjunto-lenceria-encaje",
+              "main_image_url": "https://placehold.co/200x200?text=Conjunto"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "order_id": "000003e9-0000-4000-8000-0000000003e9",
+          "variant_id": 21,
+          "quantity": 1,
+          "unit_price": 40.0,
+          "subtotal": 40.0,
+          "variant": {
+            "id": 21,
+            "sku": "BOX-NEG-L",
+            "color": "Negro",
+            "color_hex": "#000000",
+            "size": {
+              "id": 3,
+              "name": "L"
+            },
+            "product": {
+              "id": 2,
+              "name": "Bóxer de algodón",
+              "slug": "boxer-algodon",
+              "main_image_url": "https://placehold.co/200x200?text=Boxer"
+            }
+          }
+        }
+      ],
+      "total_items": 2,
+      "ui_extra": {
+        "eta_minutes": 15,
+        "latitude": -12.0975,
+        "longitude": -77.0365,
+        "delivered_at": null
+      }
+    },
+    {
+      "id": "000003ea-0000-4000-8000-0000000003ea",
+      "order_number": "ERX-00104",
+      "customer_id": "00000066-0000-4000-8000-000000000066",
+      "shipping_address_id": 502,
+      "assigned_delivery_id": "00000001-0000-4000-8000-000000000001",
+      "delivery_type": "programado",
+      "delivery_cost": 5.0,
+      "subtotal": 129.9,
+      "total_amount": 134.9,
+      "payment_method": "efectivo",
+      "payment_gateway_tx_id": null,
+      "status": "por_entregar",
+      "created_at": "2026-09-30T07:40:00-05:00",
+      "updated_at": "2026-09-30T09:30:00-05:00",
+      "customer": {
+        "id": "00000066-0000-4000-8000-000000000066",
+        "first_name": "Valeria",
+        "paternal_surname": "Gómez",
+        "maternal_surname": "Salas",
+        "phone": "955333444"
+      },
+      "shipping_address": {
+        "id": 502,
+        "user_id": "00000066-0000-4000-8000-000000000066",
+        "alias": "Casa",
+        "receiver_name": "Valeria Gómez Salas",
+        "receiver_phone": "955333444",
+        "department": "Lima",
+        "province": "Lima",
+        "district": "Miraflores",
+        "street_address": "Calle Berlín 245, Dpto 302",
+        "reference": "Al costado de la farmacia, portón negro",
+        "is_default": true
+      },
+      "items": [
+        {
+          "id": 3,
+          "order_id": "000003ea-0000-4000-8000-0000000003ea",
+          "variant_id": 11,
+          "quantity": 1,
+          "unit_price": 49.9,
+          "subtotal": 49.9,
+          "variant": {
+            "id": 11,
+            "sku": "CLE-ROS-M",
+            "color": "Rosa",
+            "color_hex": "#D6336C",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 1,
+              "name": "Conjunto de lencería de encaje",
+              "slug": "conjunto-lenceria-encaje",
+              "main_image_url": "https://placehold.co/200x200?text=Conjunto"
+            }
+          }
+        },
+        {
+          "id": 4,
+          "order_id": "000003ea-0000-4000-8000-0000000003ea",
+          "variant_id": 31,
+          "quantity": 2,
+          "unit_price": 40.0,
+          "subtotal": 80.0,
+          "variant": {
+            "id": 31,
+            "sku": "BCP-GRI-M",
+            "color": "Gris",
+            "color_hex": "#6B7280",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 3,
+              "name": "Bóxer clásico Pima",
+              "slug": "boxer-clasico-pima",
+              "main_image_url": "https://placehold.co/200x200?text=Pima"
+            }
+          }
+        }
+      ],
+      "total_items": 3,
+      "ui_extra": {
+        "eta_minutes": 30,
+        "latitude": -12.119,
+        "longitude": -77.03,
+        "delivered_at": null
+      }
+    },
+    {
+      "id": "000003eb-0000-4000-8000-0000000003eb",
+      "order_number": "ERX-00103",
+      "customer_id": "00000067-0000-4000-8000-000000000067",
+      "shipping_address_id": 503,
+      "assigned_delivery_id": "00000001-0000-4000-8000-000000000001",
+      "delivery_type": "express",
+      "delivery_cost": 8.0,
+      "subtotal": 134.9,
+      "total_amount": 142.9,
+      "payment_method": "pasarela_digital",
+      "payment_gateway_tx_id": "SBX-2C8D40",
+      "status": "en_camino",
+      "created_at": "2026-09-30T08:30:00-05:00",
+      "updated_at": "2026-09-30T10:20:00-05:00",
+      "customer": {
+        "id": "00000067-0000-4000-8000-000000000067",
+        "first_name": "Camila",
+        "paternal_surname": "Rojas",
+        "maternal_surname": "Vega",
+        "phone": "955555666"
+      },
+      "shipping_address": {
+        "id": 503,
+        "user_id": "00000067-0000-4000-8000-000000000067",
+        "alias": "Casa",
+        "receiver_name": "Camila Rojas Vega",
+        "receiver_phone": "955555666",
+        "department": "Lima",
+        "province": "Lima",
+        "district": "Santiago de Surco",
+        "street_address": "Av. Caminos del Inca 1580",
+        "reference": "Cerca del centro comercial, casa de reja verde",
+        "is_default": true
+      },
+      "items": [
+        {
+          "id": 5,
+          "order_id": "000003eb-0000-4000-8000-0000000003eb",
+          "variant_id": 41,
+          "quantity": 1,
+          "unit_price": 45.0,
+          "subtotal": 45.0,
+          "variant": {
+            "id": 41,
+            "sku": "BRD-NEG-M",
+            "color": "Negro",
+            "color_hex": "#111111",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 4,
+              "name": "Brasier deportivo",
+              "slug": "brasier-deportivo",
+              "main_image_url": "https://placehold.co/200x200?text=Brasier"
+            }
+          }
+        },
+        {
+          "id": 6,
+          "order_id": "000003eb-0000-4000-8000-0000000003eb",
+          "variant_id": 11,
+          "quantity": 1,
+          "unit_price": 49.9,
+          "subtotal": 49.9,
+          "variant": {
+            "id": 11,
+            "sku": "CLE-ROS-M",
+            "color": "Rosa",
+            "color_hex": "#D6336C",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 1,
+              "name": "Conjunto de lencería de encaje",
+              "slug": "conjunto-lenceria-encaje",
+              "main_image_url": "https://placehold.co/200x200?text=Conjunto"
+            }
+          }
+        },
+        {
+          "id": 7,
+          "order_id": "000003eb-0000-4000-8000-0000000003eb",
+          "variant_id": 21,
+          "quantity": 1,
+          "unit_price": 40.0,
+          "subtotal": 40.0,
+          "variant": {
+            "id": 21,
+            "sku": "BOX-NEG-L",
+            "color": "Negro",
+            "color_hex": "#000000",
+            "size": {
+              "id": 3,
+              "name": "L"
+            },
+            "product": {
+              "id": 2,
+              "name": "Bóxer de algodón",
+              "slug": "boxer-algodon",
+              "main_image_url": "https://placehold.co/200x200?text=Boxer"
+            }
+          }
+        }
+      ],
+      "total_items": 3,
+      "ui_extra": {
+        "eta_minutes": 45,
+        "latitude": -12.133,
+        "longitude": -77.007,
+        "delivered_at": null
+      }
+    },
+    {
+      "id": "000003ec-0000-4000-8000-0000000003ec",
+      "order_number": "ERX-00102",
+      "customer_id": "00000068-0000-4000-8000-000000000068",
+      "shipping_address_id": 504,
+      "assigned_delivery_id": "00000001-0000-4000-8000-000000000001",
+      "delivery_type": "programado",
+      "delivery_cost": 5.0,
+      "subtotal": 80.0,
+      "total_amount": 85.0,
+      "payment_method": "efectivo",
+      "payment_gateway_tx_id": null,
+      "status": "por_entregar",
+      "created_at": "2026-09-30T09:00:00-05:00",
+      "updated_at": "2026-09-30T09:45:00-05:00",
+      "customer": {
+        "id": "00000068-0000-4000-8000-000000000068",
+        "first_name": "Lucía",
+        "paternal_surname": "Paredes",
+        "maternal_surname": "Luna",
+        "phone": "955777888"
+      },
+      "shipping_address": {
+        "id": 504,
+        "user_id": "00000068-0000-4000-8000-000000000068",
+        "alias": "Casa",
+        "receiver_name": "Lucía Paredes Luna",
+        "receiver_phone": "955777888",
+        "department": "Lima",
+        "province": "Lima",
+        "district": "Jesús María",
+        "street_address": "Av. Salaverry 2310",
+        "reference": "Frente al grifo, puerta metálica gris",
+        "is_default": true
+      },
+      "items": [
+        {
+          "id": 8,
+          "order_id": "000003ec-0000-4000-8000-0000000003ec",
+          "variant_id": 21,
+          "quantity": 2,
+          "unit_price": 40.0,
+          "subtotal": 80.0,
+          "variant": {
+            "id": 21,
+            "sku": "BOX-NEG-L",
+            "color": "Negro",
+            "color_hex": "#000000",
+            "size": {
+              "id": 3,
+              "name": "L"
+            },
+            "product": {
+              "id": 2,
+              "name": "Bóxer de algodón",
+              "slug": "boxer-algodon",
+              "main_image_url": "https://placehold.co/200x200?text=Boxer"
+            }
+          }
+        }
+      ],
+      "total_items": 2,
+      "ui_extra": {
+        "eta_minutes": 60,
+        "latitude": -12.089,
+        "longitude": -77.051,
+        "delivered_at": null
+      }
+    },
+    {
+      "id": "000003ed-0000-4000-8000-0000000003ed",
+      "order_number": "ERX-00101",
+      "customer_id": "00000069-0000-4000-8000-000000000069",
+      "shipping_address_id": 505,
+      "assigned_delivery_id": "00000001-0000-4000-8000-000000000001",
+      "delivery_type": "express",
+      "delivery_cost": 8.0,
+      "subtotal": 85.0,
+      "total_amount": 93.0,
+      "payment_method": "pasarela_digital",
+      "payment_gateway_tx_id": "SBX-91B6E2",
+      "status": "entregado",
+      "created_at": "2026-09-29T16:20:00-05:00",
+      "updated_at": "2026-09-30T08:55:00-05:00",
+      "customer": {
+        "id": "00000069-0000-4000-8000-000000000069",
+        "first_name": "Rosa",
+        "paternal_surname": "Mendoza",
+        "maternal_surname": "Cruz",
+        "phone": "955999000"
+      },
+      "shipping_address": {
+        "id": 505,
+        "user_id": "00000069-0000-4000-8000-000000000069",
+        "alias": "Casa",
+        "receiver_name": "Rosa Mendoza Cruz",
+        "receiver_phone": "955999000",
+        "department": "Lima",
+        "province": "Lima",
+        "district": "San Borja",
+        "street_address": "Av. San Luis 2050",
+        "reference": "Edificio azul, timbre 5B",
+        "is_default": true
+      },
+      "items": [
+        {
+          "id": 9,
+          "order_id": "000003ed-0000-4000-8000-0000000003ed",
+          "variant_id": 31,
+          "quantity": 1,
+          "unit_price": 40.0,
+          "subtotal": 40.0,
+          "variant": {
+            "id": 31,
+            "sku": "BCP-GRI-M",
+            "color": "Gris",
+            "color_hex": "#6B7280",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 3,
+              "name": "Bóxer clásico Pima",
+              "slug": "boxer-clasico-pima",
+              "main_image_url": "https://placehold.co/200x200?text=Pima"
+            }
+          }
+        },
+        {
+          "id": 10,
+          "order_id": "000003ed-0000-4000-8000-0000000003ed",
+          "variant_id": 41,
+          "quantity": 1,
+          "unit_price": 45.0,
+          "subtotal": 45.0,
+          "variant": {
+            "id": 41,
+            "sku": "BRD-NEG-M",
+            "color": "Negro",
+            "color_hex": "#111111",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 4,
+              "name": "Brasier deportivo",
+              "slug": "brasier-deportivo",
+              "main_image_url": "https://placehold.co/200x200?text=Brasier"
+            }
+          }
+        }
+      ],
+      "total_items": 2,
+      "ui_extra": {
+        "eta_minutes": 0,
+        "latitude": -12.106,
+        "longitude": -76.999,
+        "delivered_at": "2026-09-30T08:55:00-05:00"
+      }
+    },
+    {
+      "id": "000003ee-0000-4000-8000-0000000003ee",
+      "order_number": "ERX-00100",
+      "customer_id": "0000006a-0000-4000-8000-00000000006a",
+      "shipping_address_id": 506,
+      "assigned_delivery_id": "00000001-0000-4000-8000-000000000001",
+      "delivery_type": "programado",
+      "delivery_cost": 5.0,
+      "subtotal": 49.9,
+      "total_amount": 54.9,
+      "payment_method": "efectivo",
+      "payment_gateway_tx_id": null,
+      "status": "entregado",
+      "created_at": "2026-09-29T14:05:00-05:00",
+      "updated_at": "2026-09-30T09:10:00-05:00",
+      "customer": {
+        "id": "0000006a-0000-4000-8000-00000000006a",
+        "first_name": "Sofía",
+        "paternal_surname": "Castillo",
+        "maternal_surname": "Ramos",
+        "phone": "955121314"
+      },
+      "shipping_address": {
+        "id": 506,
+        "user_id": "0000006a-0000-4000-8000-00000000006a",
+        "alias": "Casa",
+        "receiver_name": "Sofía Castillo Ramos",
+        "receiver_phone": "955121314",
+        "department": "Lima",
+        "province": "Lima",
+        "district": "Lince",
+        "street_address": "Av. Arequipa 1840",
+        "reference": "Junto a la panadería, segundo piso",
+        "is_default": true
+      },
+      "items": [
+        {
+          "id": 11,
+          "order_id": "000003ee-0000-4000-8000-0000000003ee",
+          "variant_id": 11,
+          "quantity": 1,
+          "unit_price": 49.9,
+          "subtotal": 49.9,
+          "variant": {
+            "id": 11,
+            "sku": "CLE-ROS-M",
+            "color": "Rosa",
+            "color_hex": "#D6336C",
+            "size": {
+              "id": 2,
+              "name": "M"
+            },
+            "product": {
+              "id": 1,
+              "name": "Conjunto de lencería de encaje",
+              "slug": "conjunto-lenceria-encaje",
+              "main_image_url": "https://placehold.co/200x200?text=Conjunto"
+            }
+          }
+        }
+      ],
+      "total_items": 1,
+      "ui_extra": {
+        "eta_minutes": 0,
+        "latitude": -12.083,
+        "longitude": -77.034,
+        "delivered_at": "2026-09-30T09:10:00-05:00"
+      }
+    }
+  ]
+}

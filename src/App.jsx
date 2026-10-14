@@ -4,6 +4,9 @@ import { CartProvider, useCart } from "./context/CartContext";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import DesignSystemShowcase from "./features/dev/DesignSystemShowcase";
 import LoginView from "./features/auth/LoginView";
+import DeliveryDashboard from "./features/delivery/DeliveryDashboard";
+import DeliveryRedirect from "./features/delivery/DeliveryRedirect";
+
 
 function NavigationBar() {
   const { user, profile, signOut } = useAuth();
@@ -72,6 +75,7 @@ export default function App() {
         <CartProvider>
           <div className="min-h-screen bg-surface-app text-brand-primary">
             <NavigationBar />
+            <DeliveryRedirect />
             <Routes>
               {/* Rutas Públicas */}
               <Route path="/" element={<HomeView />} />
@@ -102,10 +106,7 @@ export default function App() {
               </Route>
               {/* Rutas Protegidas de Logística (Repartidor) */}
               <Route element={<ProtectedRoute allowedRoles={["delivery"]} />}>
-                <Route
-                  path="/reparto"
-                  element={<div>Bandeja de Reparto (En desarrollo)</div>}
-                />
+                   <Route path="/reparto" element={<DeliveryDashboard />} />
               </Route>
             </Routes>
           </div>
