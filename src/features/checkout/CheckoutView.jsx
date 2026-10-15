@@ -2246,14 +2246,6 @@ export default function CheckoutView() {
                           <div className="space-y-2 text-xs">
                             <div className="flex justify-between sm:block border-b sm:border-b-0 border-border pb-1.5 sm:pb-0">
                               <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
-                                Número Institucional:
-                              </span>
-                              <span className="font-mono text-sm font-bold text-brand-primary">
-                                987 654 321
-                              </span>
-                            </div>
-                            <div className="flex justify-between sm:block border-b sm:border-b-0 border-border pb-1.5 sm:pb-0">
-                              <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
                                 Titular:
                               </span>
                               <span className="font-semibold text-brand-primary">
