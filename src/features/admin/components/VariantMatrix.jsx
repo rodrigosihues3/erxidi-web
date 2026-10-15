@@ -12,24 +12,114 @@ const QUICK_PRESETS = [
   { name: "Vino", hex: "#881337" },
 ];
 
-export default function VariantMatrix({ sizes, variants, onChange }) {
+const KIDS_SIZE_REGEX = /^(\d{1,2}T?|T[- ]?\d{1,2})$/i;
+
+function isKidsSizeName(name = "") {
+  const clean = String(name).trim();
+  return KIDS_SIZE_REGEX.test(clean);
+}
+
+function matchesTargetAudience(sizeName, targetGender) {
+  const isKidsAudience = targetGender === "nino" || targetGender === "nina";
+  const isKidsSize = isKidsSizeName(sizeName);
+  return isKidsAudience ? isKidsSize : !isKidsSize;
+}
+
+function buildSku(colorName, sizeName, sizeId) {
+  const prefix =
+    colorName
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(0, 3)
+      .toUpperCase() || "COL";
+  const suffix = Date.now().toString().slice(-5);
+  return [prefix, sizeName, suffix, sizeId].join("-");
+}
+
+export default function VariantMatrix({
+  sizes = [],
+  variants = [],
+  targetGender = "hombre",
+  onChange,
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [colorName, setColorName] = useState("");
   const [colorHex, setColorHex] = useState("#E8C8B5");
   const [error, setError] = useState("");
+  const [excludedSizeIds, setExcludedSizeIds] = useState([]);
+
+  // 1. Filtrar tallas correspondientes al público seleccionado
+  const audienceSizes = useMemo(() => {
+    const filtered = sizes.filter((s) =>
+      matchesTargetAudience(s.name, targetGender)
+    );
+    return filtered.length > 0 ? filtered : sizes;
+  }, [sizes, targetGender]);
+
+  // 2. Determinar las tallas habilitadas en la matriz (excluyendo las desmarcadas manualmente)
+  const activeSizes = useMemo(() => {
+    const enabled = audienceSizes.filter(
+      (s) => !excludedSizeIds.includes(Number(s.id))
+    );
+    return enabled.length > 0 ? enabled : audienceSizes.slice(0, 1);
+  }, [audienceSizes, excludedSizeIds]);
+
+  const activeSizeIdSet = useMemo(
+    () => new Set(activeSizes.map((s) => Number(s.id))),
+    [activeSizes]
+  );
 
   const colors = useMemo(
     () => [...new Set(variants.map((v) => v.color).filter(Boolean))],
-    [variants],
+    [variants]
   );
 
   const hasEyeDropper = typeof window !== "undefined" && "EyeDropper" in window;
 
-  // Activa la pipeta nativa de pantalla
+  function toggleSizeSelection(size) {
+    const sizeId = Number(size.id);
+    const isCurrentlyActive = activeSizeIdSet.has(sizeId);
+
+    if (isCurrentlyActive) {
+      if (activeSizes.length <= 1) {
+        window.alert("Debe permanecer al menos una talla activa en la matriz.");
+        return;
+      }
+      setExcludedSizeIds((prev) => [...prev, sizeId]);
+      onChange(variants.filter((v) => Number(v.size_id) !== sizeId));
+    } else {
+      setExcludedSizeIds((prev) => prev.filter((id) => id !== sizeId));
+      if (colors.length > 0) {
+        const newCells = [];
+        for (const color of colors) {
+          const exists = variants.some(
+            (v) => v.color === color && Number(v.size_id) === sizeId
+          );
+          if (!exists) {
+            const sample = variants.find((v) => v.color === color);
+            newCells.push({
+              product_id: sample?.product_id ?? null,
+              size_id: sizeId,
+              color,
+              color_hex: sample?.color_hex || "#111827",
+              stock: 0,
+              sku: buildSku(color, size.name, sizeId),
+              is_active: true,
+            });
+          }
+        }
+        if (newCells.length > 0) {
+          onChange([...variants, ...newCells]);
+        }
+      }
+    }
+  }
+
   async function handlePickFromScreen() {
     if (!hasEyeDropper) {
       window.alert(
-        "La herramienta cuentagotas requiere Chrome, Edge u Opera en escritorio.",
+        "La herramienta cuentagotas requiere Chrome, Edge u Opera en escritorio."
       );
       return;
     }
@@ -45,7 +135,7 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
   }
 
   function handleAddColorSubmit(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const cleanName = colorName.trim();
     if (!cleanName) {
       setError("Ingresa el nombre descriptivo del color.");
@@ -53,23 +143,28 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
     }
 
     if (colors.some((item) => item.toLowerCase() === cleanName.toLowerCase())) {
-      setError(`El color "${cleanName}" ya está registrado en la matriz.`);
+      setError('El color "' + cleanName + '" ya está registrado en la matriz.');
+      return;
+    }
+
+    if (activeSizes.length === 0) {
+      setError("Selecciona al menos una talla antes de agregar un color.");
       return;
     }
 
     let cleanHex = colorHex.trim();
-    if (!cleanHex.startsWith("#")) cleanHex = `#${cleanHex}`;
+    if (!cleanHex.startsWith("#")) cleanHex = "#" + cleanHex;
     if (!/^#[0-9A-Fa-f]{6}$/.test(cleanHex)) {
       cleanHex = "#111827";
     }
 
-    const next = sizes.map((size) => ({
+    const next = activeSizes.map((size) => ({
       product_id: null,
       size_id: size.id,
       color: cleanName,
       color_hex: cleanHex.toUpperCase(),
       stock: 0,
-      sku: `${cleanName.slice(0, 3).toUpperCase()}-${size.name}-${Date.now().toString().slice(-5)}-${size.id}`,
+      sku: buildSku(cleanName, size.name, size.id),
       is_active: true,
     }));
 
@@ -80,6 +175,14 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
     setError("");
   }
 
+  function handleModalKeyDown(e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      handleAddColorSubmit();
+    }
+  }
+
   function removeColor(color) {
     onChange(variants.filter((variant) => variant.color !== color));
   }
@@ -87,8 +190,8 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
   function updateColorHex(color, newHex) {
     onChange(
       variants.map((variant) =>
-        variant.color === color ? { ...variant, color_hex: newHex } : variant,
-      ),
+        variant.color === color ? { ...variant, color_hex: newHex } : variant
+      )
     );
   }
 
@@ -98,14 +201,15 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
         if (
           variant.color !== color ||
           Number(variant.size_id) !== Number(sizeId)
-        )
+        ) {
           return variant;
+        }
         return {
           ...variant,
           [field]:
             field === "stock" ? Math.max(0, Number(rawValue) || 0) : rawValue,
         };
-      }),
+      })
     );
   }
 
@@ -118,14 +222,18 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-bold text-brand-primary">
             Variantes por talla y color
           </p>
           <p className="text-xs text-brand-muted">
-            El stock se administra por combinación.
+            Mostrando tallas para público:{" "}
+            <span className="font-semibold uppercase text-brand-primary">
+              {targetGender}
+            </span>
+            . Puedes activar o desactivar tallas específicas para esta prenda.
           </p>
         </div>
         <Button
@@ -141,9 +249,33 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
         </Button>
       </div>
 
+      {/* Selector de tallas habilitadas según el público objetivo */}
+      <div className="flex flex-wrap items-center gap-2 p-3 bg-surface-subtle rounded-button border border-border">
+        <span className="text-xs font-semibold uppercase tracking-wider text-brand-secondary mr-1">
+          Tallas habilitadas:
+        </span>
+        {audienceSizes.map((size) => {
+          const checked = activeSizeIdSet.has(Number(size.id));
+          return (
+            <button
+              key={size.id}
+              type="button"
+              onClick={() => toggleSizeSelection(size)}
+              className={
+                checked
+                  ? "px-3 py-1 rounded-badge text-xs font-semibold border transition-colors bg-brand-primary text-white border-brand-primary"
+                  : "px-3 py-1 rounded-badge text-xs font-semibold border transition-colors bg-white text-brand-secondary border-border hover:border-brand-primary"
+              }
+            >
+              {size.name}
+            </button>
+          );
+        })}
+      </div>
+
       {colors.length === 0 ? (
         <div className="border border-dashed border-border rounded-card p-6 text-center text-sm text-brand-secondary">
-          Agrega el primer color para crear la matriz.
+          Agrega el primer color para crear la matriz con las tallas habilitadas.
         </div>
       ) : (
         <div className="overflow-x-auto border border-border rounded-card">
@@ -151,7 +283,7 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
             <thead className="bg-surface-subtle">
               <tr>
                 <th className="text-left p-3">Color / Tono</th>
-                {sizes.map((size) => (
+                {activeSizes.map((size) => (
                   <th key={size.id} className="p-3 text-left">
                     {size.name}
                   </th>
@@ -187,11 +319,11 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                         </div>
                       </div>
                     </td>
-                    {sizes.map((size) => {
+                    {activeSizes.map((size) => {
                       const variant = variants.find(
                         (v) =>
                           v.color === color &&
-                          Number(v.size_id) === Number(size.id),
+                          Number(v.size_id) === Number(size.id)
                       );
                       return (
                         <td key={size.id} className="p-3">
@@ -206,7 +338,7 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                                     color,
                                     size.id,
                                     "stock",
-                                    e.target.value,
+                                    e.target.value
                                   )
                                 }
                                 className="w-24 h-9 px-2 border border-border rounded-button text-sm"
@@ -219,7 +351,7 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                                     color,
                                     size.id,
                                     "sku",
-                                    e.target.value,
+                                    e.target.value
                                   )
                                 }
                                 className="w-32 h-9 px-2 border border-border rounded-button text-xs font-mono"
@@ -250,9 +382,12 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
         </div>
       )}
 
-      {/* Modal para Agregar Color con Selector, Pipeta y Presets */}
+      {/* Modal para Agregar Color */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-100">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-100"
+          onKeyDown={handleModalKeyDown}
+        >
           <div className="bg-white border border-border rounded-card p-6 w-full max-w-md shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2">
@@ -276,7 +411,7 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
               </p>
             )}
 
-            <div onSubmit={handleAddColorSubmit} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1">
                   Nombre del Color
@@ -290,7 +425,6 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                     setError("");
                   }}
                   className="w-full h-10 px-3 border border-border rounded-button text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary"
-                  required
                   autoFocus
                 />
               </div>
@@ -300,7 +434,6 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                   Tono Visual (Hexadecimal)
                 </label>
                 <div className="flex items-center gap-2">
-                  {/* Selector visual nativo */}
                   <input
                     type="color"
                     value={colorHex}
@@ -309,7 +442,6 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                     title="Abrir paleta de colores"
                   />
 
-                  {/* Input textual de Hexadecimal */}
                   <input
                     type="text"
                     value={colorHex}
@@ -317,10 +449,8 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                     onChange={(e) => setColorHex(e.target.value.toUpperCase())}
                     className="flex-1 h-10 px-3 border border-border rounded-button text-sm font-mono uppercase"
                     placeholder="#RRGGBB"
-                    required
                   />
 
-                  {/* Botón Pipeta (EyeDropper sobre la pantalla/imágenes) */}
                   {hasEyeDropper && (
                     <Button
                       type="button"
@@ -337,7 +467,6 @@ export default function VariantMatrix({ sizes, variants, onChange }) {
                 </div>
               </div>
 
-              {/* Atajos Rápidos */}
               <div>
                 <span className="block text-[11px] font-semibold text-brand-muted mb-2">
                   Atajos rápidos de confección:

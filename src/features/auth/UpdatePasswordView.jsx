@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "../../services/supabase";
 import Button from "../../components/ui/Button";
 import Input from "../../components/ui/Input";
@@ -11,7 +11,32 @@ import {
   CardContent,
 } from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
-import { Lock, ShieldCheck, AlertCircle } from "lucide-react";
+import { Lock, ShieldCheck, AlertCircle, Check } from "lucide-react";
+
+function evaluatePasswordRules(password = "") {
+  const val = String(password);
+  const rules = [
+    { id: "length", label: "Mínimo 8 caracteres", passed: val.length >= 8 },
+    {
+      id: "upper",
+      label: "Al menos una letra mayúscula (A-Z)",
+      passed: /[A-Z]/.test(val),
+    },
+    {
+      id: "lower",
+      label: "Al menos una letra minúscula (a-z)",
+      passed: /[a-z]/.test(val),
+    },
+    { id: "number", label: "Al menos un número (0-9)", passed: /\d/.test(val) },
+    {
+      id: "special",
+      label: "Al menos un carácter especial (!@#$%^&*._-)",
+      passed: /[^A-Za-z0-9]/.test(val),
+    },
+  ];
+  const passedCount = rules.filter((r) => r.passed).length;
+  return { rules, passedCount, isAllValid: passedCount === rules.length };
+}
 
 export default function UpdatePasswordView() {
   const [password, setPassword] = useState("");
@@ -21,17 +46,21 @@ export default function UpdatePasswordView() {
   const [success, setSuccess] = useState(false);
 
   const navigate = useNavigate();
-  const location = useLocation();
 
-  // Supabase automáticamente maneja el token en el fragmento de la URL (#access_token=...)
-  // onAuthStateChange se encarga de loguear al usuario temporalmente para poder cambiar la contraseña.
+  const passwordCheck = useMemo(
+    () => evaluatePasswordRules(password),
+    [password]
+  );
+  const passwordsMatch =
+    confirmPassword.length > 0 && password === confirmPassword;
 
   useEffect(() => {
-    // Si llegamos aquí y hay un error en el hash (ej. token expirado o inválido)
     const hash = window.location.hash;
     if (hash && hash.includes("error_description")) {
       const urlParams = new URLSearchParams(hash.replace("#", "?"));
-      setError(urlParams.get("error_description") || "Enlace inválido o expirado.");
+      setError(
+        urlParams.get("error_description") || "Enlace inválido o expirado."
+      );
     }
   }, []);
 
@@ -40,8 +69,8 @@ export default function UpdatePasswordView() {
     setError(null);
     setSuccess(false);
 
-    if (password.length < 6) {
-      setError("La contraseña debe tener al menos 6 caracteres.");
+    if (!passwordCheck.isAllValid) {
+      setError("La contraseña debe cumplir todos los requisitos de seguridad.");
       return;
     }
 
@@ -56,9 +85,7 @@ export default function UpdatePasswordView() {
         password: password,
       });
 
-      if (updateError) {
-        throw updateError;
-      }
+      if (updateError) throw updateError;
 
       setSuccess(true);
       setTimeout(() => {
@@ -80,7 +107,7 @@ export default function UpdatePasswordView() {
             <Badge variant="neutral">Seguridad</Badge>
           </div>
           <CardDescription>
-            Ingresa tu nueva contraseña para acceder a ERXIDI.
+            Configura tu nueva clave segura para acceder a ERXIDI.
           </CardDescription>
         </CardHeader>
 
@@ -99,7 +126,7 @@ export default function UpdatePasswordView() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
                 <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
               )}
@@ -107,12 +134,12 @@ export default function UpdatePasswordView() {
               <Input
                 label="Nueva Contraseña"
                 type="password"
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Crea una contraseña segura"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
-              
+
               <Input
                 label="Confirmar Contraseña"
                 type="password"
@@ -122,9 +149,32 @@ export default function UpdatePasswordView() {
                 required
               />
 
+              <div className="p-3 rounded-card bg-surface-subtle border border-border space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-secondary block">
+                  Reglas de seguridad ({passwordCheck.passedCount}/5)
+                </span>
+                <ul className="space-y-1 text-[11px]">
+                  {passwordCheck.rules.map((r) => (
+                    <li
+                      key={r.id}
+                      className={
+                        "flex items-center gap-1.5 " +
+                        (r.passed
+                          ? "text-emerald-700 font-semibold"
+                          : "text-brand-muted")
+                      }
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{r.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
               <Button
                 type="submit"
                 variant="primary"
+                disabled={loading || !passwordCheck.isAllValid || !passwordsMatch}
                 className="w-full mt-2 bg-accent hover:bg-accent-hover text-white"
                 isLoading={loading}
               >

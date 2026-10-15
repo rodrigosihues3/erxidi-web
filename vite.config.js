@@ -10,10 +10,6 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/api-decolecta/, ""),
-        headers: {
-          // Si el servidor requiere el token inyectado a nivel de cabecera de transporte:
-          // 'Authorization': `Bearer ${process.env.VITE_DNI_API_TOKEN}`
-        },
       },
     },
   },

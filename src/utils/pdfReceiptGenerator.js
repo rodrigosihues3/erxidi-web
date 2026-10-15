@@ -1,8 +1,16 @@
 import { jsPDF } from "jspdf";
 
-const formatMoney = (amount) => `S/ ${Number(amount || 0).toFixed(2)}`;
+const formatMoney = (amount) => "S/ " + Number(amount || 0).toFixed(2);
 
-export function generateReceiptPDF(order) {
+function cleanCustomerStreetAddress(rawAddress = "") {
+  if (!rawAddress) return "";
+  // Retira el bloque "(Ref: ...)" para que el comprobante muestre solo la vía y distrito
+  return String(rawAddress)
+    .replace(/\s*\(Ref:[^)]*\)/gi, "")
+    .trim();
+}
+
+function buildReceiptPDFDoc(order) {
   if (!order) {
     throw new Error("No hay datos del pedido para generar el comprobante.");
   }
@@ -16,8 +24,21 @@ export function generateReceiptPDF(order) {
 
   const items = order.items || order.order_items || [];
   const invoiceData = order.invoice_data || {};
-  const isInvoice = (order.invoice_type || "").toLowerCase() === "factura";
-  const documentNumber = invoiceData.doc_number || order.order_number;
+  const rawType = String(
+    order.invoice_type || invoiceData.type || "boleta"
+  ).toLowerCase();
+
+  const isInvoice = rawType === "factura";
+  const isNotaVenta = rawType === "nota_venta" || rawType === "none";
+
+  const docTitle = isInvoice
+    ? "FACTURA ELECTRÓNICA"
+    : isNotaVenta
+      ? "NOTA DE VENTA"
+      : "BOLETA DE VENTA ELECTRÓNICA";
+
+  const documentNumber =
+    invoiceData.doc_number || order.order_number || "ORD-000000";
   const issuedAt =
     invoiceData.issued_at || order.created_at || new Date().toISOString();
   const dateLabel = new Date(issuedAt).toLocaleString("es-PE", {
@@ -39,7 +60,6 @@ export function generateReceiptPDF(order) {
   // ---------------------------------------------------------
   // 1. CABECERA: Emisor (Izquierda) y Recuadro Fiscal (Derecha)
   // ---------------------------------------------------------
-  // Datos del Emisor
   doc.setTextColor(17, 24, 39);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
@@ -48,7 +68,7 @@ export function generateReceiptPDF(order) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
-  doc.text("CONFECCIONES TEXTILES", left, y + 23);
+  doc.text("COMERCIO Y DISTRIBUCIÓN MINORISTA", left, y + 23);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
@@ -58,7 +78,6 @@ export function generateReceiptPDF(order) {
   doc.text("Lima Metropolitana, Perú", left, y + 61);
   doc.text("soporte@erxidi.com  |  +51 987 654 321", left, y + 73);
 
-  // Recuadro Fiscal Normativo (Estilo SUNAT)
   const boxWidth = 200;
   const boxHeight = 78;
   const boxX = right - boxWidth;
@@ -79,87 +98,126 @@ export function generateReceiptPDF(order) {
   doc.setFillColor(226, 232, 240);
   doc.rect(boxX, boxY + 28, boxWidth, 24, "F");
 
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  doc.text(
-    isInvoice ? "FACTURA ELECTRÓNICA" : "BOLETA DE VENTA ELECTRÓNICA",
-    boxX + boxWidth / 2,
-    boxY + 44,
-    { align: "center" },
-  );
+  doc.text(docTitle, boxX + boxWidth / 2, boxY + 44, { align: "center" });
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.setTextColor(180, 83, 9); // Tono ámbar/acento
-  doc.text(
-    String(documentNumber || "ORD-000000"),
-    boxX + boxWidth / 2,
-    boxY + 68,
-    { align: "center" },
-  );
+  doc.setTextColor(180, 83, 9);
+  doc.text(String(documentNumber), boxX + boxWidth / 2, boxY + 68, {
+    align: "center",
+  });
 
   y = boxY + boxHeight + 20;
 
   // ---------------------------------------------------------
-  // 2. DATOS DEL COMPROBANTE Y CLIENTE
+  // 2. DATOS DINÁMICOS DEL RECEPTOR (FACTURA vs BOLETA / NOTA)
   // ---------------------------------------------------------
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.8);
   doc.line(left, y, right, y);
-  y += 14;
+  y += 12;
+
+  const holderLabel = isInvoice ? "RAZÓN SOCIAL:" : "CLIENTE:";
+  const holderValue = String(
+    invoiceData.legal_name || order.customer_name || "Cliente ERXIDI"
+  ).trim();
+
+  const docIdLabel = isInvoice ? "R.U.C.:" : "D.N.I.:";
+  const rawTaxId = String(
+    invoiceData.tax_id || order.customer_dni || ""
+  ).trim();
+  const docIdValue =
+    rawTaxId && rawTaxId !== "00000000" ? rawTaxId : "";
+
+  const addressLabel = isInvoice ? "DIRECCIÓN FISCAL:" : "DIRECCIÓN:";
+  let resolvedAddress = "";
+
+  if (isInvoice) {
+    const fiscalAddr = String(invoiceData.fiscal_address || "").trim();
+    const isSameAsDelivery =
+      fiscalAddr &&
+      order.delivery_address &&
+      fiscalAddr === String(order.delivery_address).trim();
+    if (
+      fiscalAddr &&
+      fiscalAddr !== "No registrada en SUNAT" &&
+      !isSameAsDelivery
+    ) {
+      resolvedAddress = fiscalAddr;
+    }
+  } else {
+    if (order.delivery_type !== "pickup" && order.delivery_address) {
+      resolvedAddress = cleanCustomerStreetAddress(order.delivery_address);
+    }
+  }
+
+  const valueStartX = left + 115;
+  const maxTextWidth = right - valueStartX - 10;
+
+  doc.setFontSize(8.5);
+  const holderLines = doc.splitTextToSize(holderValue || "—", maxTextWidth);
+  const addressLines = resolvedAddress
+    ? doc.splitTextToSize(resolvedAddress, maxTextWidth)
+    : [];
+
+  const holderBlockH = Math.max(14, holderLines.length * 11);
+  const addressBlockH = Math.max(14, (addressLines.length || 1) * 11);
+  const infoBoxHeight = 46 + holderBlockH + addressBlockH;
 
   doc.setFillColor(248, 250, 252);
-  doc.rect(left, y, contentWidth, 54, "F");
-  doc.roundedRect(left, y, contentWidth, 54, 2, 2, "S");
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(left, y, contentWidth, infoBoxHeight, 3, 3, "FD");
 
-  doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.setFont("helvetica", "bold");
-  doc.text("FECHA DE EMISIÓN:", left + 8, y + 15);
-  doc.text("CLIENTE / RAZÓN SOCIAL:", left + 8, y + 29);
-  doc.text("DOC. IDENTIDAD (DNI/RUC):", left + 8, y + 43);
+  let rowY = y + 16;
 
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(15, 23, 42);
-  doc.text(dateLabel, left + 130, y + 15);
-  doc.text(
-    String(invoiceData.legal_name || order.customer_name || "Cliente ERXIDI"),
-    left + 130,
-    y + 29,
-  );
-  doc.text(
-    String(invoiceData.tax_id || order.customer_dni || "No especificado"),
-    left + 130,
-    y + 43,
-  );
-
-  // Columna derecha del bloque cliente
+  // Fila 1: Fecha de Emisión
   doc.setFont("helvetica", "bold");
   doc.setTextColor(100, 116, 139);
-  doc.text("FORMA DE PAGO:", left + 320, y + 15);
-  doc.text("DIRECCIÓN:", left + 320, y + 29);
-
+  doc.text("FECHA DE EMISIÓN:", left + 10, rowY);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(15, 23, 42);
-  doc.text(
-    String(order.payment_method || "Contado").toUpperCase(),
-    left + 395,
-    y + 15,
-  );
+  doc.text(dateLabel, valueStartX, rowY);
+  rowY += 15;
 
-  const addressText = doc.splitTextToSize(
-    String(order.delivery_address || "Entrega en punto ERXIDI"),
-    right - (left + 395) - 4,
-  );
-  doc.text(addressText, left + 395, y + 29);
+  // Fila 2: Razón Social o Cliente
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(100, 116, 139);
+  doc.text(holderLabel, left + 10, rowY);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  doc.text(holderLines, valueStartX, rowY);
+  rowY += holderBlockH;
 
-  y += 68;
+  // Fila 3: R.U.C. o D.N.I.
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(100, 116, 139);
+  doc.text(docIdLabel, left + 10, rowY);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  if (docIdValue) {
+    doc.text(docIdValue, valueStartX, rowY);
+  }
+  rowY += 15;
+
+  // Fila 4: Dirección Fiscal o Dirección (en blanco si no tiene)
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(100, 116, 139);
+  doc.text(addressLabel, left + 10, rowY);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(15, 23, 42);
+  if (addressLines.length > 0) {
+    doc.text(addressLines, valueStartX, rowY);
+  }
+
+  y += infoBoxHeight + 18;
 
   // ---------------------------------------------------------
   // 3. TABLA DE ÍTEMS
   // ---------------------------------------------------------
   const drawItemsHeader = () => {
-    doc.setFillColor(30, 41, 59); // Fondo pizarra oscuro formal
+    doc.setFillColor(30, 41, 59);
     doc.rect(left, y - 11, contentWidth, 20, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
@@ -187,13 +245,13 @@ export function generateReceiptPDF(order) {
     const baseName =
       item.product_name || item.name || product.name || "Prenda ERXIDI";
     const specs = [
-      size ? `Talla: ${size}` : null,
-      color ? `Color: ${color}` : null,
+      size ? "Talla: " + size : null,
+      color ? "Color: " + color : null,
     ]
       .filter(Boolean)
       .join(" | ");
 
-    const fullDescription = specs ? `${baseName} (${specs})` : baseName;
+    const fullDescription = specs ? baseName + " (" + specs + ")" : baseName;
     const descLines = doc.splitTextToSize(fullDescription, 290);
     const rowHeight = Math.max(18, descLines.length * 11 + 6);
 
@@ -201,7 +259,6 @@ export function generateReceiptPDF(order) {
       drawItemsHeader();
     }
 
-    // Fondo alternado para filas
     if (idx % 2 === 1) {
       doc.setFillColor(248, 250, 252);
       doc.rect(left, y - 9, contentWidth, rowHeight, "F");
@@ -233,12 +290,12 @@ export function generateReceiptPDF(order) {
       acc +
       Number(
         it.subtotal ??
-          Number(it.price ?? it.unit_price ?? 0) * Number(it.quantity || 1),
+        Number(it.price ?? it.unit_price ?? 0) * Number(it.quantity || 1)
       ),
-    0,
+    0
   );
   const total = Number(
-    order.total_amount ?? calculatedItemsSubtotal + deliveryCost,
+    order.total_amount ?? calculatedItemsSubtotal + deliveryCost
   );
   const subtotal = Math.max(0, total - deliveryCost);
   const taxableAmount = Number((subtotal / 1.18).toFixed(2));
@@ -266,7 +323,6 @@ export function generateReceiptPDF(order) {
   doc.text(formatMoney(deliveryCost), right - 8, y, { align: "right" });
   y += 15;
 
-  // Barra de importe total
   doc.setFillColor(30, 41, 59);
   doc.rect(totalsBoxX - 6, y - 10, totalsBoxWidth + 6, 22, "F");
 
@@ -294,7 +350,27 @@ export function generateReceiptPDF(order) {
   const legalLines = doc.splitTextToSize(legalNotice, contentWidth);
   doc.text(legalLines, left, y);
 
-  doc.save(`${documentNumber || order.order_number}.pdf`);
+  const fileName = String(documentNumber || order.order_number) + ".pdf";
+  return { doc, fileName };
+}
+
+export function generateReceiptPDF(order) {
+  const { doc, fileName } = buildReceiptPDFDoc(order);
+  doc.save(fileName);
+}
+
+export function generateReceiptPDFBase64(order) {
+  try {
+    const { doc, fileName } = buildReceiptPDFDoc(order);
+    const dataUri = doc.output("datauristring");
+    const base64Content = dataUri.includes(",")
+      ? dataUri.split(",")[1]
+      : dataUri;
+    return { fileName, base64Content };
+  } catch (err) {
+    console.warn("No se pudo generar el PDF adjunto en Base64:", err);
+    return null;
+  }
 }
 
 export const generateInvoicePDF = generateReceiptPDF;

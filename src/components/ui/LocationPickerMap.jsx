@@ -1,60 +1,58 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
-  useMap,
+  Polygon,
+  ZoomControl,
   useMapEvents,
+  useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import shadowUrl from "leaflet/dist/images/marker-shadow.png";
-import { Crosshair, Loader2, MapPin, Search } from "lucide-react";
+import {
+  Search,
+  LocateFixed,
+  Maximize2,
+  Minimize2,
+  Loader2,
+} from "lucide-react";
 
-// Corregir el icono roto por defecto de Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl,
-  iconUrl,
-  shadowUrl,
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-const DEFAULT_CENTER = [-12.046374, -77.042793]; // Lima Metropolitana
-const DEFAULT_ZOOM = 13;
+const DEFAULT_CENTER = [-12.0464, -77.0428];
 
-function MapEventsHandler({ onSelect }) {
-  useMapEvents({
-    click(e) {
-      onSelect(e.latlng.lat, e.latlng.lng);
-    },
-  });
+function MapController({ center, isExpanded }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (center && Array.isArray(center) && center.length === 2) {
+      map.flyTo(center, Math.max(map.getZoom(), 16), { duration: 0.8 });
+    }
+  }, [center, map]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [isExpanded, map]);
+
   return null;
 }
 
-function MapCenterController({ position, flyToTarget }) {
-  const map = useMap();
-  const lastPosRef = useRef(null);
-
-  useEffect(() => {
-    if (flyToTarget && flyToTarget.lat && flyToTarget.lng) {
-      map.flyTo([flyToTarget.lat, flyToTarget.lng], 16, { duration: 1.2 });
-      return;
-    }
-
-    if (
-      position &&
-      Array.isArray(position) &&
-      (!lastPosRef.current ||
-        lastPosRef.current[0] !== position[0] ||
-        lastPosRef.current[1] !== position[1])
-    ) {
-      lastPosRef.current = position;
-      map.flyTo(position, Math.max(map.getZoom(), 15), { duration: 1.2 });
-    }
-  }, [position, flyToTarget, map]);
-
+function ClickHandler({ onSelect }) {
+  useMapEvents({
+    click(e) {
+      onSelect({ lat: e.latlng.lat, lng: e.latlng.lng });
+    },
+  });
   return null;
 }
 
@@ -62,206 +60,224 @@ export default function LocationPickerMap({
   latitude,
   longitude,
   onChange,
-  className = "",
+  searchQuery: externalSearchQuery = "",
+  coveragePolygon = null,
   height = "h-64",
-  searchQuery = "",
 }) {
-  const [isLocating, setIsLocating] = useState(false);
+  const [internalQuery, setInternalQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [localSearchText, setLocalSearchText] = useState("");
-  const [flyToTarget, setFlyToTarget] = useState(null);
-  const markerRef = useRef(null);
-  const lastExecutedSearchRef = useRef("");
+  const [isLocating, setIsLocating] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  const searchAddress = async (text) => {
-    const q = (text || "").trim();
-    if (!q || q.length < 5) return;
-    if (lastExecutedSearchRef.current === q) return;
-    lastExecutedSearchRef.current = q;
-    setIsSearching(true);
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-        q + ", Lima, Peru",
-      )}&limit=1`;
-      const res = await fetch(url, {
-        headers: { "Accept-Language": "es" },
-      });
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const foundLat = parseFloat(data[0].lat);
-        const foundLng = parseFloat(data[0].lon);
-        setFlyToTarget({ lat: foundLat, lng: foundLng });
-        onChange?.({ lat: foundLat, lng: foundLng });
-      }
-    } catch (err) {
-      console.warn("Error geocodificando en LocationPickerMap:", err);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  const hasCoords = latitude != null && longitude != null;
+  const currentPosition = hasCoords
+    ? [Number(latitude), Number(longitude)]
+    : null;
 
-  // Reaccionar al prop searchQuery si cambia con longitud >= 5
-  useEffect(() => {
-    if (searchQuery && searchQuery.trim().length >= 5) {
-      const timer = setTimeout(() => {
-        searchAddress(searchQuery);
-      }, 700);
-      return () => clearTimeout(timer);
-    }
-  }, [searchQuery]);
+  const polygonPositions =
+    Array.isArray(coveragePolygon) && coveragePolygon.length >= 3
+      ? coveragePolygon.map((pt) =>
+        Array.isArray(pt)
+          ? [Number(pt[0]), Number(pt[1])]
+          : [Number(pt.lat), Number(pt.lng)]
+      )
+      : null;
 
-  const isValidCoord =
-    typeof latitude === "number" &&
-    typeof longitude === "number" &&
-    !isNaN(latitude) &&
-    !isNaN(longitude);
-
-  const markerPosition = useMemo(() => {
-    return isValidCoord ? [latitude, longitude] : null;
-  }, [isValidCoord, latitude, longitude]);
-
-  const mapCenter = markerPosition || DEFAULT_CENTER;
-  const initialZoom = isValidCoord ? 15 : DEFAULT_ZOOM;
-
-  const eventHandlers = useMemo(
-    () => ({
-      dragend() {
-        const marker = markerRef.current;
-        if (marker != null) {
-          const { lat, lng } = marker.getLatLng();
+  const executeGeocodeSearch = useCallback(
+    async (rawText) => {
+      const clean = String(rawText || "").trim();
+      if (clean.length < 3) return;
+      setIsSearching(true);
+      try {
+        const url =
+          "https://nominatim.openstreetmap.org/search?format=json&q=" +
+          encodeURIComponent(clean + ", Lima, Peru") +
+          "&limit=1";
+        const res = await fetch(url);
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const lat = parseFloat(data[0].lat);
+          const lng = parseFloat(data[0].lon);
           onChange?.({ lat, lng });
         }
-      },
-    }),
-    [onChange],
+      } catch (err) {
+        console.warn("Error buscando ubicación en el mapa:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [onChange]
   );
 
-  const handleMapClick = (lat, lng) => {
-    onChange?.({ lat, lng });
-  };
+  // Ejecutar búsqueda cuando el componente padre dispara searchQuery mediante botón de lupa
+  useEffect(() => {
+    if (externalSearchQuery && externalSearchQuery.trim().length >= 3) {
+      setInternalQuery(externalSearchQuery.trim());
+      executeGeocodeSearch(externalSearchQuery);
+    }
+  }, [externalSearchQuery, executeGeocodeSearch]);
 
-  const handleUseCurrentLocation = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
+  const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert("La geolocalización no está disponible en tu navegador.");
+      window.alert("Tu navegador no soporta geolocalización.");
       return;
     }
-
     setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        onChange?.({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
         setIsLocating(false);
-        const { latitude: lat, longitude: lng } = pos.coords;
-        onChange?.({ lat, lng });
       },
-      (err) => {
-        setIsLocating(false);
-        console.warn("Error obteniendo ubicación:", err);
-        alert(
-          "No se pudo acceder a tu ubicación actual. Revisa los permisos del navegador.",
+      () => {
+        window.alert(
+          "No se pudo obtener tu ubicación actual. Verifica los permisos de GPS de tu navegador."
         );
+        setIsLocating(false);
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-      },
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
+  const wrapperClasses = isExpanded
+    ? "fixed inset-0 z-50 bg-black/75 backdrop-blur-xs p-3 sm:p-6 flex flex-col justify-center items-center"
+    : "relative w-full";
+
+  const containerClasses = isExpanded
+    ? "relative w-full max-w-5xl h-[85vh] bg-white rounded-card border border-border overflow-hidden shadow-2xl flex flex-col"
+    : "relative w-full rounded-card border border-border overflow-hidden bg-surface-subtle " +
+    height;
+
   return (
-    <div
-      className={`relative w-full rounded-card border border-border overflow-hidden bg-surface-subtle ${height} ${className}`}
-    >
-      <MapContainer
-        center={mapCenter}
-        zoom={initialZoom}
-        scrollWheelZoom={true}
-        className="w-full h-full z-0"
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+    <div className={wrapperClasses}>
+      <div className={containerClasses}>
+        {/* Barra superior responsiva libre de colisión con los botones de Zoom */}
+        <div className="absolute top-2.5 left-2.5 right-2.5 z-[400] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pointer-events-none">
+          <div className="flex items-center bg-white/95 backdrop-blur-xs rounded-button border border-border shadow-md overflow-hidden flex-1 max-w-full sm:max-w-xs pointer-events-auto">
+            <input
+              type="text"
+              value={internalQuery}
+              onChange={(e) => setInternalQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  executeGeocodeSearch(internalQuery);
+                }
+              }}
+              placeholder="Buscar calle o distrito..."
+              className="w-full h-9 px-3 text-xs text-brand-primary bg-transparent focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => executeGeocodeSearch(internalQuery)}
+              disabled={isSearching}
+              className="h-9 px-3 bg-brand-primary text-white hover:bg-brand-secondary transition-colors flex items-center justify-center shrink-0"
+              title="Buscar en el mapa"
+            >
+              {isSearching ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Search className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
 
-        <MapEventsHandler onSelect={handleMapClick} />
+          <div className="flex items-center justify-end gap-1.5 pointer-events-auto">
+            <button
+              type="button"
+              onClick={handleUseCurrentLocation}
+              disabled={isLocating}
+              className="h-9 px-3 bg-white/95 hover:bg-white text-brand-primary border border-border rounded-button shadow-md text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              title="Usar mi ubicación GPS actual"
+            >
+              {isLocating ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+              ) : (
+                <LocateFixed className="w-3.5 h-3.5 text-accent" />
+              )}
+              <span>Mi ubicación</span>
+            </button>
 
-        <MapCenterController
-          position={markerPosition}
-          flyToTarget={flyToTarget}
-        />
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              className="h-9 px-3 bg-brand-primary text-white hover:bg-brand-secondary rounded-button shadow-md text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              title={
+                isExpanded
+                  ? "Reducir mapa"
+                  : "Ampliar mapa a pantalla completa"
+              }
+            >
+              {isExpanded ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span>Cerrar vista amplia</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>Ampliar</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
 
-        {markerPosition && (
-          <Marker
-            draggable={true}
-            eventHandlers={eventHandlers}
-            position={markerPosition}
-            ref={markerRef}
-          />
+        {/* Leyenda inferior izquierda del área de cobertura */}
+        {polygonPositions && (
+          <div className="absolute bottom-2.5 left-2.5 z-[400] bg-white/95 backdrop-blur-xs border border-border rounded-badge px-2.5 py-1 shadow-sm flex items-center gap-2 text-[11px] font-medium text-brand-primary pointer-events-none">
+            <span className="w-3 h-3 rounded-xs bg-emerald-500/30 border border-emerald-600 inline-block" />
+            <span>Área de cobertura de reparto</span>
+          </div>
         )}
-      </MapContainer>
 
-      {/* Buscador de dirección rápido en la esquina superior izquierda */}
-      <div className="absolute top-2.5 left-2.5 z-[1000] max-w-[210px] sm:max-w-xs w-full">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            searchAddress(localSearchText);
-          }}
-          className="flex items-center bg-white/95 backdrop-blur-sm rounded-button border border-border shadow-md overflow-hidden"
+        <MapContainer
+          center={currentPosition || DEFAULT_CENTER}
+          zoom={currentPosition ? 16 : 12}
+          zoomControl={false}
+          className="w-full h-full z-10"
+          scrollWheelZoom={true}
         >
-          <input
-            type="text"
-            placeholder="Buscar calle o ref..."
-            value={localSearchText}
-            onChange={(e) => setLocalSearchText(e.target.value)}
-            className="w-full px-2.5 py-1 text-xs text-brand-primary placeholder:text-brand-muted bg-transparent focus:outline-none"
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <button
-            type="submit"
-            disabled={isSearching || localSearchText.trim().length < 3}
-            className="p-1.5 text-brand-secondary hover:text-accent disabled:opacity-40"
-            title="Buscar dirección"
-          >
-            {isSearching ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
-            ) : (
-              <Search className="w-3.5 h-3.5" />
-            )}
-          </button>
-        </form>
-      </div>
 
-      {/* Botón flotante: Usar mi ubicación actual */}
-      <div className="absolute top-2.5 right-2.5 z-[1000]">
-        <button
-          type="button"
-          onClick={handleUseCurrentLocation}
-          disabled={isLocating}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white text-brand-primary rounded-button shadow-md border border-border hover:bg-surface-subtle transition-colors disabled:opacity-50 select-none cursor-pointer"
-        >
-          {isLocating ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
-          ) : (
-            <Crosshair className="w-3.5 h-3.5 text-accent" />
+          {/* Control de Zoom (+) y (-) en la esquina inferior derecha */}
+          <ZoomControl position="bottomright" />
+
+          <MapController center={currentPosition} isExpanded={isExpanded} />
+          <ClickHandler onSelect={onChange} />
+
+          {polygonPositions && (
+            <Polygon
+              positions={polygonPositions}
+              pathOptions={{
+                color: "#059669",
+                weight: 2,
+                fillColor: "#10B981",
+                fillOpacity: 0.14,
+                dashArray: "6, 6",
+              }}
+            />
           )}
-          <span>Usar mi ubicación actual</span>
-        </button>
-      </div>
 
-      {/* Indicador de coordenadas / instrucción */}
-      <div className="absolute bottom-2 left-2 z-[1000] bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-button border border-border text-[11px] font-mono text-brand-secondary shadow-sm flex items-center gap-1.5 select-none">
-        <MapPin className="w-3 h-3 text-accent shrink-0" />
-        {isValidCoord ? (
-          <span>
-            {latitude.toFixed(6)}, {longitude.toFixed(6)}
-          </span>
-        ) : (
-          <span className="font-sans text-[11px] text-brand-muted">
-            Haz clic en el mapa para fijar el pin de entrega
-          </span>
-        )}
+          {currentPosition && (
+            <Marker
+              position={currentPosition}
+              draggable={true}
+              eventHandlers={{
+                dragend: (e) => {
+                  const pos = e.target.getLatLng();
+                  onChange?.({ lat: pos.lat, lng: pos.lng });
+                },
+              }}
+            />
+          )}
+        </MapContainer>
       </div>
     </div>
   );

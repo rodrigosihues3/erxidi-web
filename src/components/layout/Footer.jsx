@@ -38,9 +38,9 @@ export default function Footer({ onOpenSizeMatcher }) {
               </span>
             </Link>
             <p className="text-xs text-brand-muted leading-relaxed">
-              Taller de confección textil especializado en ropa interior
-              masculina. Algodón pima peinado, costuras planas y corte anatómico
-              para máximo confort diario.
+              Tienda especializada en comercialización de ropa interior y calcetería para
+              damas, caballeros y niños. Prendas seleccionadas de alta rotación con ajuste
+              anatómico, recojo en tienda y reparto local en Lima.
             </p>
             <div className="space-y-2 pt-1 text-xs text-brand-muted">
               <div className="flex items-center gap-2">
@@ -116,8 +116,7 @@ export default function Footer({ onOpenSizeMatcher }) {
                     Despacho en Lima:
                   </strong>
                   <span>
-                    Envío Express (45 a 90 min) y Programado dentro de la zona
-                    de cobertura.
+                    Envío Express (45 a 90 min) y Programado dentro de la zona de cobertura.
                   </span>
                 </div>
               </li>

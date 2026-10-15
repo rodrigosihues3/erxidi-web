@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from "react";
-import { MapPin, X, AlertCircle, Search } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { MapPin, X, AlertCircle, Search, Info } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import Input from "../../../components/ui/Input";
 import LocationPickerMap from "../../../components/ui/LocationPickerMap";
 import { supabase } from "../../../services/supabase";
+import { getStoreDeliverySettings } from "../../admin/services/adminSettings.service";
+import { isPointInPolygon } from "../../../utils/geoUtils";
 
 const INITIAL_FORM = {
   alias: "Casa",
@@ -32,6 +34,36 @@ export default function AddressModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState("");
+  const [coveragePolygon, setCoveragePolygon] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    getStoreDeliverySettings()
+      .then((settings) => {
+        if (active && Array.isArray(settings?.polygon)) {
+          setCoveragePolygon(settings.polygon);
+        }
+      })
+      .catch(() => { });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const isOutOfCoverage = useMemo(() => {
+    if (
+      formData.latitude == null ||
+      formData.longitude == null ||
+      !coveragePolygon ||
+      coveragePolygon.length < 3
+    ) {
+      return false;
+    }
+    return !isPointInPolygon(
+      [Number(formData.latitude), Number(formData.longitude)],
+      coveragePolygon
+    );
+  }, [formData.latitude, formData.longitude, coveragePolygon]);
 
   const handleMapLocationChange = async ({ lat, lng }) => {
     setFormData((prev) => ({
@@ -42,12 +74,15 @@ export default function AddressModal({
 
     try {
       setIsGeocoding(true);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
-      );
+      const url =
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat=" +
+        lat +
+        "&lon=" +
+        lng +
+        "&zoom=18&addressdetails=1";
+      const res = await fetch(url);
       const data = await res.json();
       if (data && data.address) {
-        // 1. Resolver calle y número
         const road =
           data.address.road ||
           data.address.pedestrian ||
@@ -57,7 +92,6 @@ export default function AddressModal({
         const houseNumber = data.address.house_number || "";
         const fullStreet = [road, houseNumber].filter(Boolean).join(" ");
 
-        // 2. Resolver distrito en segundo plano contra deliveryZones
         const detectedDistrict =
           data.address.suburb ||
           data.address.city_district ||
@@ -81,7 +115,6 @@ export default function AddressModal({
           if (matched) matchedZoneId = matched.id;
         }
 
-        // Si no coincide, asignar el primer ID de zona disponible o null
         if (!matchedZoneId && deliveryZones?.length > 0) {
           matchedZoneId = deliveryZones[0].id;
         }
@@ -96,7 +129,7 @@ export default function AddressModal({
           zone_id: matchedZoneId
             ? String(matchedZoneId)
             : prev.zone_id ||
-              (deliveryZones?.[0]?.id ? String(deliveryZones[0].id) : null),
+            (deliveryZones?.[0]?.id ? String(deliveryZones[0].id) : null),
         }));
       }
     } catch (err) {
@@ -110,7 +143,7 @@ export default function AddressModal({
     if (e) e.preventDefault();
     const street = (formData.street_address || "").trim();
     if (!street || street.length < 3) return;
-    setMapSearchQuery((prev) => (prev === street ? `${street} ` : street));
+    setMapSearchQuery((prev) => (prev === street ? street + " " : street));
   };
 
   useEffect(() => {
@@ -126,14 +159,20 @@ export default function AddressModal({
         receiver_phone: addressToEdit.receiver_phone || "",
         is_default: Boolean(addressToEdit.is_default),
         latitude:
-          addressToEdit.latitude != null ? Number(addressToEdit.latitude) : null,
+          addressToEdit.latitude != null
+            ? Number(addressToEdit.latitude)
+            : null,
         longitude:
-          addressToEdit.longitude != null ? Number(addressToEdit.longitude) : null,
+          addressToEdit.longitude != null
+            ? Number(addressToEdit.longitude)
+            : null,
       });
     } else {
-      const defaultZone = deliveryZones[0]?.id ? String(deliveryZones[0].id) : "";
+      const defaultZone = deliveryZones[0]?.id
+        ? String(deliveryZones[0].id)
+        : "";
       const fullName = profile
-        ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim()
+        ? [profile.first_name || "", profile.last_name || ""].join(" ").trim()
         : "";
 
       setFormData({
@@ -158,7 +197,13 @@ export default function AddressModal({
     if (!user) return;
 
     if (!formData.street_address || formData.street_address.trim().length < 4) {
-      setFormError("Ingresa una dirección válida (mínimo 4 caracteres).");
+      setFormError("Ingresa una dirección exacta válida (mínimo 4 caracteres).");
+      return;
+    }
+    if (!formData.reference || formData.reference.trim().length < 3) {
+      setFormError(
+        "La referencia de llegada es obligatoria (mínimo 3 caracteres)."
+      );
       return;
     }
     if (
@@ -167,7 +212,7 @@ export default function AddressModal({
       isNaN(formData.latitude) ||
       isNaN(formData.longitude)
     ) {
-      setFormError("Debes ubicar y fijar el pin de tu entrega en el mapa.");
+      setFormError("Debes ubicar y fijar el pin de tu dirección en el mapa.");
       return;
     }
 
@@ -185,7 +230,7 @@ export default function AddressModal({
       }
 
       const defaultFullName = profile
-        ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim()
+        ? [profile.first_name || "", profile.last_name || ""].join(" ").trim()
         : user?.user_metadata?.full_name || "Cliente";
       const defaultPhone =
         profile?.phone || user?.user_metadata?.phone || "999999999";
@@ -195,15 +240,15 @@ export default function AddressModal({
       const resolvedZoneId = formData.zone_id
         ? Number(formData.zone_id)
         : fallbackZoneId
-        ? Number(fallbackZoneId)
-        : null;
+          ? Number(fallbackZoneId)
+          : null;
 
       const payload = {
         user_id: user.id,
         alias: (formData.alias || "").trim() || "Casa",
         zone_id: resolvedZoneId,
         street_address: formData.street_address.trim(),
-        reference: (formData.reference || "").trim(),
+        reference: formData.reference.trim(),
         receiver_name:
           (formData.receiver_name || "").trim() || defaultFullName || "Cliente",
         receiver_phone: formData.receiver_phone
@@ -234,14 +279,16 @@ export default function AddressModal({
       onClose();
     } catch (err) {
       console.error("Error al guardar dirección:", err);
-      setFormError(err.message || "Error al procesar la dirección en el servidor.");
+      setFormError(
+        err.message || "Error al procesar la dirección en el servidor."
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div
         className="bg-surface-card border border-border rounded-card w-full max-w-lg shadow-xl animate-in zoom-in-95 duration-150 overflow-hidden my-8"
         role="dialog"
@@ -264,7 +311,10 @@ export default function AddressModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+        <form
+          onSubmit={handleSubmit}
+          className="p-4 sm:p-5 space-y-4 max-h-[82vh] overflow-y-auto"
+        >
           {formError && (
             <div className="p-3 bg-rose-50 border border-status-danger-border rounded text-xs text-status-danger-text flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -272,10 +322,22 @@ export default function AddressModal({
             </div>
           )}
 
-          {/* Paso A: Alias de la Dirección */}
+          {/* Advertencia no bloqueante cuando el pin está fuera del área de reparto */}
+          {isOutOfCoverage && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-start gap-2">
+              <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>Fuera de zona de reparto a domicilio:</strong> Puedes
+                guardar esta dirección igualmente para tus compras con{" "}
+                <strong>Recojo en Tienda</strong> y visualizar tu ruta hacia el
+                local.
+              </span>
+            </div>
+          )}
+
           <div>
             <Input
-              label="Alias de la Dirección"
+              label="Alias de la Dirección *"
               id="addr-alias"
               placeholder="Ej. Casa, Oficina, Depa"
               value={formData.alias}
@@ -298,36 +360,32 @@ export default function AddressModal({
             </div>
           </div>
 
-          {/* Paso B: Ubicación en el Mapa */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
-              Ubicación en el Mapa <span className="text-red-500">*</span>
+              Ubicación en el Mapa *
             </label>
             <LocationPickerMap
               latitude={formData.latitude}
               longitude={formData.longitude}
               searchQuery={mapSearchQuery}
+              coveragePolygon={coveragePolygon}
               onChange={handleMapLocationChange}
-              height="h-56"
+              height="h-64"
             />
-            <p className="mt-1 text-[11px] text-brand-muted">
-              Mueve el pin o pulsa «Usar mi ubicación actual» para rellenar automáticamente tu dirección.
-            </p>
           </div>
 
-          {/* Paso C: Dirección Exacta */}
           <div>
             <label
               htmlFor="addr-street"
               className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
             >
-              Dirección Exacta <span className="text-red-500">*</span>
+              Dirección Exacta <span className="text-rose-600">*</span>
             </label>
             <div className="flex gap-2 items-center">
               <div className="flex-1">
                 <Input
                   id="addr-street"
-                  placeholder="Calle / Av., Número, Interior o Departamento"
+                  placeholder="Calle / Av., Número, Interior"
                   value={formData.street_address}
                   onChange={(e) =>
                     setFormData({ ...formData, street_address: e.target.value })
@@ -343,36 +401,34 @@ export default function AddressModal({
               </div>
               <Button
                 type="button"
-                variant="secondary"
+                variant="outline"
                 size="md"
+                disabled={
+                  isGeocoding ||
+                  (formData.street_address || "").trim().length < 3
+                }
                 onClick={handleCenterMapFromInput}
-                title="Centrar en el mapa según la dirección"
-                aria-label="Centrar en el mapa"
+                title="Buscar esta dirección en el mapa"
                 className="shrink-0 h-10 px-3.5"
               >
-                <Search className="w-4 h-4" />
+                <Search className="w-4 h-4 text-brand-primary" />
               </Button>
             </div>
-            <p className="mt-1 text-[11px] text-brand-muted">
-              Se autocompleta desde el mapa. Si prefieres tipear, presiona la lupa para centrar el pin.
-            </p>
           </div>
 
-          {/* Paso D: Referencia de Llegada (Opcional) */}
           <div>
             <Input
-              label="Referencia de Llegada (Opcional)"
+              label="Referencia de Llegada (Obligatoria) *"
               id="addr-reference"
               placeholder="Ej. Frente al parque, rejas blancas, timbre 2B"
               value={formData.reference}
               onChange={(e) =>
                 setFormData({ ...formData, reference: e.target.value })
               }
-              helperText="Información complementaria no bloqueante para facilitar la entrega."
+              required
             />
           </div>
 
-          {/* Paso E: Checkbox Dirección Principal */}
           <div className="pt-2 border-t border-border">
             <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-brand-primary select-none">
               <input
@@ -381,16 +437,12 @@ export default function AddressModal({
                 onChange={(e) =>
                   setFormData({ ...formData, is_default: e.target.checked })
                 }
-                className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
+                className="w-4 h-4 text-accent border-border rounded"
               />
               <span>Establecer como dirección principal</span>
             </label>
-            <p className="text-[11px] text-brand-muted ml-6.5 mt-0.5">
-              Esta dirección se seleccionará automáticamente en tus próximos pedidos.
-            </p>
           </div>
 
-          {/* Paso F: Botones Cancelar y Guardar Dirección */}
           <div className="pt-3 border-t border-border flex items-center justify-end gap-2">
             <Button
               type="button"
@@ -405,6 +457,7 @@ export default function AddressModal({
               type="submit"
               variant="primary"
               size="md"
+              disabled={isSaving}
               isLoading={isSaving}
             >
               {addressToEdit ? "Guardar Cambios" : "Guardar Dirección"}

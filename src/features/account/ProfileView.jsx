@@ -15,7 +15,6 @@ import {
 import {
   User,
   Mail,
-  Phone,
   Ruler,
   MapPin,
   CheckCircle,
@@ -26,14 +25,39 @@ import {
   Lock,
   Save,
   KeyRound,
-  Sparkles,
+  Check,
 } from "lucide-react";
 import SizePreferencesTab from "../profile/components/SizePreferencesTab";
 import AddressesTab from "../profile/components/AddressesTab";
 
+function evaluatePasswordRules(password = "") {
+  const val = String(password);
+  const rules = [
+    { id: "length", label: "Mínimo 8 caracteres", passed: val.length >= 8 },
+    {
+      id: "upper",
+      label: "Al menos una letra mayúscula (A-Z)",
+      passed: /[A-Z]/.test(val),
+    },
+    {
+      id: "lower",
+      label: "Al menos una letra minúscula (a-z)",
+      passed: /[a-z]/.test(val),
+    },
+    { id: "number", label: "Al menos un número (0-9)", passed: /\d/.test(val) },
+    {
+      id: "special",
+      label: "Al menos un carácter especial (!@#$%^&*._-)",
+      passed: /[^A-Za-z0-9]/.test(val),
+    },
+  ];
+  const passedCount = rules.filter((r) => r.passed).length;
+  return { rules, passedCount, isAllValid: passedCount === rules.length };
+}
+
 export default function ProfileView() {
   const { user, profile, refreshProfile } = useAuth();
-  const [activeTab, setActiveTab] = useState("personal"); // 'personal' | 'addresses' | 'measurements' | 'security'
+  const [activeTab, setActiveTab] = useState("personal");
 
   // ==========================================
   // PESTAÑA 1: DATOS PERSONALES Y CUENTA
@@ -60,7 +84,6 @@ export default function ProfileView() {
   const [isSavingPersonal, setIsSavingPersonal] = useState(false);
   const [personalFeedback, setPersonalFeedback] = useState(null);
 
-  // Email verification y edición
   const isEmailVerified = Boolean(user?.email_confirmed_at);
   const [isResendingEmail, setIsResendingEmail] = useState(false);
   const [resendStatus, setResendStatus] = useState(null);
@@ -68,7 +91,6 @@ export default function ProfileView() {
   const [newEmail, setNewEmail] = useState("");
   const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
 
-  // Sincronizar formulario personal cuando profile cambia
   useEffect(() => {
     setFirstName(initialPersonal.firstName);
     setLastName(initialPersonal.lastName);
@@ -140,7 +162,8 @@ export default function ProfileView() {
     } catch (err) {
       setResendStatus({
         type: "error",
-        message: err.message || "No se pudo reenviar el correo de confirmación.",
+        message:
+          err.message || "No se pudo reenviar el correo de confirmación.",
       });
     } finally {
       setIsResendingEmail(false);
@@ -166,7 +189,7 @@ export default function ProfileView() {
       setPersonalFeedback({
         type: "success",
         message:
-          "Se ha enviado un enlace de confirmación a tu nuevo correo. Verifícalo para actualizar tu acceso y habilitar pago contra entrega.",
+          "Se ha enviado un enlace de confirmación a tu nuevo correo. Verifícalo para actualizar tu acceso.",
       });
       setIsEditingEmail(false);
     } catch (err) {
@@ -180,21 +203,53 @@ export default function ProfileView() {
   };
 
   // ==========================================
-  // PESTAÑA 3: SEGURIDAD
+  // PESTAÑA 4: SEGURIDAD (Punto 8)
   // ==========================================
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [securityFeedback, setSecurityFeedback] = useState(null);
 
+  const securityPasswordCheck = useMemo(
+    () => evaluatePasswordRules(newPassword),
+    [newPassword]
+  );
+
+  const isCurrentPasswordEntered = currentPassword.trim().length >= 5;
+  const securityPasswordsMatch =
+    confirmPassword.length > 0 && newPassword === confirmPassword;
+  const isSameAsCurrent =
+    currentPassword.length > 0 &&
+    newPassword.length > 0 &&
+    currentPassword === newPassword;
+
   const handleSaveSecurity = async (e) => {
     e.preventDefault();
     setSecurityFeedback(null);
 
-    if (newPassword.length < 6) {
+    if (!currentPassword.trim()) {
       setSecurityFeedback({
         type: "error",
-        message: "La contraseña debe tener al menos 6 caracteres.",
+        message:
+          "Debes ingresar tu contraseña actual para autorizar el cambio.",
+      });
+      return;
+    }
+
+    if (isSameAsCurrent) {
+      setSecurityFeedback({
+        type: "error",
+        message: "La nueva contraseña debe ser diferente a la actual.",
+      });
+      return;
+    }
+
+    if (!securityPasswordCheck.isAllValid) {
+      setSecurityFeedback({
+        type: "error",
+        message:
+          "La nueva contraseña no cumple con los requisitos mínimos de seguridad.",
       });
       return;
     }
@@ -202,23 +257,38 @@ export default function ProfileView() {
     if (newPassword !== confirmPassword) {
       setSecurityFeedback({
         type: "error",
-        message: "Las contraseñas no coinciden.",
+        message: "La confirmación de la nueva contraseña no coincide.",
       });
       return;
     }
 
     setIsSavingSecurity(true);
     try {
-      const { error } = await supabase.auth.updateUser({
+      // 1. Verificar autenticidad de la contraseña actual contra Supabase Auth
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user?.email || "",
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        throw new Error(
+          "La contraseña actual ingresada es incorrecta. Verifícala e inténtalo nuevamente."
+        );
+      }
+
+      // 2. Actualizar a la nueva contraseña segura
+      const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
       });
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       setSecurityFeedback({
         type: "success",
-        message: "Tu contraseña ha sido actualizada exitosamente.",
+        message:
+          "Identidad verificada. Tu contraseña ha sido actualizada exitosamente.",
       });
+      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
@@ -233,12 +303,12 @@ export default function ProfileView() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 space-y-8">
-      {/* Encabezado Principal */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <div>
           <h1 className="text-2xl font-bold text-brand-primary">Mi Cuenta</h1>
           <p className="text-xs text-brand-secondary mt-1">
-            Gestiona tus datos de identificación, medidas anatómicas y seguridad.
+            Gestiona tus datos de identificación, medidas anatómicas y
+            seguridad.
           </p>
         </div>
 
@@ -252,76 +322,49 @@ export default function ProfileView() {
 
       {/* Navegación por Pestañas */}
       <div className="grid grid-cols-2 sm:grid-cols-4 border-b border-border text-xs font-bold uppercase tracking-wider">
-        <button
-          type="button"
-          onClick={() => setActiveTab("personal")}
-          className={`py-3 text-center transition-colors flex items-center justify-center gap-1.5 ${
-            activeTab === "personal"
-              ? "border-b-2 border-brand-primary text-brand-primary bg-surface-card"
-              : "text-brand-muted hover:text-brand-primary bg-surface-subtle"
-          }`}
-        >
-          <User className="w-3.5 h-3.5 text-accent" />
-          <span>Datos Personales</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("addresses")}
-          className={`py-3 text-center transition-colors flex items-center justify-center gap-1.5 ${
-            activeTab === "addresses"
-              ? "border-b-2 border-brand-primary text-brand-primary bg-surface-card"
-              : "text-brand-muted hover:text-brand-primary bg-surface-subtle"
-          }`}
-        >
-          <MapPin className="w-3.5 h-3.5 text-accent" />
-          <span>Direcciones</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("measurements")}
-          className={`py-3 text-center transition-colors flex items-center justify-center gap-1.5 ${
-            activeTab === "measurements"
-              ? "border-b-2 border-brand-primary text-brand-primary bg-surface-card"
-              : "text-brand-muted hover:text-brand-primary bg-surface-subtle"
-          }`}
-        >
-          <Ruler className="w-3.5 h-3.5 text-accent" />
-          <span>Medidas y Talla</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("security")}
-          className={`py-3 text-center transition-colors flex items-center justify-center gap-1.5 ${
-            activeTab === "security"
-              ? "border-b-2 border-brand-primary text-brand-primary bg-surface-card"
-              : "text-brand-muted hover:text-brand-primary bg-surface-subtle"
-          }`}
-        >
-          <Lock className="w-3.5 h-3.5 text-accent" />
-          <span>Seguridad</span>
-        </button>
+        {[
+          { id: "personal", label: "Datos Personales", icon: User },
+          { id: "addresses", label: "Direcciones", icon: MapPin },
+          { id: "measurements", label: "Medidas y Talla", icon: Ruler },
+          { id: "security", label: "Seguridad", icon: Lock },
+        ].map((tab) => {
+          const IconComponent = tab.icon;
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={
+                "py-3 text-center transition-colors flex items-center justify-center gap-1.5 " +
+                (active
+                  ? "border-b-2 border-brand-primary text-brand-primary bg-surface-card"
+                  : "text-brand-muted hover:text-brand-primary bg-surface-subtle")
+              }
+            >
+              <IconComponent className="w-3.5 h-3.5 text-accent" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* ========================================================= */}
       {/* PESTAÑA 1: DATOS PERSONALES */}
-      {/* ========================================================= */}
       {activeTab === "personal" && (
         <div className="space-y-6 animate-in fade-in duration-150">
           {personalFeedback && (
             <div
-              className={`p-3.5 rounded-card border text-xs flex items-center gap-2 ${
-                personalFeedback.type === "success"
+              className={
+                "p-3.5 rounded-card border text-xs flex items-center gap-2 " +
+                (personalFeedback.type === "success"
                   ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                  : "bg-rose-50 border-status-danger-border text-status-danger-text"
-              }`}
+                  : "bg-rose-50 border-status-danger-border text-status-danger-text")
+              }
             >
               {personalFeedback.type === "success" ? (
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                <CheckCircle className="w-4 h-4 shrink-0" />
               ) : (
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <AlertCircle className="w-4 h-4 shrink-0" />
               )}
               <span>{personalFeedback.message}</span>
             </div>
@@ -345,7 +388,8 @@ export default function ProfileView() {
                 )}
               </div>
               <CardDescription>
-                Tus datos de contacto y facturación registrados en la plataforma.
+                Tus datos de contacto y facturación registrados en la
+                plataforma.
               </CardDescription>
             </CardHeader>
 
@@ -394,7 +438,6 @@ export default function ProfileView() {
                   />
                 </div>
 
-                {/* Sección de Correo Electrónico */}
                 <div className="pt-3 border-t border-border space-y-3">
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
@@ -432,7 +475,7 @@ export default function ProfileView() {
                           onClick={handleUpdateEmail}
                           disabled={isUpdatingEmail || !newEmail.trim()}
                           isLoading={isUpdatingEmail}
-                          className="h-10 px-4 flex-shrink-0 bg-accent hover:bg-accent-hover text-white"
+                          className="h-10 px-4 shrink-0 bg-accent hover:bg-accent-hover text-white"
                         >
                           Guardar
                         </Button>
@@ -441,7 +484,7 @@ export default function ProfileView() {
                           variant="ghost"
                           size="sm"
                           onClick={() => setIsEditingEmail(false)}
-                          className="h-10 px-3 flex-shrink-0"
+                          className="h-10 px-3 shrink-0"
                         >
                           Cancelar
                         </Button>
@@ -457,10 +500,10 @@ export default function ProfileView() {
                   {!isEmailVerified && (
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-card flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-900">
                       <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                        <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                         <span>
-                          Tu correo aún no está verificado. Verifica tu cuenta para
-                          habilitar pedidos con pago contra entrega.
+                          Tu correo aún no está verificado. Verifica tu cuenta
+                          para habilitar pedidos con pago contra entrega.
                         </span>
                       </div>
                       <Button
@@ -480,11 +523,12 @@ export default function ProfileView() {
 
                   {resendStatus && (
                     <div
-                      className={`p-2.5 rounded-button text-xs ${
-                        resendStatus.type === "success"
+                      className={
+                        "p-2.5 rounded-button text-xs " +
+                        (resendStatus.type === "success"
                           ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                          : "bg-rose-50 text-rose-800 border border-rose-200"
-                      }`}
+                          : "bg-rose-50 text-rose-800 border border-rose-200")
+                      }
                     >
                       {resendStatus.message}
                     </div>
@@ -510,33 +554,28 @@ export default function ProfileView() {
         </div>
       )}
 
-      {/* ========================================================= */}
       {/* PESTAÑA 2: DIRECCIONES */}
-      {/* ========================================================= */}
       {activeTab === "addresses" && <AddressesTab />}
 
-      {/* ========================================================= */}
       {/* PESTAÑA 3: MEDIDAS CORPORALES Y TALLA */}
-      {/* ========================================================= */}
       {activeTab === "measurements" && <SizePreferencesTab />}
 
-      {/* ========================================================= */}
-      {/* PESTAÑA 4: SEGURIDAD */}
-      {/* ========================================================= */}
+      {/* PESTAÑA 4: SEGURIDAD (Punto 8) */}
       {activeTab === "security" && (
         <div className="space-y-6 animate-in fade-in duration-150">
           {securityFeedback && (
             <div
-              className={`p-3.5 rounded-card border text-xs flex items-center gap-2 ${
-                securityFeedback.type === "success"
+              className={
+                "p-3.5 rounded-card border text-xs flex items-center gap-2 " +
+                (securityFeedback.type === "success"
                   ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                  : "bg-rose-50 border-status-danger-border text-status-danger-text"
-              }`}
+                  : "bg-rose-50 border-status-danger-border text-status-danger-text")
+              }
             >
               {securityFeedback.type === "success" ? (
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                <CheckCircle className="w-4 h-4 shrink-0" />
               ) : (
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <AlertCircle className="w-4 h-4 shrink-0" />
               )}
               <span>{securityFeedback.message}</span>
             </div>
@@ -546,48 +585,164 @@ export default function ProfileView() {
             <CardHeader>
               <CardTitle className="text-sm flex items-center gap-2">
                 <KeyRound className="w-4 h-4 text-accent" />
-                Seguridad y Credenciales
+                Seguridad y Cambio de Contraseña
               </CardTitle>
               <CardDescription>
-                Actualiza tu contraseña para mantener tu cuenta protegida.
+                Por tu seguridad, primero ingresa tu contraseña actual para
+                habilitar la configuración de una nueva clave.
               </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <form onSubmit={handleSaveSecurity} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <form onSubmit={handleSaveSecurity} className="space-y-5">
+                {/* Paso 1: Contraseña Actual Obligatoria */}
+                <div className="p-4 rounded-card bg-surface-subtle border border-border space-y-2">
                   <Input
-                    label="Nueva Contraseña"
-                    id="profile-new-password"
+                    label="1. Contraseña Actual (Requerida para desbloquear) *"
+                    id="profile-current-password"
                     type="password"
-                    placeholder="Mínimo 6 caracteres"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Ingresa tu contraseña vigente"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
                     required
                   />
-
-                  <Input
-                    label="Confirmar Nueva Contraseña"
-                    id="profile-confirm-password"
-                    type="password"
-                    placeholder="Repite la contraseña"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                  />
+                  <p className="text-[11px] text-brand-muted">
+                    Validaremos tu clave actual antes de aplicar cualquier
+                    cambio en tu cuenta.
+                  </p>
                 </div>
 
-                <div className="pt-3 flex justify-end">
+                {/* Paso 2: Nueva Contraseña (Se habilita al escribir la actual) */}
+                <div
+                  className={
+                    "space-y-4 transition-opacity " +
+                    (!isCurrentPasswordEntered ? "opacity-50" : "opacity-100")
+                  }
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input
+                      label="2. Nueva Contraseña"
+                      id="profile-new-password"
+                      type="password"
+                      placeholder="Crea tu nueva contraseña"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      disabled={!isCurrentPasswordEntered}
+                      required
+                    />
+
+                    <Input
+                      label="3. Confirmar Nueva Contraseña"
+                      id="profile-confirm-password"
+                      type="password"
+                      placeholder="Repite la nueva contraseña"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      disabled={!isCurrentPasswordEntered}
+                      required
+                    />
+                  </div>
+
+                  {/* Checklist Reactivo de Reglas */}
+                  <div className="p-3.5 rounded-card bg-surface-subtle border border-border space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-brand-primary flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-accent" />
+                        Requisitos de seguridad de la nueva contraseña
+                      </span>
+                      <span className="font-mono text-xs font-bold text-brand-secondary">
+                        {securityPasswordCheck.passedCount}/5 completados
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-1.5 h-1.5">
+                      {[1, 2, 3, 4, 5].map((step) => {
+                        const active =
+                          securityPasswordCheck.passedCount >= step;
+                        const barColor =
+                          securityPasswordCheck.passedCount <= 2
+                            ? "bg-rose-500"
+                            : securityPasswordCheck.passedCount <= 4
+                              ? "bg-amber-500"
+                              : "bg-emerald-600";
+                        return (
+                          <div
+                            key={step}
+                            className={
+                              "rounded-full transition-all " +
+                              (active ? barColor : "bg-slate-200")
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs pt-1">
+                      {securityPasswordCheck.rules.map((rule) => (
+                        <li
+                          key={rule.id}
+                          className={
+                            "flex items-center gap-1.5 " +
+                            (rule.passed
+                              ? "text-emerald-700 font-semibold"
+                              : newPassword.length > 0
+                                ? "text-rose-600"
+                                : "text-brand-muted")
+                          }
+                        >
+                          {rule.passed ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          ) : (
+                            <span className="w-3.5 h-3.5 rounded-full border border-current inline-flex items-center justify-center text-[9px] shrink-0">
+                              •
+                            </span>
+                          )}
+                          <span>{rule.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {isSameAsCurrent && (
+                      <p className="text-xs text-rose-600 font-semibold pt-1 border-t border-border">
+                        La nueva contraseña no puede ser idéntica a tu
+                        contraseña actual.
+                      </p>
+                    )}
+
+                    {confirmPassword.length > 0 && (
+                      <p
+                        className={
+                          "text-xs font-semibold pt-1 border-t border-border " +
+                          (securityPasswordsMatch
+                            ? "text-emerald-700"
+                            : "text-rose-600")
+                        }
+                      >
+                        {securityPasswordsMatch
+                          ? "✓ La confirmación coincide exactamente."
+                          : "✕ Las contraseñas nuevas no coinciden."}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
                   <Button
                     type="submit"
                     variant="primary"
                     size="md"
-                    disabled={isSavingSecurity || !newPassword || !confirmPassword}
+                    disabled={
+                      isSavingSecurity ||
+                      !isCurrentPasswordEntered ||
+                      !securityPasswordCheck.isAllValid ||
+                      !securityPasswordsMatch ||
+                      isSameAsCurrent
+                    }
                     isLoading={isSavingSecurity}
                     className="bg-accent hover:bg-accent-hover text-white px-6"
                   >
                     <Lock className="w-4 h-4 mr-2" />
-                    Actualizar Contraseña
+                    Verificar y Actualizar Contraseña
                   </Button>
                 </div>
               </form>

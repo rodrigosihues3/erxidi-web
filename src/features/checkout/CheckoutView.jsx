@@ -15,7 +15,6 @@ import {
   Calendar,
   AlertCircle,
   Search,
-  Edit3,
   QrCode,
   Banknote,
   MapPin,
@@ -25,6 +24,10 @@ import {
   Building,
   Navigation,
   ExternalLink,
+  Copy,
+  Landmark,
+  UserCheck,
+  Trash2,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -52,6 +55,28 @@ import {
   calculateDistanceKm,
   calculateDeliveryFee,
 } from "../../utils/geoUtils";
+import { triggerOrderConfirmationEmail } from "../../services/api/orderEmailService";
+
+const BANK_ACCOUNTS = [
+  {
+    bank: "BCP ( Soles )",
+    account: "191-98451234-0-45",
+    cci: "002-191009845123404591",
+    holder: "ERXIDI CONFECCIONES S.A.C.",
+  },
+  {
+    bank: "Interbank ( Soles )",
+    account: "200-3004589120",
+    cci: "003-20000300458912034",
+    holder: "ERXIDI CONFECCIONES S.A.C.",
+  },
+  {
+    bank: "BBVA ( Soles )",
+    account: "0011-0117-0100045891",
+    cci: "011-117-000100045891-95",
+    holder: "ERXIDI CONFECCIONES S.A.C.",
+  },
+];
 
 export default function CheckoutView() {
   const navigate = useNavigate();
@@ -62,13 +87,15 @@ export default function CheckoutView() {
   const [completedSteps, setCompletedSteps] = useState({ 1: false, 2: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [createdOrder, setCreatedOrder] = useState(null);
+  const [copiedAccount, setCopiedAccount] = useState("");
   const createdOrderRef = useRef(null);
 
   // -------------------------------------------------------------
   // PASO 1: Identificación y Contacto
   // -------------------------------------------------------------
-  const [dni, setDni] = useState(profile?.document_number || "");
+  const [dni, setDni] = useState(
+    profile?.dni || profile?.document_number || ""
+  );
   const [firstName, setFirstName] = useState(profile?.first_name || "");
   const [lastName, setLastName] = useState(profile?.last_name || "");
   const [email, setEmail] = useState(user?.email || "");
@@ -89,10 +116,15 @@ export default function CheckoutView() {
       if (fullLastName) setLastName(fullLastName);
       if (user.email) setEmail(user.email);
       if (profile.phone) setPhone(profile.phone);
-      if (profile.dni || profile.document_number) {
-        setDni(profile.dni || profile.document_number);
+      const savedDni = String(
+        profile.dni || profile.document_number || ""
+      ).replace(/\D/g, "");
+      if (savedDni.length === 8) {
+        setDni(savedDni);
+        if (profile.first_name && fullLastName) {
+          setIsNameLocked(true);
+        }
       }
-      setIsNameLocked(true);
     }
   }, [user, profile]);
 
@@ -100,7 +132,7 @@ export default function CheckoutView() {
     const clean = String(dniToSearch || "")
       .replace(/\D/g, "")
       .slice(0, 8);
-    if (!/^\d{8}$/.test(clean)) {
+    if (clean.length !== 8) {
       setDniFeedback({
         type: "error",
         message: "El DNI debe contener exactamente 8 dígitos numéricos.",
@@ -116,19 +148,21 @@ export default function CheckoutView() {
       if (res.success && res.names) {
         setFirstName(res.names);
         setLastName(
-          `${res.firstLastName || ""} ${res.secondLastName || ""}`.trim(),
+          [res.firstLastName || "", res.secondLastName || ""].join(" ").trim()
         );
+        // Bloqueo inmutable cuando RENIEC encuentra el DNI
         setIsNameLocked(true);
         setDniFeedback({
           type: "success",
           message: "Identidad verificada exitosamente en RENIEC.",
         });
       } else {
+        // Solo si RENIEC no lo encuentra se habilita la edición manual
         setIsNameLocked(false);
         setDniFeedback({
           type: "info",
           message:
-            "No pudimos autocompletar tus datos. Ingrésalos manualmente.",
+            "DNI no encontrado en RENIEC. Puedes ingresar tus nombres manualmente.",
         });
       }
     } catch {
@@ -136,7 +170,7 @@ export default function CheckoutView() {
       setDniFeedback({
         type: "info",
         message:
-          "Servicio no disponible momentáneamente. Ingresa tus datos manualmente.",
+          "Servicio RENIEC no disponible. Ingresa tus nombres manualmente.",
       });
     } finally {
       setIsSearchingDni(false);
@@ -147,20 +181,34 @@ export default function CheckoutView() {
     const rawVal = e.target.value.replace(/\D/g, "").slice(0, 8);
     setDni(rawVal);
     setDniFeedback(null);
-
-    if (rawVal.length === 8) {
-      triggerDniLookup(rawVal);
-    } else {
+    if (isNameLocked) {
       setIsNameLocked(false);
+      setFirstName("");
+      setLastName("");
     }
   };
 
+  // Botón de basurero: borra el DNI, limpia nombres autocompletados y desbloquea edición
+  const handleClearDni = () => {
+    setDni("");
+    setDniFeedback(null);
+    setIsNameLocked(false);
+    setFirstName("");
+    setLastName("");
+  };
+
   const isStep1Valid = useMemo(() => {
-    const isDniValid = /^\d{8}$/.test(dni);
+    const cleanDni = String(dni || "").replace(/\D/g, "");
+    const isDniValid = cleanDni.length === 0 || cleanDni.length === 8;
     const isNameValid =
       firstName.trim().length > 1 && lastName.trim().length > 1;
-    const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-    const isPhoneValid = /^9\d{8}$/.test(phone.trim());
+    const cleanEmail = email.trim();
+    const isEmailValid =
+      cleanEmail.includes("@") &&
+      cleanEmail.includes(".") &&
+      !cleanEmail.includes(" ");
+    const cleanPhone = phone.trim();
+    const isPhoneValid = cleanPhone.length === 9 && cleanPhone.startsWith("9");
     return isDniValid && isNameValid && isEmailValid && isPhoneValid;
   }, [dni, firstName, lastName, email, phone]);
 
@@ -173,17 +221,17 @@ export default function CheckoutView() {
   };
 
   // -------------------------------------------------------------
-  // PASO 2: Método de Entrega, Horarios y Direcciones
+  // PASO 2: Método de Entrega, Horarios y Direcciones (Intacto)
   // -------------------------------------------------------------
   const [deliveryType, setDeliveryType] = useState("scheduled");
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
   const [selectedZoneId, setSelectedZoneId] = useState(
-    defaultDeliveryZones[0]?.id || 1,
+    defaultDeliveryZones[0]?.id || 1
   );
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryReference, setDeliveryReference] = useState("");
   const [scheduledTimeSlot, setScheduledTimeSlot] = useState(
-    defaultDeliverySlots[0],
+    defaultDeliverySlots[0]
   );
 
   const [savedAddresses, setSavedAddresses] = useState([]);
@@ -223,9 +271,7 @@ export default function CheckoutView() {
           });
         }
       })
-      .catch((err) => {
-        console.error("Error al cargar configuración de cobertura:", err);
-      });
+      .catch(() => { });
     return () => {
       isMounted = false;
     };
@@ -234,7 +280,7 @@ export default function CheckoutView() {
   const activeCoordinates = useMemo(() => {
     if (selectedAddressMode === "saved" && selectedSavedAddressId) {
       const addr = (savedAddresses || []).find(
-        (a) => a.id === selectedSavedAddressId,
+        (a) => a.id === selectedSavedAddressId
       );
       if (addr && addr.latitude != null && addr.longitude != null) {
         return [Number(addr.latitude), Number(addr.longitude)];
@@ -303,33 +349,19 @@ export default function CheckoutView() {
           setDeliveryAddress(defaultAddr.street_address || "");
           setDeliveryReference(defaultAddr.reference || "");
           setDeliveryLatitude(
-            defaultAddr.latitude != null ? Number(defaultAddr.latitude) : null,
+            defaultAddr.latitude != null ? Number(defaultAddr.latitude) : null
           );
           setDeliveryLongitude(
             defaultAddr.longitude != null
               ? Number(defaultAddr.longitude)
-              : null,
+              : null
           );
-
-          if (defaultAddr.receiver_phone) {
-            setPhone(defaultAddr.receiver_phone.replace(/\D/g, "").slice(0, 9));
-          }
-          if (defaultAddr.receiver_name) {
-            const parts = defaultAddr.receiver_name.trim().split(" ");
-            if (parts.length > 1) {
-              setFirstName(parts.slice(0, -1).join(" "));
-              setLastName(parts.slice(-1).join(" "));
-            } else if (parts[0]) {
-              setFirstName(parts[0]);
-            }
-          }
         } else {
           setSavedAddresses([]);
           setSelectedAddressMode("new");
           setSelectedSavedAddressId(null);
         }
-      } catch (err) {
-        console.error("Error al cargar direcciones:", err);
+      } catch {
         setSelectedAddressMode("new");
         setSelectedSavedAddressId(null);
       } finally {
@@ -348,21 +380,8 @@ export default function CheckoutView() {
     setDeliveryReference(addr.reference || "");
     setDeliveryLatitude(addr.latitude != null ? Number(addr.latitude) : null);
     setDeliveryLongitude(
-      addr.longitude != null ? Number(addr.longitude) : null,
+      addr.longitude != null ? Number(addr.longitude) : null
     );
-
-    if (addr.receiver_phone) {
-      setPhone(addr.receiver_phone.replace(/\D/g, "").slice(0, 9));
-    }
-    if (addr.receiver_name) {
-      const parts = addr.receiver_name.trim().split(" ");
-      if (parts.length > 1) {
-        setFirstName(parts.slice(0, -1).join(" "));
-        setLastName(parts.slice(-1).join(" "));
-      } else if (parts[0]) {
-        setFirstName(parts[0]);
-      }
-    }
   };
 
   const handleSelectNewAddressMode = () => {
@@ -378,19 +397,22 @@ export default function CheckoutView() {
     () =>
       deliveryZones.find((z) => Number(z.id) === Number(selectedZoneId)) ||
       deliveryZones[0],
-    [deliveryZones, selectedZoneId],
+    [deliveryZones, selectedZoneId]
   );
 
-  // Geocodificación Inversa: El pin en el mapa manda sobre la dirección y resuelve el distrito
   const handleMapLocationChange = async ({ lat, lng }) => {
     setDeliveryLatitude(lat);
     setDeliveryLongitude(lng);
 
     try {
       setIsGeocoding(true);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-      );
+      const url =
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat=" +
+        lat +
+        "&lon=" +
+        lng +
+        "&zoom=18&addressdetails=1";
+      const res = await fetch(url);
       const data = await res.json();
       if (data && data.address) {
         const road =
@@ -419,31 +441,30 @@ export default function CheckoutView() {
                 .includes(z.district_name.toLowerCase()) ||
               z.district_name
                 .toLowerCase()
-                .includes(detectedDistrict.toLowerCase()),
+                .includes(detectedDistrict.toLowerCase())
           );
           if (matched) {
             setSelectedZoneId(Number(matched.id));
           }
         }
       }
-    } catch (err) {
-      console.warn("Error en reverse geocoding:", err);
+    } catch {
+      // Fallo silencioso
     } finally {
       setIsGeocoding(false);
     }
   };
 
-  // Geocodificación Directa de respaldo
   const searchAddressOnMap = async (queryText) => {
     const clean = (queryText || "").trim();
     if (clean.length < 4) return;
     setIsGeocoding(true);
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          `${clean}, Lima, Perú`,
-        )}&limit=1`,
-      );
+      const searchUrl =
+        "https://nominatim.openstreetmap.org/search?format=json&q=" +
+        encodeURIComponent(clean + ", Lima, Perú") +
+        "&limit=1";
+      const res = await fetch(searchUrl);
       const data = await res.json();
       if (data && data.length > 0) {
         const lat = parseFloat(data[0].lat);
@@ -451,15 +472,11 @@ export default function CheckoutView() {
         setDeliveryLatitude(lat);
         setDeliveryLongitude(lon);
       }
-    } catch (err) {
-      console.warn("Error geocodificando dirección:", err);
+    } catch {
+      // Fallo silencioso
     } finally {
       setIsGeocoding(false);
     }
-  };
-
-  const handleDeliveryAddressChange = (value) => {
-    setDeliveryAddress(value);
   };
 
   const expressTimeWindow = useMemo(() => {
@@ -467,8 +484,16 @@ export default function CheckoutView() {
     const start = new Date(now.getTime() + 45 * 60000);
     const end = new Date(now.getTime() + 90 * 60000);
     const formatH = (d) =>
-      `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    return `Tu pedido llegará hoy entre las ${formatH(start)} y ${formatH(end)} hrs`;
+      String(d.getHours()).padStart(2, "0") +
+      ":" +
+      String(d.getMinutes()).padStart(2, "0");
+    return (
+      "Tu pedido llegará hoy entre las " +
+      formatH(start) +
+      " y " +
+      formatH(end) +
+      " hrs"
+    );
   }, []);
 
   const deliveryDistanceKm = useMemo(() => {
@@ -481,7 +506,7 @@ export default function CheckoutView() {
     }
     return calculateDistanceKm(
       [storeLocationData.lat, storeLocationData.lng],
-      activeCoordinates,
+      activeCoordinates
     );
   }, [activeCoordinates, storeLocationData]);
 
@@ -492,7 +517,7 @@ export default function CheckoutView() {
     if (deliveryDistanceKm !== null) {
       baseShippingFee = calculateDeliveryFee(
         deliveryDistanceKm,
-        deliveryPricing,
+        deliveryPricing
       );
     }
 
@@ -504,17 +529,24 @@ export default function CheckoutView() {
 
   const totalAmount = subtotal + deliveryCost;
 
-  // Validación: Referencia opcional, dirección y coordenadas obligatorias para envíos a domicilio
   const isStep2Valid = useMemo(() => {
     if (deliveryType === "pickup") return true;
     if (isOutOfCoverage) return false;
     if (!activeCoordinates) return false;
+    if (deliveryAddress.trim().length < 4) return false;
+    if (deliveryReference.trim().length < 3) return false;
 
-    return deliveryAddress.trim().length >= 4;
-  }, [deliveryType, isOutOfCoverage, activeCoordinates, deliveryAddress]);
+    return true;
+  }, [
+    deliveryType,
+    isOutOfCoverage,
+    activeCoordinates,
+    deliveryAddress,
+    deliveryReference,
+  ]);
 
   const handleNextFromStep2 = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (isStep2Valid) {
       setCompletedSteps((prev) => ({ ...prev, 2: true }));
       setCurrentStep(3);
@@ -529,12 +561,161 @@ export default function CheckoutView() {
   const [culqiError, setCulqiError] = useState(null);
 
   const [receiptType, setReceiptType] = useState("boleta");
+
+  const [useCustomBoleta, setUseCustomBoleta] = useState(false);
+  const [boletaDni, setBoletaDni] = useState("");
+  const [boletaFullName, setBoletaFullName] = useState("");
+  const [isSearchingBoletaDni, setIsSearchingBoletaDni] = useState(false);
+  const [isBoletaNameLocked, setIsBoletaNameLocked] = useState(false);
+  const [boletaDniFeedback, setBoletaDniFeedback] = useState(null);
+
   const [ruc, setRuc] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [fiscalAddress, setFiscalAddress] = useState("");
   const [isSearchingRuc, setIsSearchingRuc] = useState(false);
   const [isRucLocked, setIsRucLocked] = useState(false);
   const [rucFeedback, setRucFeedback] = useState(null);
+
+  const hasValidStep1Dni = useMemo(
+    () => String(dni || "").replace(/\D/g, "").length === 8,
+    [dni]
+  );
+
+  // Búsqueda manual de DNI para Boleta en Paso 3 (Bloqueo estricto si RENIEC lo encuentra)
+  const triggerBoletaDniLookup = async (dniToQuery = boletaDni) => {
+    const clean = String(dniToQuery || "")
+      .replace(/\D/g, "")
+      .slice(0, 8);
+    if (clean.length !== 8) {
+      setBoletaDniFeedback({
+        type: "error",
+        message: "El DNI debe contener exactamente 8 dígitos numéricos.",
+      });
+      return;
+    }
+
+    setIsSearchingBoletaDni(true);
+    setBoletaDniFeedback(null);
+
+    try {
+      const res = await fetchDni(clean);
+      if (res.success && res.names) {
+        const full = [
+          res.names,
+          res.firstLastName || "",
+          res.secondLastName || "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        setBoletaFullName(full);
+        setIsBoletaNameLocked(true);
+        setBoletaDniFeedback({
+          type: "success",
+          message: "Titular de boleta verificado en RENIEC.",
+        });
+      } else {
+        setIsBoletaNameLocked(false);
+        setBoletaDniFeedback({
+          type: "info",
+          message:
+            "DNI no encontrado en RENIEC. Ingresa el nombre del titular manualmente.",
+        });
+      }
+    } catch {
+      setIsBoletaNameLocked(false);
+      setBoletaDniFeedback({
+        type: "info",
+        message:
+          "Servicio no disponible. Ingresa el nombre del titular manualmente.",
+      });
+    } finally {
+      setIsSearchingBoletaDni(false);
+    }
+  };
+
+  const handleBoletaDniChange = (e) => {
+    const rawVal = e.target.value.replace(/\D/g, "").slice(0, 8);
+    setBoletaDni(rawVal);
+    setBoletaDniFeedback(null);
+    if (isBoletaNameLocked) {
+      setIsBoletaNameLocked(false);
+      setBoletaFullName("");
+    }
+  };
+
+  const isValidRucFormat = (val) => {
+    const clean = String(val || "").replace(/\D/g, "");
+    return (
+      clean.length === 11 &&
+      (clean.startsWith("10") || clean.startsWith("20"))
+    );
+  };
+
+  const triggerRucLookup = async (rucToSearch = ruc) => {
+    const clean = String(rucToSearch || "")
+      .replace(/\D/g, "")
+      .slice(0, 11);
+    if (!isValidRucFormat(clean)) {
+      setRucFeedback({
+        type: "error",
+        message: "El RUC debe tener 11 dígitos y empezar con 10 o 20.",
+      });
+      setIsRucLocked(false);
+      return;
+    }
+
+    setIsSearchingRuc(true);
+    setRucFeedback(null);
+
+    try {
+      const res = await fetchRuc(clean);
+      if (res.success && res.legalName) {
+        setCompanyName(res.legalName);
+        setFiscalAddress(res.address || "");
+        setIsRucLocked(true);
+        setRucFeedback({
+          type: "success",
+          message: "RUC verificado en SUNAT: " + (res.status || "ACTIVO"),
+        });
+      } else {
+        setCompanyName("");
+        setFiscalAddress("");
+        setIsRucLocked(false);
+        setRucFeedback({
+          type: "error",
+          message:
+            "No se encontraron datos válidos en SUNAT para este RUC.",
+        });
+      }
+    } catch {
+      setCompanyName("");
+      setFiscalAddress("");
+      setIsRucLocked(false);
+      setRucFeedback({
+        type: "error",
+        message:
+          "No se pudo conectar con SUNAT en este momento. Intenta nuevamente.",
+      });
+    } finally {
+      setIsSearchingRuc(false);
+    }
+  };
+
+  const handleRucChange = (e) => {
+    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+    setRuc(val);
+    setRucFeedback(null);
+    setIsRucLocked(false);
+    setCompanyName("");
+    setFiscalAddress("");
+  };
+
+  const handleCopyAccount = (text, label) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedAccount(label);
+    setTimeout(() => setCopiedAccount(""), 2000);
+  };
 
   const orderContextRef = useRef({});
   orderContextRef.current = {
@@ -552,6 +733,9 @@ export default function CheckoutView() {
     subtotal,
     totalAmount,
     receiptType,
+    useCustomBoleta,
+    boletaDni,
+    boletaFullName,
     ruc,
     companyName,
     fiscalAddress,
@@ -583,9 +767,10 @@ export default function CheckoutView() {
             alias: ctx.newAddressAlias.trim() || "Dirección de compra",
             zone_id: Number(ctx.selectedZoneId),
             street_address: ctx.deliveryAddress.trim(),
-            reference: ctx.deliveryReference.trim() || "Sin referencia",
-            receiver_name:
-              `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim(),
+            reference: ctx.deliveryReference.trim(),
+            receiver_name: [ctx.firstName.trim(), ctx.lastName.trim()]
+              .join(" ")
+              .trim(),
             receiver_phone: ctx.phone.trim(),
             is_default: (ctx.savedAddresses || []).length === 0,
             latitude: ctx.deliveryLatitude || null,
@@ -593,8 +778,8 @@ export default function CheckoutView() {
             updated_at: new Date().toISOString(),
           },
         ]);
-      } catch (err) {
-        console.warn("Aviso al guardar nueva dirección:", err);
+      } catch {
+        // Silencioso
       }
     }
   };
@@ -602,17 +787,22 @@ export default function CheckoutView() {
   const buildOrderPayload = (
     gatewayTxId = null,
     paymentStatus = "pending_verification",
+    methodOverride = "culqi_gateway"
   ) => {
     const ctx = orderContextRef.current;
-    const fullName = `${ctx.firstName.trim()} ${ctx.lastName.trim()}`.trim();
+    const fullName = [ctx.firstName.trim(), ctx.lastName.trim()]
+      .join(" ")
+      .trim();
+    const refSegment = ctx.deliveryReference.trim()
+      ? " (Ref: " + ctx.deliveryReference.trim() + ")"
+      : "";
     const finalAddress =
       ctx.deliveryType === "pickup"
         ? pickupStoreInfo.address
-        : `${ctx.deliveryAddress.trim()}${
-            ctx.deliveryReference.trim()
-              ? ` (Ref: ${ctx.deliveryReference.trim()})`
-              : ""
-          } - ${ctx.selectedZone?.district_name || "Lima"}`;
+        : ctx.deliveryAddress.trim() +
+        refSegment +
+        " - " +
+        (ctx.selectedZone?.district_name || "Lima");
 
     const isUsingSavedAddress =
       ctx.deliveryType !== "pickup" &&
@@ -626,19 +816,19 @@ export default function CheckoutView() {
     const selectedAddress =
       ctx.deliveryType !== "pickup" && ctx.selectedAddressMode === "saved"
         ? (ctx.savedAddresses || []).find(
-            (a) => a.id === ctx.selectedSavedAddressId,
-          )
+          (a) => a.id === ctx.selectedSavedAddressId
+        )
         : null;
 
     const resolvedLat =
       ctx.deliveryType === "pickup"
         ? null
-        : (selectedAddress?.latitude ?? ctx.deliveryLatitude ?? null);
+        : selectedAddress?.latitude ?? ctx.deliveryLatitude ?? null;
 
     const resolvedLng =
       ctx.deliveryType === "pickup"
         ? null
-        : (selectedAddress?.longitude ?? ctx.deliveryLongitude ?? null);
+        : selectedAddress?.longitude ?? ctx.deliveryLongitude ?? null;
 
     const invoicePrefix =
       ctx.receiptType === "factura"
@@ -646,20 +836,56 @@ export default function CheckoutView() {
         : ctx.receiptType === "boleta"
           ? "B001"
           : "NV01";
-    const invoiceDocNumber = `${invoicePrefix}-${Date.now().toString().slice(-6)}`;
+    const invoiceDocNumber =
+      invoicePrefix + "-" + Date.now().toString().slice(-6);
+
+    const step1CleanDni = String(ctx.dni || "").replace(/\D/g, "");
+    const step3CleanBoletaDni = String(ctx.boletaDni || "").replace(/\D/g, "");
+
+    let resolvedTaxId = step1CleanDni.length === 8 ? step1CleanDni : "00000000";
+    let resolvedLegalName = fullName;
+    let resolvedFiscalAddress = "";
+
+    if (ctx.receiptType === "factura") {
+      resolvedTaxId = String(ctx.ruc || "").trim();
+      resolvedLegalName = String(ctx.companyName || "").trim();
+      resolvedFiscalAddress = String(ctx.fiscalAddress || "").trim();
+    } else if (ctx.receiptType === "boleta") {
+      const isUsingStep3Boleta =
+        ctx.useCustomBoleta || step1CleanDni.length !== 8;
+      if (isUsingStep3Boleta) {
+        if (step3CleanBoletaDni.length === 8) {
+          resolvedTaxId = step3CleanBoletaDni;
+        }
+        if (String(ctx.boletaFullName || "").trim().length > 1) {
+          resolvedLegalName = String(ctx.boletaFullName).trim();
+        }
+      }
+      resolvedFiscalAddress =
+        ctx.deliveryType === "pickup"
+          ? ""
+          : ctx.deliveryAddress.trim()
+            ? ctx.deliveryAddress.trim() +
+            " - " +
+            (ctx.selectedZone?.district_name || "Lima")
+            : "";
+    }
 
     const invoiceData = {
       type: ctx.receiptType,
       doc_number: invoiceDocNumber,
-      tax_id: ctx.receiptType === "factura" ? ctx.ruc.trim() : ctx.dni.trim(),
-      legal_name:
-        ctx.receiptType === "factura" ? ctx.companyName.trim() : fullName,
-      fiscal_address:
-        ctx.receiptType === "factura"
-          ? ctx.fiscalAddress.trim() || finalAddress
-          : finalAddress,
+      tax_id: resolvedTaxId,
+      legal_name: resolvedLegalName,
+      fiscal_address: resolvedFiscalAddress,
       issued_at: new Date().toISOString(),
     };
+
+    const resolvedSlot =
+      ctx.deliveryType === "scheduled"
+        ? ctx.scheduledTimeSlot
+        : ctx.deliveryType === "express"
+          ? "Express Mismo Día"
+          : "Horario Comercial 09:00 - 18:00";
 
     return {
       userId: ctx.user?.id || null,
@@ -677,16 +903,11 @@ export default function CheckoutView() {
       deliveryZoneId:
         ctx.deliveryType === "pickup" ? null : ctx.selectedZone?.id || null,
       deliveryCost: ctx.deliveryCost,
-      scheduledTimeSlot:
-        ctx.deliveryType === "scheduled"
-          ? ctx.scheduledTimeSlot
-          : deliveryType === "express"
-            ? "Express Mismo Día"
-            : "Horario Comercial 09:00 - 18:00",
+      scheduledTimeSlot: resolvedSlot,
       subtotal: ctx.subtotal,
       totalAmount: ctx.totalAmount,
-      payment_method: "culqi_gateway",
-      paymentMethod: "culqi_gateway",
+      payment_method: methodOverride,
+      paymentMethod: methodOverride,
       payment_status: paymentStatus,
       paymentStatus,
       payment_gateway_tx_id: gatewayTxId,
@@ -707,16 +928,19 @@ export default function CheckoutView() {
     try {
       if (!orderToCharge) {
         await maybeSaveNewAddress();
-        const orderPayload = buildOrderPayload(null, "pending_verification");
+        const orderPayload = buildOrderPayload(
+          null,
+          "pending_verification",
+          "culqi_gateway"
+        );
         const result = await createOrder(orderPayload);
         if (!result.success || !result.order) {
           throw new Error(
-            result.error || "No se pudo registrar la orden en el sistema.",
+            result.error || "No se pudo registrar la orden en el sistema."
           );
         }
         orderToCharge = result.order;
         createdOrderRef.current = result.order;
-        setCreatedOrder(result.order);
       }
 
       const chargeData = await processCulqiCharge({
@@ -731,20 +955,30 @@ export default function CheckoutView() {
       await supabase
         .from("orders")
         .update({
-          status: "pending",
           payment_status: "paid",
           payment_gateway_tx_id: chargeId,
           updated_at: new Date().toISOString(),
         })
         .eq("id", orderToCharge.id);
 
+      const finalOrderObject = {
+        ...orderToCharge,
+        payment_status: "paid",
+        payment_gateway_tx_id: chargeId,
+      };
+
+      triggerOrderConfirmationEmail(finalOrderObject, ctx.items);
+
       clearCart();
-      navigate(`/seguimiento/${orderToCharge.order_number}`);
+      navigate("/seguimiento/" + orderToCharge.order_number, {
+        state: {
+          order: finalOrderObject,
+        },
+      });
     } catch (err) {
-      console.error("Error al procesar cobro de Culqi:", err);
       setCulqiError(
         err.message ||
-          "Tu tarjeta fue rechazada o ocurrió un inconveniente con la pasarela. Inténtalo nuevamente o elige otro método.",
+        "Tu tarjeta fue rechazada o ocurrió un inconveniente con la pasarela."
       );
     } finally {
       setIsProcessing(false);
@@ -759,10 +993,6 @@ export default function CheckoutView() {
           const token = window.Culqi.token;
           closeCulqi();
           await handleCulqiTokenPayment(token.id);
-        } else if (window.Culqi?.order) {
-          const order = window.Culqi.order;
-          closeCulqi();
-          await handleCulqiTokenPayment(order.id);
         } else if (window.Culqi?.error) {
           closeCulqi();
           const errorMsg =
@@ -775,7 +1005,6 @@ export default function CheckoutView() {
           setIsSubmitting(false);
         }
       } catch (err) {
-        console.error("Error en callback window.culqi:", err);
         setCulqiError(err.message || "Error inesperado al procesar el pago.");
         setIsProcessing(false);
         setIsSubmitting(false);
@@ -787,75 +1016,31 @@ export default function CheckoutView() {
     };
   }, []);
 
-  const triggerRucLookup = async (rucToSearch = ruc) => {
-    const clean = String(rucToSearch || "")
-      .replace(/\D/g, "")
-      .slice(0, 11);
-    if (!/^(10|20)\d{9}$/.test(clean)) {
-      setRucFeedback({
-        type: "error",
-        message: "El RUC debe tener 11 dígitos y empezar con 10 o 20.",
-      });
-      setIsRucLocked(false);
-      return;
-    }
-
-    setIsSearchingRuc(true);
-    setRucFeedback(null);
-
-    try {
-      const res = await fetchRuc(clean);
-      if (res.success && res.legalName) {
-        setCompanyName(res.legalName);
-        if (res.address) {
-          setFiscalAddress(res.address);
-        }
-        setIsRucLocked(true);
-        setRucFeedback({
-          type: "success",
-          message: `✓ RUC verificado: ${res.status || "ACTIVO"}`,
-        });
-      } else {
-        setIsRucLocked(false);
-        setRucFeedback({
-          type: "info",
-          message: "Completa la Razón Social y Dirección Fiscal manualmente.",
-        });
-      }
-    } catch {
-      setIsRucLocked(false);
-      setRucFeedback({
-        type: "info",
-        message: "No pudimos consultar SUNAT. Ingrésalos manualmente.",
-      });
-    } finally {
-      setIsSearchingRuc(false);
-    }
-  };
-
-  const handleRucChange = (e) => {
-    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
-    setRuc(val);
-    setRucFeedback(null);
-    setIsRucLocked(false);
-
-    if (val.length === 11 && /^(10|20)\d{9}$/.test(val)) {
-      triggerRucLookup(val);
-    }
-  };
-
   const isCashOnDeliveryAllowed = Boolean(user && user.email_confirmed_at);
 
   const isStep3Valid = useMemo(() => {
     if (paymentMethod === "yape_plin") {
-      if (!/^\d{6,8}$/.test(yapeOpNumber.trim())) return false;
+      const cleanOp = yapeOpNumber.trim().replace(/\D/g, "");
+      if (cleanOp.length < 6 || cleanOp.length > 8) return false;
     } else if (paymentMethod === "cash_on_delivery") {
       if (!isCashOnDeliveryAllowed) return false;
     }
 
     if (receiptType === "factura") {
-      if (!/^(10|20)\d{9}$/.test(ruc.trim())) return false;
-      if (companyName.trim().length < 2) return false;
+      if (!isValidRucFormat(ruc)) return false;
+      if (!isRucLocked || companyName.trim().length < 2) return false;
+    } else if (receiptType === "boleta" && useCustomBoleta) {
+      const cleanBoletaDni = boletaDni.replace(/\D/g, "");
+      if (cleanBoletaDni.length !== 8) return false;
+      if (boletaFullName.trim().length < 3) return false;
+    } else if (receiptType === "boleta" && !hasValidStep1Dni) {
+      const cleanBoletaDni = boletaDni.replace(/\D/g, "");
+      if (cleanBoletaDni.length > 0 && cleanBoletaDni.length !== 8) {
+        return false;
+      }
+      if (cleanBoletaDni.length === 8 && boletaFullName.trim().length < 3) {
+        return false;
+      }
     }
 
     return true;
@@ -865,7 +1050,12 @@ export default function CheckoutView() {
     isCashOnDeliveryAllowed,
     receiptType,
     ruc,
+    isRucLocked,
     companyName,
+    useCustomBoleta,
+    boletaDni,
+    boletaFullName,
+    hasValidStep1Dni,
   ]);
 
   const handleConfirmOrder = async (e) => {
@@ -873,35 +1063,30 @@ export default function CheckoutView() {
     if (isSubmitting || isProcessing) return;
 
     if (receiptType === "factura") {
-      if (!/^(10|20)\d{9}$/.test(ruc.trim()) || companyName.trim().length < 2) {
+      if (
+        !isValidRucFormat(ruc) ||
+        !isRucLocked ||
+        companyName.trim().length < 2
+      ) {
         setRucFeedback({
           type: "error",
           message:
-            "Por favor completa un RUC y Razón Social válidos para la Factura.",
+            "Debes validar un RUC de 11 dígitos con el botón de lupa en SUNAT para emitir Factura.",
         });
         return;
       }
     }
 
     if (paymentMethod === "culqi_gateway") {
+      if (!isStep3Valid) return;
       setCulqiError(null);
       try {
-        if (!createdOrderRef.current) {
-          await maybeSaveNewAddress();
-          const payload = buildOrderPayload(null, "pending_verification");
-          const res = await createOrder(payload);
-          if (res.success && res.order) {
-            createdOrderRef.current = res.order;
-            setCreatedOrder(res.order);
-          }
-        }
         initCulqi({
-          title: "ERXIDI - Confecciones",
-          amountInCents: totalAmount * 100,
+          title: "ERXIDI - Ropa Interior y Calcetería",
+          amountInCents: Math.round(totalAmount * 100),
         });
         openCulqi();
       } catch (err) {
-        console.error("Error al iniciar Culqi:", err);
         setCulqiError(err.message || "No se pudo abrir la pasarela Culqi.");
       }
       return;
@@ -912,131 +1097,80 @@ export default function CheckoutView() {
     setIsSubmitting(true);
     setCulqiError(null);
 
-    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-    const finalAddress =
-      deliveryType === "pickup"
-        ? pickupStoreInfo.address
-        : `${deliveryAddress.trim()}${
-            deliveryReference.trim()
-              ? ` (Ref: ${deliveryReference.trim()})`
-              : ""
-          } - ${selectedZone?.district_name || "Lima"}`;
-
-    const isUsingSavedAddress =
-      deliveryType !== "pickup" &&
-      selectedAddressMode === "saved" &&
-      Boolean(selectedSavedAddressId);
-
-    const shippingAddressId = isUsingSavedAddress
-      ? selectedSavedAddressId
-      : null;
-
-    const selectedAddress =
-      deliveryType !== "pickup" && selectedAddressMode === "saved"
-        ? (savedAddresses || []).find((a) => a.id === selectedSavedAddressId)
-        : null;
-
-    const resolvedLatitude =
-      deliveryType === "pickup"
-        ? null
-        : (selectedAddress?.latitude ?? deliveryLatitude ?? null);
-
-    const resolvedLongitude =
-      deliveryType === "pickup"
-        ? null
-        : (selectedAddress?.longitude ?? deliveryLongitude ?? null);
-
-    await maybeSaveNewAddress();
-
-    const invoicePrefix =
-      receiptType === "factura"
-        ? "F001"
-        : receiptType === "boleta"
-          ? "B001"
-          : "NV01";
-    const invoiceDocNumber = `${invoicePrefix}-${Date.now().toString().slice(-6)}`;
-
-    const invoiceData = {
-      type: receiptType,
-      doc_number: invoiceDocNumber,
-      tax_id: receiptType === "factura" ? ruc.trim() : dni.trim(),
-      legal_name: receiptType === "factura" ? companyName.trim() : fullName,
-      fiscal_address:
-        receiptType === "factura"
-          ? fiscalAddress.trim() || finalAddress
-          : finalAddress,
-      issued_at: new Date().toISOString(),
-    };
-
-    const isCashOnDelivery = paymentMethod === "cash_on_delivery";
-
-    const orderPayload = {
-      userId: user?.id || null,
-      customerName: fullName,
-      customerEmail: email.trim(),
-      customerPhone: phone.trim(),
-      deliveryType,
-      deliveryAddress: finalAddress,
-      delivery_latitude: resolvedLatitude,
-      deliveryLatitude: resolvedLatitude,
-      delivery_longitude: resolvedLongitude,
-      deliveryLongitude: resolvedLongitude,
-      shipping_address_id: shippingAddressId,
-      shippingAddressId,
-      deliveryZoneId:
-        deliveryType === "pickup" ? null : selectedZone?.id || null,
-      deliveryCost,
-      scheduledTimeSlot:
-        deliveryType === "scheduled"
-          ? scheduledTimeSlot
-          : deliveryType === "express"
-            ? "Express Mismo Día"
-            : "Horario Comercial 09:00 - 18:00",
-      subtotal,
-      totalAmount,
-      payment_method: paymentMethod,
-      paymentMethod,
-      payment_status: isCashOnDelivery ? "pending" : "pending_verification",
-      paymentStatus: isCashOnDelivery ? "pending" : "pending_verification",
-      payment_gateway_tx_id: isCashOnDelivery ? null : yapeOpNumber.trim(),
-      paymentGatewayTxId: isCashOnDelivery ? null : yapeOpNumber.trim(),
-      invoice_type: receiptType,
-      invoice_data: invoiceData,
-      items,
-    };
-
     try {
+      await maybeSaveNewAddress();
+
+      const isCashOnDelivery = paymentMethod === "cash_on_delivery";
+      const targetStatus = isCashOnDelivery
+        ? "pending"
+        : "pending_verification";
+      const targetTxId = isCashOnDelivery ? null : yapeOpNumber.trim();
+
+      const orderPayload = buildOrderPayload(
+        targetTxId,
+        targetStatus,
+        paymentMethod
+      );
+
       if (createdOrderRef.current?.id) {
         const { error: updateOrderError } = await supabase
           .from("orders")
           .update({
             payment_method: paymentMethod,
-            payment_status: isCashOnDelivery
-              ? "pending"
-              : "pending_verification",
-            payment_gateway_tx_id: isCashOnDelivery
-              ? null
-              : yapeOpNumber.trim(),
+            payment_status: targetStatus,
+            payment_gateway_tx_id: targetTxId,
+            invoice_type: orderPayload.invoice_type,
+            invoice_data: orderPayload.invoice_data,
             updated_at: new Date().toISOString(),
           })
           .eq("id", createdOrderRef.current.id);
 
-        if (!updateOrderError) {
-          clearCart();
-          navigate(`/seguimiento/${createdOrderRef.current.order_number}`);
-          return;
+        if (updateOrderError) {
+          throw new Error(updateOrderError.message);
         }
+
+        const updatedOrderObj = {
+          ...createdOrderRef.current,
+          payment_method: paymentMethod,
+          payment_status: targetStatus,
+          payment_gateway_tx_id: targetTxId,
+          invoice_type: orderPayload.invoice_type,
+          invoice_data: orderPayload.invoice_data,
+        };
+
+        triggerOrderConfirmationEmail(
+          updatedOrderObj,
+          orderContextRef.current.items
+        );
+
+        clearCart();
+        navigate("/seguimiento/" + createdOrderRef.current.order_number, {
+          state: { order: updatedOrderObj },
+        });
+        return;
       }
 
       const result = await createOrder(orderPayload);
-      if (result.success && result.order) {
-        clearCart();
-        navigate(`/seguimiento/${result.order.order_number}`, {
-          state: { order: result.order },
-        });
+
+      if (!result.success || !result.order) {
+        throw new Error(
+          result.error || "No se pudo registrar el pedido. Verifica el stock."
+        );
       }
+
+      triggerOrderConfirmationEmail(
+        result.order,
+        orderContextRef.current.items
+      );
+
+      clearCart();
+      navigate("/seguimiento/" + result.order.order_number, {
+        state: { order: result.order },
+      });
     } catch (err) {
-      console.error("Error al procesar la compra:", err);
+      setCulqiError(
+        err.message || "Ocurrió un error al registrar tu pedido."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -1078,6 +1212,84 @@ export default function CheckoutView() {
     );
   }
 
+  const renderAddressInputs = (prefixId) => (
+    <div className="space-y-4">
+      <div>
+        <label
+          htmlFor={prefixId + "-address"}
+          className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
+        >
+          Dirección Exacta <span className="text-rose-600">*</span>
+        </label>
+        <div className="flex gap-2 items-center">
+          <div className="flex-1">
+            <Input
+              id={prefixId + "-address"}
+              placeholder="Calle / Av. y número (presiona la lupa para ubicar en el mapa)"
+              value={deliveryAddress}
+              onChange={(e) => setDeliveryAddress(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  searchAddressOnMap(
+                    deliveryAddress +
+                    ", " +
+                    (selectedZone?.district_name || "")
+                  );
+                }
+              }}
+              required
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="md"
+            disabled={isGeocoding || deliveryAddress.trim().length < 4}
+            onClick={() =>
+              searchAddressOnMap(
+                deliveryAddress + ", " + (selectedZone?.district_name || "")
+              )
+            }
+            className="h-10 px-3.5 shrink-0"
+            title="Buscar esta dirección en el mapa"
+          >
+            {isGeocoding ? (
+              <Loader2 className="w-4 h-4 animate-spin text-accent" />
+            ) : (
+              <Search className="w-4 h-4 text-brand-primary" />
+            )}
+          </Button>
+        </div>
+        <span className="text-[11px] text-brand-muted mt-1 block">
+          Escribe tu dirección y presiona el botón de lupa para fijar el pin en
+          el mapa.
+        </span>
+      </div>
+
+      <div>
+        <Input
+          label="Referencia de Llegada (Obligatoria) *"
+          id={prefixId + "-ref"}
+          placeholder="Ej. Dpto 402, portón negro frente al parque, timbre 2"
+          value={deliveryReference}
+          onChange={(e) => setDeliveryReference(e.target.value)}
+          required
+        />
+        {deliveryReference.trim().length > 0 &&
+          deliveryReference.trim().length < 3 && (
+            <span className="text-[11px] text-rose-600 mt-1 block">
+              Ingresa una referencia válida (mínimo 3 caracteres) para el
+              repartidor.
+            </span>
+          )}
+      </div>
+    </div>
+  );
+
+  const showCustomBoletaForm =
+    receiptType === "boleta" && (useCustomBoleta || !hasValidStep1Dni);
+
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8">
       {/* Encabezado y Progreso */}
@@ -1102,111 +1314,65 @@ export default function CheckoutView() {
 
         <nav aria-label="Progreso de Checkout" className="pt-4">
           <ol className="grid grid-cols-3 gap-2 sm:gap-4">
-            <li
-              onClick={() => handleStepClick(1)}
-              className={`p-3 rounded-card border transition-all cursor-pointer select-none flex items-center gap-3 ${
-                currentStep === 1
-                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
-                  : completedSteps[1]
-                    ? "border-emerald-300 bg-emerald-50/40 hover:border-brand-primary"
-                    : "border-border bg-surface-subtle opacity-70"
-              }`}
-            >
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors ${
-                  completedSteps[1]
-                    ? "bg-emerald-600 text-white"
-                    : currentStep === 1
-                      ? "bg-brand-primary text-white"
-                      : "bg-surface-subtle text-brand-secondary border border-border"
-                }`}
-              >
-                {completedSteps[1] ? <Check className="w-4 h-4" /> : "1"}
-              </div>
-              <div className="min-w-0">
-                <span className="block text-[10px] uppercase font-bold tracking-wider text-brand-muted">
-                  Paso 1
-                </span>
-                <span className="block text-xs font-bold text-brand-primary truncate">
-                  Identificación
-                </span>
-              </div>
-            </li>
+            {[
+              { step: 1, label: "Identificación" },
+              { step: 2, label: "Entrega" },
+              { step: 3, label: "Pago" },
+            ].map(({ step, label }) => {
+              const isCurrent = currentStep === step;
+              const isCompleted = completedSteps[step];
+              const isClickable =
+                step === 1 ||
+                (step === 2 && completedSteps[1]) ||
+                (step === 3 && completedSteps[1] && completedSteps[2]);
 
-            <li
-              onClick={() => handleStepClick(2)}
-              className={`p-3 rounded-card border transition-all ${
-                completedSteps[1]
-                  ? "cursor-pointer"
-                  : "cursor-not-allowed opacity-50"
-              } select-none flex items-center gap-3 ${
-                currentStep === 2
-                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
-                  : completedSteps[2]
-                    ? "border-emerald-300 bg-emerald-50/40 hover:border-brand-primary"
-                    : "border-border bg-surface-subtle"
-              }`}
-            >
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors ${
-                  completedSteps[2]
-                    ? "bg-emerald-600 text-white"
-                    : currentStep === 2
-                      ? "bg-brand-primary text-white"
-                      : "bg-surface-subtle text-brand-secondary border border-border"
-                }`}
-              >
-                {completedSteps[2] ? <Check className="w-4 h-4" /> : "2"}
-              </div>
-              <div className="min-w-0">
-                <span className="block text-[10px] uppercase font-bold tracking-wider text-brand-muted">
-                  Paso 2
-                </span>
-                <span className="block text-xs font-bold text-brand-primary truncate">
-                  Entrega
-                </span>
-              </div>
-            </li>
-
-            <li
-              onClick={() => handleStepClick(3)}
-              className={`p-3 rounded-card border transition-all ${
-                completedSteps[1] && completedSteps[2]
-                  ? "cursor-pointer"
-                  : "cursor-not-allowed opacity-50"
-              } select-none flex items-center gap-3 ${
-                currentStep === 3
-                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
-                  : "border-border bg-surface-subtle"
-              }`}
-            >
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors ${
-                  currentStep === 3
-                    ? "bg-brand-primary text-white"
-                    : "bg-surface-subtle text-brand-secondary border border-border"
-                }`}
-              >
-                3
-              </div>
-              <div className="min-w-0">
-                <span className="block text-[10px] uppercase font-bold tracking-wider text-brand-muted">
-                  Paso 3
-                </span>
-                <span className="block text-xs font-bold text-brand-primary truncate">
-                  Pago
-                </span>
-              </div>
-            </li>
+              return (
+                <li
+                  key={step}
+                  onClick={() => handleStepClick(step)}
+                  className={
+                    "p-3 rounded-card border transition-all select-none flex items-center gap-3 " +
+                    (isClickable
+                      ? "cursor-pointer "
+                      : "cursor-not-allowed opacity-50 ") +
+                    (isCurrent
+                      ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary"
+                      : isCompleted
+                        ? "border-emerald-300 bg-emerald-50/40 hover:border-brand-primary"
+                        : "border-border bg-surface-subtle")
+                  }
+                >
+                  <div
+                    className={
+                      "w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold transition-colors " +
+                      (isCompleted
+                        ? "bg-emerald-600 text-white"
+                        : isCurrent
+                          ? "bg-brand-primary text-white"
+                          : "bg-surface-subtle text-brand-secondary border border-border")
+                    }
+                  >
+                    {isCompleted ? <Check className="w-4 h-4" /> : step}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[10px] uppercase font-bold tracking-wider text-brand-muted">
+                      Paso {step}
+                    </span>
+                    <span className="block text-xs font-bold text-brand-primary truncate">
+                      {label}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         </nav>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Columna Formulario (lg:col-span-8) */}
         <div className="lg:col-span-8 space-y-6">
           {/* ========================================================= */}
-          {/* PASO 1 */}
+          {/* PASO 1: Identificación y Contacto */}
           {/* ========================================================= */}
           {currentStep === 1 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
@@ -1215,15 +1381,16 @@ export default function CheckoutView() {
                   1. Identificación y Contacto
                 </h2>
                 <p className="text-xs text-brand-secondary mt-0.5">
-                  Ingresa tus datos personales para validar tu identidad con
-                  RENIEC y coordinar el despacho.
+                  Ingresa tus datos de contacto para coordinar el despacho.
+                  Puedes consultar tu DNI con la lupa para autocompletar tus
+                  nombres.
                 </p>
               </div>
 
               {user && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-card flex items-center justify-between text-xs text-emerald-900 animate-in fade-in duration-150">
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-card flex items-center justify-between text-xs text-emerald-900">
                   <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>
                       Datos precargados desde tu cuenta de cliente ERXIDI.
                     </span>
@@ -1241,7 +1408,7 @@ export default function CheckoutView() {
                       htmlFor="checkout-dni"
                       className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                     >
-                      DNI (8 dígitos)
+                      DNI (Opcional)
                     </label>
                     {isSearchingDni && (
                       <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -1257,17 +1424,18 @@ export default function CheckoutView() {
                         id="checkout-dni"
                         type="text"
                         inputMode="numeric"
-                        placeholder="Ingresa 8 dígitos"
+                        maxLength={8}
+                        placeholder="Ingresa 8 dígitos numéricos"
                         value={dni}
                         onChange={handleDniChange}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
-                            triggerDniLookup();
+                            if (dni.length === 8) {
+                              triggerDniLookup();
+                            }
                           }
                         }}
-                        disabled={Boolean(user && profile?.document_number)}
-                        required
                       />
                     </div>
 
@@ -1277,7 +1445,7 @@ export default function CheckoutView() {
                       size="md"
                       onClick={() => triggerDniLookup()}
                       disabled={isSearchingDni || dni.length !== 8}
-                      className="h-10 px-3.5 flex-shrink-0"
+                      className="h-10 px-3.5 shrink-0"
                       title="Consultar DNI en RENIEC"
                     >
                       {isSearchingDni ? (
@@ -1286,15 +1454,37 @@ export default function CheckoutView() {
                         <Search className="w-4 h-4 text-brand-primary" />
                       )}
                     </Button>
+
+                    {(dni.length > 0 || isNameLocked) && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="md"
+                        onClick={handleClearDni}
+                        disabled={isSearchingDni}
+                        className="h-10 px-3.5 shrink-0 text-rose-600 hover:bg-rose-50 border-border"
+                        title="Borrar DNI y editar nombres manualmente"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
+
+                  {dni.length > 0 && dni.length < 8 && (
+                    <span className="text-[11px] text-amber-600 mt-1 block">
+                      Completa los 8 dígitos o presiona el botón de papelera
+                      para continuar sin DNI.
+                    </span>
+                  )}
 
                   {dniFeedback && (
                     <div
-                      className={`mt-1.5 text-xs flex items-center gap-1.5 ${
-                        dniFeedback.type === "success"
+                      className={
+                        "mt-1.5 text-xs flex items-center gap-1.5 " +
+                        (dniFeedback.type === "success"
                           ? "text-emerald-600 font-medium"
-                          : "text-amber-600"
-                      }`}
+                          : "text-amber-600")
+                      }
                     >
                       {dniFeedback.type === "success" ? (
                         <Check className="w-3.5 h-3.5" />
@@ -1302,19 +1492,6 @@ export default function CheckoutView() {
                         <AlertCircle className="w-3.5 h-3.5" />
                       )}
                       <span>{dniFeedback.message}</span>
-                    </div>
-                  )}
-
-                  {isNameLocked && (
-                    <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setIsNameLocked(false)}
-                        className="text-xs text-accent hover:text-accent-hover font-semibold hover:underline flex items-center gap-1"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        Editar nombres manualmente
-                      </button>
                     </div>
                   )}
                 </div>
@@ -1327,6 +1504,12 @@ export default function CheckoutView() {
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
                     disabled={isNameLocked}
+                    readOnly={isNameLocked}
+                    className={
+                      isNameLocked
+                        ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                        : ""
+                    }
                     required
                   />
 
@@ -1337,6 +1520,12 @@ export default function CheckoutView() {
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                     disabled={isNameLocked}
+                    readOnly={isNameLocked}
+                    className={
+                      isNameLocked
+                        ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                        : ""
+                    }
                     required
                   />
                 </div>
@@ -1386,7 +1575,7 @@ export default function CheckoutView() {
           )}
 
           {/* ========================================================= */}
-          {/* PASO 2: Método de Entrega y Horarios */}
+          {/* PASO 2: Método de Entrega y Horarios (Intacto) */}
           {/* ========================================================= */}
           {currentStep === 2 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
@@ -1395,39 +1584,38 @@ export default function CheckoutView() {
                   2. Método de Entrega y Horarios
                 </h2>
                 <p className="text-xs text-brand-secondary mt-0.5">
-                  Elige la modalidad que mejor se adapte a tus necesidades.
+                  Elige la modalidad de entrega y verifica tu ubicación dentro
+                  del polígono de cobertura.
                 </p>
               </div>
 
-              <form onSubmit={handleNextFromStep2} className="space-y-6">
-                {/* Alerta contextual si está fuera de cobertura */}
+              <div className="space-y-6">
                 {deliveryType !== "pickup" && isOutOfCoverage && (
-                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900 animate-in fade-in duration-150">
-                    <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                     <div>
                       <strong className="block font-bold">
                         Zona fuera de cobertura a domicilio
                       </strong>
                       <span>
                         La ubicación fijada en el mapa se encuentra fuera de
-                        nuestra zona de cobertura. Ubica el pin dentro de la
-                        zona delimitada o cambia a{" "}
-                        <strong>Recojo en Tienda</strong> para continuar.
+                        nuestra área delimitada. Ubica el pin dentro del
+                        polígono verde o selecciona{" "}
+                        <strong>Recojo en Tienda</strong>.
                       </span>
                     </div>
                   </div>
                 )}
 
-                {/* 3 Opciones de Entrega: Seleccionables en todo momento */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Recojo en Tienda */}
                   <label
                     onClick={() => setDeliveryType("pickup")}
-                    className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                      deliveryType === "pickup"
+                    className={
+                      "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none " +
+                      (deliveryType === "pickup"
                         ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                        : "border-border bg-surface-card hover:border-border-strong"
-                    }`}
+                        : "border-border bg-surface-card hover:border-border-strong")
+                    }
                   >
                     <input
                       type="radio"
@@ -1452,14 +1640,14 @@ export default function CheckoutView() {
                     </div>
                   </label>
 
-                  {/* Envío Express */}
                   <label
                     onClick={() => setDeliveryType("express")}
-                    className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                      deliveryType === "express"
+                    className={
+                      "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none " +
+                      (deliveryType === "express"
                         ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                        : "border-border bg-surface-card hover:border-border-strong"
-                    }`}
+                        : "border-border bg-surface-card hover:border-border-strong")
+                    }
                   >
                     <input
                       type="radio"
@@ -1484,14 +1672,14 @@ export default function CheckoutView() {
                     </div>
                   </label>
 
-                  {/* Envío Programado */}
                   <label
                     onClick={() => setDeliveryType("scheduled")}
-                    className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                      deliveryType === "scheduled"
+                    className={
+                      "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none " +
+                      (deliveryType === "scheduled"
                         ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                        : "border-border bg-surface-card hover:border-border-strong"
-                    }`}
+                        : "border-border bg-surface-card hover:border-border-strong")
+                    }
                   >
                     <input
                       type="radio"
@@ -1506,9 +1694,6 @@ export default function CheckoutView() {
                         <Badge variant="success" className="text-[10px]">
                           Económico
                         </Badge>
-                        <Badge variant="neutral" className="text-[10px]">
-                          Día Siguiente
-                        </Badge>
                       </div>
                       <span className="block text-xs font-bold text-brand-primary">
                         Envío Programado
@@ -1520,23 +1705,25 @@ export default function CheckoutView() {
                   </label>
                 </div>
 
-                {/* Vista Recojo en Tienda */}
                 {deliveryType === "pickup" && (
                   <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-3 text-xs">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/70 pb-2.5">
                       <div className="flex items-center gap-2 font-bold text-brand-primary">
-                        <Store className="w-4 h-4 text-accent flex-shrink-0" />
+                        <Store className="w-4 h-4 text-accent shrink-0" />
                         <span>
-                          {storeLocationData?.name || "Taller ERXIDI Central"}{" "}
+                          {storeLocationData?.name || "Tienda ERXIDI Central"}{" "}
                           &bull;{" "}
                           {storeLocationData?.address ||
                             pickupStoreInfo.address}
                         </span>
                       </div>
                       <a
-                        href={`https://www.google.com/maps/dir/?api=1&destination=${
-                          storeLocationData?.lat || -12.1215
-                        },${storeLocationData?.lng || -77.0298}`}
+                        href={
+                          "https://www.google.com/maps/dir/?api=1&destination=" +
+                          (storeLocationData?.lat || -12.1215) +
+                          "," +
+                          (storeLocationData?.lng || -77.0298)
+                        }
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-white rounded-button font-semibold text-xs shadow-sm transition-colors self-start sm:self-auto"
@@ -1557,12 +1744,11 @@ export default function CheckoutView() {
                   </div>
                 )}
 
-                {/* Vista Envío Express o Programado */}
                 {deliveryType !== "pickup" && (
                   <div className="space-y-5 pt-2 border-t border-border">
                     {deliveryType === "express" && (
                       <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
-                        <Zap className="w-4 h-4 text-accent flex-shrink-0" />
+                        <Zap className="w-4 h-4 text-accent shrink-0" />
                         <span className="font-semibold">
                           {expressTimeWindow}
                         </span>
@@ -1582,11 +1768,12 @@ export default function CheckoutView() {
                                 key={slot}
                                 type="button"
                                 onClick={() => setScheduledTimeSlot(slot)}
-                                className={`p-3 rounded-button border text-xs font-semibold flex items-center justify-between transition-colors focus:outline-none ${
-                                  isSelected
+                                className={
+                                  "p-3 rounded-button border text-xs font-semibold flex items-center justify-between transition-colors " +
+                                  (isSelected
                                     ? "border-brand-primary bg-surface-subtle text-brand-primary ring-1 ring-brand-primary"
-                                    : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary"
-                                }`}
+                                    : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary")
+                                }
                               >
                                 <span>{slot}</span>
                                 {isSelected && (
@@ -1599,7 +1786,6 @@ export default function CheckoutView() {
                       </div>
                     )}
 
-                    {/* Selector de Dirección Guardada */}
                     {user && savedAddresses.length > 0 ? (
                       <div className="space-y-3 pt-2 border-t border-border">
                         <div className="flex items-center justify-between">
@@ -1628,26 +1814,27 @@ export default function CheckoutView() {
                               const zoneInfo = addr.delivery_zones
                                 ?.district_name
                                 ? {
-                                    name: addr.delivery_zones.district_name,
-                                    cost: addr.delivery_zones.delivery_cost,
-                                  }
+                                  name: addr.delivery_zones.district_name,
+                                  cost: addr.delivery_zones.delivery_cost,
+                                }
                                 : deliveryZones.find(
-                                    (z) =>
-                                      Number(z.id) === Number(addr.zone_id),
-                                  ) || {
-                                    name: "Lima",
-                                    cost: 10.0,
-                                  };
+                                  (z) =>
+                                    Number(z.id) === Number(addr.zone_id)
+                                ) || {
+                                  name: "Lima",
+                                  cost: 10.0,
+                                };
 
                               return (
                                 <div
                                   key={addr.id}
                                   onClick={() => handleSelectSavedAddress(addr)}
-                                  className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between text-left select-none ${
-                                    isSelected
+                                  className={
+                                    "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between text-left select-none " +
+                                    (isSelected
                                       ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary shadow-subtle"
-                                      : "border-border bg-surface-card hover:border-border-strong"
-                                  }`}
+                                      : "border-border bg-surface-card hover:border-border-strong")
+                                  }
                                 >
                                   <div>
                                     <div className="flex items-center justify-between mb-1.5">
@@ -1683,8 +1870,6 @@ export default function CheckoutView() {
                                           ? deliveryCost.toFixed(2)
                                           : Number(zoneInfo.cost).toFixed(2)}
                                       </span>
-                                      {deliveryType === "express" &&
-                                        " (+S/ 5.00 Express)"}
                                     </p>
                                     {addr.reference && (
                                       <p className="text-[10px] text-brand-muted mt-1 italic line-clamp-1">
@@ -1692,110 +1877,71 @@ export default function CheckoutView() {
                                       </p>
                                     )}
                                   </div>
-
-                                  <div className="mt-2.5 pt-2 border-t border-border/60 flex items-center justify-between text-[10px] text-brand-muted">
-                                    <span>Recibe: {addr.receiver_name}</span>
-                                    <div
-                                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                                        isSelected
-                                          ? "border-accent bg-accent text-white"
-                                          : "border-border"
-                                      }`}
-                                    >
-                                      {isSelected && (
-                                        <Check className="w-2.5 h-2.5 stroke-[3]" />
-                                      )}
-                                    </div>
-                                  </div>
                                 </div>
                               );
                             })}
 
                             <div
                               onClick={handleSelectNewAddressMode}
-                              className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col items-center justify-center text-center select-none min-h-[110px] ${
-                                selectedAddressMode === "new"
+                              className={
+                                "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col items-center justify-center text-center select-none min-h-[110px] " +
+                                (selectedAddressMode === "new"
                                   ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                                  : "border-dashed border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/50"
-                              }`}
+                                  : "border-dashed border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/50")
+                              }
                             >
                               <div className="w-8 h-8 rounded-full bg-surface-subtle border border-border flex items-center justify-center mb-1.5 text-accent">
                                 <Plus className="w-4 h-4" />
                               </div>
                               <span className="text-xs font-bold text-brand-primary">
-                                ➕ Enviar a una nueva dirección
+                                Enviar a una nueva dirección
                               </span>
                               <span className="text-[10px] text-brand-secondary mt-0.5">
-                                Fijar en el mapa
+                                Fijar en el mapa con área de cobertura
                               </span>
                             </div>
                           </div>
                         )}
 
-                        {/* Nueva Dirección: Mapa como fuente de verdad (Sin selector de distrito) */}
-                        {selectedAddressMode === "new" && (
-                          <div className="space-y-4 pt-3 border-t border-border bg-surface-subtle/40 p-4 rounded-card border mt-3 animate-in fade-in duration-150">
-                            <div className="flex items-center gap-2 text-xs font-bold text-brand-primary">
-                              <MapPin className="w-4 h-4 text-accent" />
-                              <span>Nueva Dirección de Entrega</span>
-                            </div>
-
-                            {/* 1. MAPA PRIMERO (Reverse Geocoding) */}
-                            <div>
-                              <div className="flex items-center justify-between mb-1.5">
-                                <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-                                  Ubicación en el Mapa (Mueve el Pin)
-                                </label>
-                                {isGeocoding && (
-                                  <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                    Obteniendo dirección...
-                                  </span>
-                                )}
-                              </div>
-
-                              <LocationPickerMap
-                                latitude={deliveryLatitude}
-                                longitude={deliveryLongitude}
-                                onChange={handleMapLocationChange}
-                                height="h-56"
-                              />
-                              <p className="mt-1 text-[11px] text-brand-muted">
-                                Mueve el marcador o pulsa «Usar mi ubicación
-                                actual» para rellenar automáticamente tu
-                                dirección y calcular el flete.
-                              </p>
-                            </div>
-
-                            {/* 2. DIRECCIÓN EXACTA (Autocompletada) */}
+                        {selectedAddressMode === "saved" && (
+                          <div className="pt-2">
                             <Input
-                              label="Dirección Exacta"
-                              id="checkout-new-address"
-                              placeholder="Calle / Av. y número (se completa al mover el pin)"
-                              value={deliveryAddress}
-                              onChange={(e) =>
-                                handleDeliveryAddressChange(e.target.value)
-                              }
-                              onBlur={() => {
-                                if (deliveryAddress.trim().length >= 4) {
-                                  searchAddressOnMap(
-                                    `${deliveryAddress}, ${selectedZone?.district_name || ""}`,
-                                  );
-                                }
-                              }}
-                              required
-                            />
-
-                            {/* 3. REFERENCIA (Opcional) */}
-                            <Input
-                              label="Referencia de Llegada (Opcional)"
-                              id="checkout-new-ref"
-                              placeholder="Ej. Dpto 402, frente al parque, timbre blanco"
+                              label="Referencia de Llegada (Obligatoria) *"
+                              id="checkout-saved-ref"
+                              placeholder="Confirma o detalla la referencia del domicilio"
                               value={deliveryReference}
                               onChange={(e) =>
                                 setDeliveryReference(e.target.value)
                               }
+                              required
                             />
+                          </div>
+                        )}
+
+                        {selectedAddressMode === "new" && (
+                          <div className="space-y-4 pt-3 border-t border-border bg-surface-subtle/40 p-4 rounded-card border mt-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 text-xs font-bold text-brand-primary">
+                                <MapPin className="w-4 h-4 text-accent" />
+                                <span>Nueva Dirección de Entrega</span>
+                              </div>
+                              {isGeocoding && (
+                                <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Ubicando...
+                                </span>
+                              )}
+                            </div>
+
+                            <LocationPickerMap
+                              latitude={deliveryLatitude}
+                              longitude={deliveryLongitude}
+                              onChange={handleMapLocationChange}
+                              coveragePolygon={coveragePolygon}
+                              height="h-72"
+                            />
+
+                            {renderAddressInputs("checkout-new")}
 
                             <div className="pt-2 border-t border-border space-y-2">
                               <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-brand-primary select-none">
@@ -1805,7 +1951,7 @@ export default function CheckoutView() {
                                   onChange={(e) =>
                                     setSaveAddressForFuture(e.target.checked)
                                   }
-                                  className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
+                                  className="w-4 h-4 text-accent border-border rounded"
                                 />
                                 <span>
                                   Guardar esta dirección en mi cuenta para
@@ -1814,11 +1960,11 @@ export default function CheckoutView() {
                               </label>
 
                               {saveAddressForFuture && (
-                                <div className="pl-6 max-w-xs animate-in fade-in duration-100">
+                                <div className="pl-6 max-w-xs">
                                   <Input
                                     label="Alias de la dirección"
                                     id="checkout-new-alias"
-                                    placeholder="Ej. Casa de playa, Oficina"
+                                    placeholder="Ej. Casa, Oficina"
                                     value={newAddressAlias}
                                     onChange={(e) =>
                                       setNewAddressAlias(e.target.value)
@@ -1831,101 +1977,33 @@ export default function CheckoutView() {
                         )}
                       </div>
                     ) : (
-                      /* Modo Dirección Manual (Invitados o sin direcciones registradas, sin selector de distrito) */
                       <div className="space-y-4 pt-2 border-t border-border">
-                        {/* 1. MAPA PRIMERO */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-                              Ubicación en el Mapa (Mueve el Pin)
-                            </label>
-                            {isGeocoding && (
-                              <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                Obteniendo dirección...
-                              </span>
-                            )}
-                          </div>
-
-                          <LocationPickerMap
-                            latitude={deliveryLatitude}
-                            longitude={deliveryLongitude}
-                            onChange={handleMapLocationChange}
-                            height="h-56"
-                          />
-                          <p className="mt-1 text-[11px] text-brand-muted">
-                            Mueve el marcador o pulsa «Usar mi ubicación actual»
-                            para rellenar automáticamente tu dirección y
-                            calcular el flete.
-                          </p>
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                            Ubicación en el Mapa (Área de Cobertura Delimitada)
+                          </label>
+                          {isGeocoding && (
+                            <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Obteniendo dirección...
+                            </span>
+                          )}
                         </div>
 
-                        {/* 2. DIRECCIÓN EXACTA */}
-                        <Input
-                          label="Dirección Exacta"
-                          id="checkout-manual-address"
-                          placeholder="Calle / Av. y número (se completa al mover el pin)"
-                          value={deliveryAddress}
-                          onChange={(e) =>
-                            handleDeliveryAddressChange(e.target.value)
-                          }
-                          onBlur={() => {
-                            if (deliveryAddress.trim().length >= 4) {
-                              searchAddressOnMap(
-                                `${deliveryAddress}, ${selectedZone?.district_name || ""}`,
-                              );
-                            }
-                          }}
-                          required
+                        <LocationPickerMap
+                          latitude={deliveryLatitude}
+                          longitude={deliveryLongitude}
+                          onChange={handleMapLocationChange}
+                          coveragePolygon={coveragePolygon}
+                          height="h-72"
                         />
 
-                        {/* 3. REFERENCIA (Opcional) */}
-                        <Input
-                          label="Referencia de Llegada (Opcional)"
-                          id="checkout-manual-ref"
-                          placeholder="Ej. Dpto 402, frente al parque, timbre blanco"
-                          value={deliveryReference}
-                          onChange={(e) => setDeliveryReference(e.target.value)}
-                        />
-
-                        {user && (
-                          <div className="pt-2 border-t border-border space-y-2">
-                            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-brand-primary select-none">
-                              <input
-                                type="checkbox"
-                                checked={saveAddressForFuture}
-                                onChange={(e) =>
-                                  setSaveAddressForFuture(e.target.checked)
-                                }
-                                className="w-4 h-4 text-accent border-border rounded focus:ring-accent"
-                              />
-                              <span>
-                                Guardar esta dirección en mi cuenta para futuras
-                                compras
-                              </span>
-                            </label>
-
-                            {saveAddressForFuture && (
-                              <div className="pl-6 max-w-xs animate-in fade-in duration-100">
-                                <Input
-                                  label="Alias de la dirección"
-                                  id="checkout-manual-alias"
-                                  placeholder="Ej. Casa, Oficina"
-                                  value={newAddressAlias}
-                                  onChange={(e) =>
-                                    setNewAddressAlias(e.target.value)
-                                  }
-                                />
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {renderAddressInputs("checkout-manual")}
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Acciones Paso 2 */}
                 <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <Button
                     type="button"
@@ -1939,28 +2017,37 @@ export default function CheckoutView() {
                   <div className="flex flex-col items-end gap-1">
                     {deliveryType !== "pickup" && isOutOfCoverage && (
                       <span className="text-xs text-rose-600 font-semibold text-right">
-                        Ubicación fuera de cobertura para entrega a domicilio.
+                        Ubicación fuera del área de cobertura.
                       </span>
                     )}
                     {deliveryType !== "pickup" &&
                       !activeCoordinates &&
                       deliveryAddress.trim().length >= 4 && (
                         <span className="text-xs text-amber-600 font-medium text-right">
-                          Fija el pin en el mapa para validar la cobertura.
+                          Presiona el botón de lupa o haz clic en el mapa para
+                          fijar las coordenadas.
+                        </span>
+                      )}
+                    {deliveryType !== "pickup" &&
+                      activeCoordinates &&
+                      deliveryReference.trim().length < 3 && (
+                        <span className="text-xs text-amber-600 font-medium text-right">
+                          Completa la referencia obligatoria para continuar.
                         </span>
                       )}
                     <Button
-                      type="submit"
+                      type="button"
                       variant="primary"
                       size="md"
                       disabled={!isStep2Valid}
+                      onClick={handleNextFromStep2}
                     >
                       Continuar al Pago
                       <ChevronRight className="w-4 h-4 ml-1.5" />
                     </Button>
                   </div>
                 </div>
-              </form>
+              </div>
             </div>
           )}
 
@@ -1974,122 +2061,257 @@ export default function CheckoutView() {
                   3. Pago y Comprobante
                 </h2>
                 <p className="text-xs text-brand-secondary mt-0.5">
-                  Selecciona tu forma de pago y los datos para tu comprobante.
+                  Selecciona tu modalidad de pago y el tipo de comprobante
+                  electrónico.
                 </p>
               </div>
 
               <form onSubmit={handleConfirmOrder} className="space-y-6">
+                {/* Selector de Comprobante */}
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Tipo de Comprobante
                   </label>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div
-                      onClick={() => setReceiptType("nota_venta")}
-                      className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                        receiptType === "nota_venta"
-                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/40"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold text-brand-primary">
-                          Nota de Venta
-                        </span>
-                        {receiptType === "nota_venta" && (
-                          <Check className="w-4 h-4 text-accent" />
-                        )}
-                      </div>
-                      <span className="text-xs text-brand-secondary">
-                        Control interno de pedido
-                      </span>
-                    </div>
-
-                    <div
-                      onClick={() => setReceiptType("boleta")}
-                      className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                        receiptType === "boleta"
-                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/40"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold text-brand-primary">
-                          Boleta de Venta
-                        </span>
-                        {receiptType === "boleta" && (
-                          <Check className="w-4 h-4 text-accent" />
-                        )}
-                      </div>
-                      <span className="text-xs text-brand-secondary">
-                        Consumo personal / DNI
-                      </span>
-                    </div>
-
-                    <div
-                      onClick={() => setReceiptType("factura")}
-                      className={`p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none ${
-                        receiptType === "factura"
-                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/40"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold text-brand-primary">
-                          Factura Electrónica
-                        </span>
-                        {receiptType === "factura" && (
-                          <Check className="w-4 h-4 text-accent" />
-                        )}
-                      </div>
-                      <span className="text-xs text-brand-secondary">
-                        Para empresas / RUC
-                      </span>
-                    </div>
+                    {[
+                      {
+                        id: "nota_venta",
+                        title: "Nota de Venta",
+                        desc: "Control interno de pedido",
+                      },
+                      {
+                        id: "boleta",
+                        title: "Boleta de Venta",
+                        desc: "Consumo personal / DNI",
+                      },
+                      {
+                        id: "factura",
+                        title: "Factura Electrónica",
+                        desc: "Para empresas / RUC",
+                      },
+                    ].map((item) => {
+                      const active = receiptType === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setReceiptType(item.id)}
+                          className={
+                            "p-3.5 rounded-card border text-left transition-all flex flex-col justify-between " +
+                            (active
+                              ? "border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary shadow-xs"
+                              : "border-border bg-surface-card hover:border-border-strong")
+                          }
+                        >
+                          <div className="flex items-center justify-between w-full mb-1">
+                            <span className="text-sm font-bold text-brand-primary">
+                              {item.title}
+                            </span>
+                            <div
+                              className={
+                                "w-4 h-4 rounded-full border flex items-center justify-center " +
+                                (active
+                                  ? "border-brand-primary bg-brand-primary text-white"
+                                  : "border-border bg-white")
+                              }
+                            >
+                              {active && <Check className="w-2.5 h-2.5" />}
+                            </div>
+                          </div>
+                          <span className="text-xs text-brand-secondary">
+                            {item.desc}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  {receiptType === "boleta" && (
-                    <div className="p-3.5 bg-surface-subtle border border-border rounded-card text-xs space-y-1.5 animate-in fade-in duration-150">
-                      <div className="flex items-center justify-between">
-                        <span className="text-brand-secondary font-medium">
-                          Titular del comprobante:
-                        </span>
-                        <span className="font-semibold text-brand-primary truncate max-w-[240px] text-right">
-                          {firstName} {lastName}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-brand-secondary font-medium">
-                          Documento de Identidad:
-                        </span>
-                        <span className="font-mono font-semibold text-brand-primary">
-                          DNI {dni}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-brand-muted pt-1 border-t border-border/60">
-                        La Boleta se emitirá automáticamente con los datos
-                        verificados en el Paso 1.
-                      </p>
-                    </div>
-                  )}
-
+                  {/* Nota de Venta */}
                   {receiptType === "nota_venta" && (
-                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary animate-in fade-in duration-150">
-                      Comprobante para control interno y seguimiento de
-                      despacho. No tiene efectos tributarios.
+                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary">
+                      Comprobante interno para control de pedido y seguimiento
+                      de entrega.
                     </div>
                   )}
 
+                  {/* Boleta de Venta */}
+                  {receiptType === "boleta" && (
+                    <div className="p-4 bg-surface-subtle border border-border rounded-card text-xs space-y-3">
+                      {!showCustomBoletaForm ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-brand-secondary font-medium">
+                              Titular del comprobante:
+                            </span>
+                            <span className="font-semibold text-brand-primary">
+                              {firstName} {lastName}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-brand-secondary font-medium">
+                              Documento:
+                            </span>
+                            <span className="font-mono font-semibold text-brand-primary">
+                              DNI {dni}
+                            </span>
+                          </div>
+                          <div className="pt-2 border-t border-border/70 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUseCustomBoleta(true);
+                                setBoletaDni("");
+                                setBoletaFullName("");
+                                setIsBoletaNameLocked(false);
+                                setBoletaDniFeedback(null);
+                              }}
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:text-accent-hover hover:underline"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              Emitir comprobante a nombre de otra persona o
+                              registrar DNI
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-brand-primary">
+                              {hasValidStep1Dni
+                                ? "Datos del tercero para la Boleta"
+                                : "Registrar DNI para la Boleta (Opcional)"}
+                            </span>
+                            {hasValidStep1Dni && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUseCustomBoleta(false);
+                                  setBoletaDniFeedback(null);
+                                }}
+                                className="text-xs font-semibold text-brand-secondary hover:text-brand-primary hover:underline"
+                              >
+                                Usar mis datos del Paso 1
+                              </button>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label
+                                htmlFor="boleta-custom-dni"
+                                className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
+                              >
+                                DNI del Titular (8 dígitos)
+                              </label>
+                              {isSearchingBoletaDni && (
+                                <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Consultando RENIEC...
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex gap-2 items-center">
+                              <div className="flex-1">
+                                <Input
+                                  id="boleta-custom-dni"
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={8}
+                                  placeholder="Ingresa 8 dígitos numéricos"
+                                  value={boletaDni}
+                                  onChange={handleBoletaDniChange}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      if (boletaDni.length === 8) {
+                                        triggerBoletaDniLookup();
+                                      }
+                                    }
+                                  }}
+                                  required={useCustomBoleta}
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="md"
+                                onClick={() => triggerBoletaDniLookup()}
+                                disabled={
+                                  isSearchingBoletaDni ||
+                                  boletaDni.length !== 8
+                                }
+                                className="h-10 px-3.5 shrink-0"
+                                title="Buscar DNI en RENIEC"
+                              >
+                                {isSearchingBoletaDni ? (
+                                  <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                                ) : (
+                                  <Search className="w-4 h-4 text-brand-primary" />
+                                )}
+                              </Button>
+                            </div>
+
+                            {boletaDniFeedback && (
+                              <p
+                                className={
+                                  "mt-1.5 text-xs " +
+                                  (boletaDniFeedback.type === "success"
+                                    ? "text-emerald-700 font-medium"
+                                    : "text-amber-700")
+                                }
+                              >
+                                {boletaDniFeedback.message}
+                              </p>
+                            )}
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor="boleta-custom-name"
+                              className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1"
+                            >
+                              Nombres y Apellidos del Titular
+                            </label>
+                            <Input
+                              id="boleta-custom-name"
+                              placeholder={
+                                hasValidStep1Dni
+                                  ? "Nombre completo del titular de la boleta"
+                                  : firstName + " " + lastName
+                              }
+                              value={boletaFullName}
+                              onChange={(e) =>
+                                setBoletaFullName(e.target.value)
+                              }
+                              disabled={isBoletaNameLocked}
+                              readOnly={isBoletaNameLocked}
+                              className={
+                                isBoletaNameLocked
+                                  ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                                  : ""
+                              }
+                              required={
+                                useCustomBoleta || boletaDni.length === 8
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Factura Electrónica */}
                   {receiptType === "factura" && (
-                    <div className="space-y-3.5 p-4 bg-surface-subtle border border-border rounded-card animate-in fade-in duration-150">
+                    <div className="space-y-4 p-4 bg-surface-subtle border border-border rounded-card">
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label
                             htmlFor="checkout-ruc"
                             className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                           >
-                            RUC (11 dígitos)
+                            RUC (11 dígitos) *
                           </label>
                           {isSearchingRuc && (
                             <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -2105,26 +2327,28 @@ export default function CheckoutView() {
                               id="checkout-ruc"
                               type="text"
                               inputMode="numeric"
+                              maxLength={11}
                               placeholder="20XXXXXXXXX o 10XXXXXXXXX"
                               value={ruc}
                               onChange={handleRucChange}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  triggerRucLookup();
+                                  if (ruc.length === 11) {
+                                    triggerRucLookup();
+                                  }
                                 }
                               }}
                               required
                             />
                           </div>
-
                           <Button
                             type="button"
                             variant="outline"
                             size="md"
                             onClick={() => triggerRucLookup()}
                             disabled={isSearchingRuc || ruc.length !== 11}
-                            className="h-10 px-3.5 flex-shrink-0"
+                            className="h-10 px-3.5 shrink-0"
                             title="Consultar RUC en SUNAT"
                           >
                             {isSearchingRuc ? (
@@ -2136,223 +2360,250 @@ export default function CheckoutView() {
                         </div>
 
                         {rucFeedback && (
-                          <div
-                            className={`mt-1.5 text-xs flex items-center gap-1.5 ${
-                              rucFeedback.type === "success"
-                                ? "text-emerald-600 font-medium"
-                                : rucFeedback.type === "error"
-                                  ? "text-rose-600 font-medium"
-                                  : "text-amber-600"
-                            }`}
+                          <p
+                            className={
+                              "mt-1.5 text-xs font-medium " +
+                              (rucFeedback.type === "success"
+                                ? "text-emerald-700"
+                                : "text-rose-600")
+                            }
                           >
-                            {rucFeedback.type === "success" ? (
-                              <Check className="w-3.5 h-3.5 flex-shrink-0" />
-                            ) : (
-                              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                            )}
-                            <span>{rucFeedback.message}</span>
-                          </div>
+                            {rucFeedback.message}
+                          </p>
                         )}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="w-full">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <label
-                              htmlFor="checkout-company"
-                              className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
-                            >
-                              Razón Social
-                            </label>
-                            {isRucLocked && (
-                              <button
-                                type="button"
-                                onClick={() => setIsRucLocked(false)}
-                                className="text-xs text-accent hover:underline font-medium inline-flex items-center gap-1"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                                Editar manualmente
-                              </button>
-                            )}
-                          </div>
+                      <div className="space-y-3">
+                        <div className="w-full col-span-full">
                           <Input
+                            label="Razón Social"
                             id="checkout-company"
-                            placeholder="Nombre comercial o razón social"
+                            placeholder="Se autocompleta al validar el RUC con la lupa"
                             value={companyName}
-                            onChange={(e) => setCompanyName(e.target.value)}
-                            readOnly={isRucLocked}
-                            className={
-                              isRucLocked
-                                ? "bg-slate-100 text-slate-700 cursor-not-allowed"
-                                : ""
-                            }
+                            readOnly={true}
+                            className="w-full bg-slate-100 text-slate-700 cursor-not-allowed"
                             required
                           />
                         </div>
 
-                        <Input
-                          label="Dirección Fiscal (Opcional)"
-                          id="checkout-fiscal-address"
-                          placeholder="Dirección fiscal registrada"
-                          value={fiscalAddress}
-                          onChange={(e) => setFiscalAddress(e.target.value)}
-                        />
+                        <div className="w-full col-span-full">
+                          <Input
+                            label="Dirección Fiscal"
+                            id="checkout-fiscal-address"
+                            placeholder="Se autocompleta al validar el RUC con la lupa"
+                            value={fiscalAddress}
+                            readOnly={true}
+                            className="w-full bg-slate-100 text-slate-700 cursor-not-allowed"
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Métodos de Pago */}
-                <div className="space-y-3 pt-3 border-t border-border">
+                {/* Tarjetas de Método de Pago */}
+                <div className="space-y-3 pt-4 border-t border-border">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Método de Pago
                   </label>
 
                   <div className="space-y-3">
+                    {/* OPCIÓN 1: Yape / Plin / Transferencia Bancaria */}
                     <div
-                      onClick={() => setPaymentMethod("yape_plin")}
-                      className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
-                        paymentMethod === "yape_plin"
-                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/30"
-                      }`}
+                      className={
+                        "rounded-card border transition-all overflow-hidden " +
+                        (paymentMethod === "yape_plin"
+                          ? "border-brand-primary ring-2 ring-brand-primary bg-surface-card shadow-sm"
+                          : "border-border bg-surface-card hover:border-border-strong")
+                      }
                     >
-                      <div className="mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors border-brand-primary bg-brand-primary text-white">
-                        {paymentMethod === "yape_plin" ? (
-                          <div className="w-2 h-2 rounded-full bg-white" />
-                        ) : (
-                          <div className="w-2 h-2 rounded-full bg-transparent" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-bold text-brand-primary">
-                            Transferencia Directa (Yape / Plin Manual)
-                          </span>
-                          <Badge variant="neutral" className="text-[10px]">
-                            Sin recargo
-                          </Badge>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("yape_plin")}
+                        className="w-full p-4 text-left flex items-start gap-3.5"
+                      >
+                        <div
+                          className={
+                            "mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors " +
+                            (paymentMethod === "yape_plin"
+                              ? "border-brand-primary bg-brand-primary text-white"
+                              : "border-border-strong bg-white")
+                          }
+                        >
+                          {paymentMethod === "yape_plin" && (
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          )}
                         </div>
-                        <span className="block text-xs text-brand-secondary mt-1">
-                          Transfiere desde tu app bancaria e ingresa el número
-                          de operación.
-                        </span>
-                      </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <span className="text-sm font-bold text-brand-primary">
+                              Yape / Plin o Transferencia Bancaria Directa
+                            </span>
+                            <Badge variant="neutral" className="text-[10px]">
+                              Sin comisión
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-brand-secondary mt-1">
+                            Escanea nuestro QR o transfiere a nuestras cuentas
+                            corporativas BCP, Interbank o BBVA.
+                          </p>
+                        </div>
+                      </button>
+
+                      {paymentMethod === "yape_plin" && (
+                        <div className="p-4 bg-surface-subtle border-t border-border space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+                            <div className="md:col-span-5 p-4 bg-white border border-border rounded-card flex flex-col items-center justify-center text-center space-y-2">
+                              <div className="w-28 h-28 rounded-card border border-border bg-surface-subtle flex items-center justify-center p-2">
+                                <QrCode className="w-24 h-24 text-brand-primary" />
+                              </div>
+                              <div>
+                                <span className="block text-xs font-bold text-brand-primary">
+                                  Yape / Plin: 987 654 321
+                                </span>
+                                <span className="block text-[11px] text-brand-secondary">
+                                  Titular: ERXIDI CONFECCIONES S.A.C.
+                                </span>
+                              </div>
+                              <div className="px-3 py-1 rounded-badge bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold">
+                                Monto: {formatCurrency(totalAmount)}
+                              </div>
+                            </div>
+
+                            <div className="md:col-span-7 space-y-2.5">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-brand-primary">
+                                <Landmark className="w-4 h-4 text-accent" />
+                                <span>
+                                  Cuentas Corrientes Corporativas (Soles)
+                                </span>
+                              </div>
+
+                              <div className="space-y-2">
+                                {BANK_ACCOUNTS.map((b) => (
+                                  <div
+                                    key={b.bank}
+                                    className="p-2.5 bg-white border border-border rounded-button text-xs space-y-1"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-bold text-brand-primary">
+                                        {b.bank}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleCopyAccount(b.account, b.bank)
+                                        }
+                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
+                                      >
+                                        <Copy className="w-3 h-3" />
+                                        {copiedAccount === b.bank
+                                          ? "¡Copiado!"
+                                          : "Copiar N°"}
+                                      </button>
+                                    </div>
+                                    <p className="font-mono text-[11px] text-brand-primary">
+                                      Cuenta: <strong>{b.account}</strong>
+                                    </p>
+                                    <p className="font-mono text-[10px] text-brand-muted">
+                                      CCI: {b.cci}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-3 border-t border-border">
+                            <Input
+                              label="Número de Operación / Voucher (6 a 8 dígitos) *"
+                              id="checkout-yape-op"
+                              placeholder="Ingresa el N° de operación de tu transferencia o Yape"
+                              value={yapeOpNumber}
+                              onChange={(e) =>
+                                setYapeOpNumber(
+                                  e.target.value.replace(/\D/g, "").slice(0, 8)
+                                )
+                              }
+                              required
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    {paymentMethod === "yape_plin" && (
-                      <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-4 animate-in fade-in duration-150">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                          <div className="space-y-2 text-xs">
-                            <div className="flex justify-between sm:block border-b sm:border-b-0 border-border pb-1.5 sm:pb-0">
-                              <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
-                                Titular:
-                              </span>
-                              <span className="font-semibold text-brand-primary">
-                                ERXIDI S.A.C.
-                              </span>
-                            </div>
-                            <div className="flex justify-between sm:block">
-                              <span className="text-brand-secondary block text-[11px] uppercase tracking-wider font-semibold">
-                                Monto a Transferir:
-                              </span>
-                              <span className="font-mono text-sm font-bold text-accent">
-                                {formatCurrency(totalAmount)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col items-center justify-center p-3.5 bg-surface-card border border-border rounded-card text-center space-y-1.5">
-                            <div className="w-24 h-24 rounded border border-border bg-white flex items-center justify-center p-2 shadow-xs">
-                              <QrCode className="w-20 h-20 text-brand-primary" />
-                            </div>
-                            <span className="text-[10px] uppercase font-bold tracking-wider text-brand-muted">
-                              QR Institucional Yape / Plin
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="pt-2 border-t border-border space-y-1.5">
-                          <Input
-                            label="Número de Operación (6 a 8 dígitos)"
-                            id="checkout-yape-op"
-                            placeholder="Ej. 12345678"
-                            value={yapeOpNumber}
-                            onChange={(e) =>
-                              setYapeOpNumber(
-                                e.target.value.replace(/\D/g, "").slice(0, 8),
-                              )
-                            }
-                            helperText="Ingresa el código numérico de 6 a 8 dígitos que figura en tu comprobante de Yape o Plin."
-                            required
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <div
+                    {/* OPCIÓN 2: Pasarela Culqi */}
+                    <button
+                      type="button"
                       onClick={() => setPaymentMethod("culqi_gateway")}
-                      className={`p-4 rounded-card border cursor-pointer transition-all flex items-start gap-3 select-none ${
-                        paymentMethod === "culqi_gateway"
-                          ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                          : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/30"
-                      }`}
+                      className={
+                        "w-full p-4 rounded-card border text-left transition-all flex items-start gap-3.5 " +
+                        (paymentMethod === "culqi_gateway"
+                          ? "border-brand-primary ring-2 ring-brand-primary bg-brand-primary/5 shadow-sm"
+                          : "border-border bg-surface-card hover:border-border-strong")
+                      }
                     >
-                      <div className="mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors border-brand-primary bg-brand-primary text-white">
-                        {paymentMethod === "culqi_gateway" ? (
-                          <div className="w-2 h-2 rounded-full bg-white" />
-                        ) : (
-                          <div className="w-2 h-2 rounded-full bg-transparent" />
+                      <div
+                        className={
+                          "mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors " +
+                          (paymentMethod === "culqi_gateway"
+                            ? "border-brand-primary bg-brand-primary text-white"
+                            : "border-border-strong bg-white")
+                        }
+                      >
+                        {paymentMethod === "culqi_gateway" && (
+                          <Check className="w-3 h-3 stroke-[3]" />
                         )}
                       </div>
                       <div className="flex-1">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-brand-primary">
-                              Pago Online Seguro (Culqi: Tarjetas y Yape App)
+                              Pago en Línea con Tarjeta o Yape (Culqi)
                             </span>
                             <Badge variant="success" className="text-[10px]">
-                              Acreditación Inmediata
+                              Confirmación Inmediata
                             </Badge>
                           </div>
                           <CreditCard className="w-4 h-4 text-accent" />
                         </div>
                         <p className="text-xs text-brand-secondary mt-1">
-                          Acepta Visa, Mastercard y Yape con código de
-                          aprobación. Procesado de forma segura por Culqi.
+                          Visa, Mastercard, Diners, Amex y Yape con código de
+                          aprobación.
                         </p>
                       </div>
-                    </div>
+                    </button>
 
-                    <div
+                    {/* OPCIÓN 3: Pago Contra Entrega */}
+                    <button
+                      type="button"
+                      disabled={!isCashOnDeliveryAllowed}
                       onClick={() => {
                         if (isCashOnDeliveryAllowed) {
                           setPaymentMethod("cash_on_delivery");
                         }
                       }}
-                      className={`p-4 rounded-card border transition-all flex items-start gap-3 select-none ${
-                        !isCashOnDeliveryAllowed
-                          ? "border-border bg-surface-subtle opacity-70 cursor-not-allowed"
+                      className={
+                        "w-full p-4 rounded-card border text-left transition-all flex items-start gap-3.5 " +
+                        (!isCashOnDeliveryAllowed
+                          ? "border-border bg-surface-subtle opacity-60 cursor-not-allowed"
                           : paymentMethod === "cash_on_delivery"
-                            ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary cursor-pointer"
-                            : "border-border bg-surface-card hover:border-border-strong hover:bg-surface-subtle/30 cursor-pointer"
-                      }`}
+                            ? "border-brand-primary ring-2 ring-brand-primary bg-brand-primary/5 shadow-sm"
+                            : "border-border bg-surface-card hover:border-border-strong")
+                      }
                     >
                       <div
-                        className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors ${
-                          !isCashOnDeliveryAllowed
-                            ? "border-border bg-surface-card text-brand-muted"
-                            : paymentMethod === "cash_on_delivery"
-                              ? "border-brand-primary bg-brand-primary text-white"
-                              : "border-brand-secondary bg-surface-card text-white"
-                        }`}
+                        className={
+                          "mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors " +
+                          (paymentMethod === "cash_on_delivery" &&
+                            isCashOnDeliveryAllowed
+                            ? "border-brand-primary bg-brand-primary text-white"
+                            : "border-border-strong bg-white")
+                        }
                       >
                         {paymentMethod === "cash_on_delivery" &&
-                        isCashOnDeliveryAllowed ? (
-                          <div className="w-2 h-2 rounded-full bg-white" />
-                        ) : (
-                          <div className="w-2 h-2 rounded-full bg-transparent" />
-                        )}
+                          isCashOnDeliveryAllowed && (
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          )}
                       </div>
 
                       <div className="flex-1">
@@ -2363,48 +2614,35 @@ export default function CheckoutView() {
                             </span>
                             {!isCashOnDeliveryAllowed && (
                               <Badge variant="warning" className="text-[10px]">
-                                Requiere cuenta verificada
+                                Solo cuentas verificadas
                               </Badge>
                             )}
                           </div>
                           <Banknote className="w-4 h-4 text-accent" />
                         </div>
-
                         <p className="text-xs text-brand-secondary mt-1">
-                          Cancela en efectivo exacto al momento de recibir tus
-                          prendas.
+                          Paga al repartidor al recibir tu pedido en la puerta
+                          de tu domicilio.
                         </p>
-
-                        {!isCashOnDeliveryAllowed && (
-                          <div className="mt-2.5 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-900 flex items-start gap-1.5">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-700 flex-shrink-0 mt-0.5" />
-                            <span>
-                              {!user
-                                ? "Inicia sesión y verifica tu correo para habilitar pedidos con pago contra entrega."
-                                : "Verifica tu correo electrónico para habilitar pedidos con pago contra entrega."}
-                            </span>
-                          </div>
-                        )}
                       </div>
-                    </div>
+                    </button>
                   </div>
 
                   {isProcessing && (
-                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-card text-xs text-blue-800 flex items-center gap-2 animate-in fade-in duration-150">
-                      <Loader2 className="w-4 h-4 animate-spin text-accent flex-shrink-0" />
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-card text-xs text-blue-800 flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-accent shrink-0" />
                       <p className="font-medium">
-                        Procesando pago seguro con Culqi. Por favor espera sin
-                        recargar la página...
+                        Procesando cobro seguro con Culqi...
                       </p>
                     </div>
                   )}
 
                   {culqiError && (
-                    <div className="p-3 bg-rose-50 border border-status-danger-border rounded-card text-xs text-status-danger-text flex items-start gap-2 animate-in fade-in duration-150">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-status-danger-text" />
-                      <div className="flex-1">
+                    <div className="p-3 bg-rose-50 border border-status-danger-border rounded-card text-xs text-status-danger-text flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
                         <p className="font-semibold">
-                          Inconveniente con la pasarela
+                          Inconveniente al procesar el pedido
                         </p>
                         <p>{culqiError}</p>
                       </div>
@@ -2432,10 +2670,10 @@ export default function CheckoutView() {
                     className="bg-accent hover:bg-accent-hover text-white px-8"
                   >
                     {isProcessing
-                      ? "Procesando pago..."
+                      ? "Procesando..."
                       : paymentMethod === "culqi_gateway"
-                        ? `Pagar con Culqi ${formatCurrency(totalAmount)}`
-                        : `Confirmar Pedido ${formatCurrency(totalAmount)}`}
+                        ? "Pagar con Culqi " + formatCurrency(totalAmount)
+                        : "Confirmar Pedido " + formatCurrency(totalAmount)}
                   </Button>
                 </div>
               </form>
@@ -2462,7 +2700,7 @@ export default function CheckoutView() {
                   className="flex gap-3 text-xs items-center justify-between"
                 >
                   <div className="flex gap-2.5 items-center min-w-0">
-                    <div className="w-10 h-12 rounded bg-surface-subtle border border-border overflow-hidden flex-shrink-0">
+                    <div className="w-10 h-12 rounded bg-surface-subtle border border-border overflow-hidden shrink-0">
                       {item.imageUrl ? (
                         <img
                           src={item.imageUrl}
@@ -2488,7 +2726,7 @@ export default function CheckoutView() {
                       </p>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-brand-primary flex-shrink-0">
+                  <span className="font-mono font-bold text-brand-primary shrink-0">
                     {formatCurrency(item.price * item.quantity)}
                   </span>
                 </div>
@@ -2523,10 +2761,10 @@ export default function CheckoutView() {
             </div>
 
             <div className="p-3 bg-surface-subtle border border-border rounded text-[11px] text-brand-secondary flex items-start gap-2 leading-relaxed">
-              <ShieldAlert className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+              <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
               <span>
-                Por motivos de higiene, la ropa interior no admite cambios ni
-                devoluciones una vez entregada.
+                Por motivos de higiene sanitaria, la ropa interior no admite
+                cambios ni devoluciones una vez abierto el empaque.
               </span>
             </div>
           </div>

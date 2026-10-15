@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from "react";
 import {
   ArrowLeft,
   ShoppingCart,
-  Ruler,
   ShieldAlert,
   Minus,
   Plus,
@@ -16,7 +15,6 @@ import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
-import { supabase } from "../../services/supabase";
 import { getUserMeasurements } from "./utils/sizeCalculator";
 import {
   fetchProductSizeGuides,
@@ -32,25 +30,31 @@ export default function ProductDetailView({
   const { items: cartItems, addItem } = useCart();
   const { profile } = useAuth();
 
+  const activeVariants = useMemo(
+    () =>
+      (currentProduct?.product_variants || []).filter(
+        (v) => v.is_active !== false
+      ),
+    [currentProduct]
+  );
+
   const initialVariant = useMemo(() => {
-    const variants = currentProduct?.product_variants || [];
     return (
-      variants.find((v) => v.is_active !== false && (v.stock || 0) > 0) ||
-      variants[0] ||
+      activeVariants.find((v) => (Number(v.stock) || 0) > 0) ||
+      activeVariants[0] ||
       null
     );
-  }, [currentProduct]);
+  }, [activeVariants]);
 
   const [selectedVariant, setSelectedVariant] = useState(initialVariant);
   const [selectedImage, setSelectedImage] = useState(
-    currentProduct?.main_image_url || "",
+    currentProduct?.main_image_url || ""
   );
   const [quantity, setQuantity] = useState(1);
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
-  const [suggestedNotice, setSuggestedNotice] = useState(null);
 
   const [sizeGuides, setSizeGuides] = useState(
-    currentProduct?.size_guides || [],
+    currentProduct?.size_guides || []
   );
 
   useEffect(() => {
@@ -69,7 +73,7 @@ export default function ProductDetailView({
             setSizeGuides(currentProduct.size_guides);
           }
         }
-      } catch (err) {
+      } catch {
         if (isMounted && currentProduct?.size_guides) {
           setSizeGuides(currentProduct.size_guides);
         }
@@ -80,10 +84,10 @@ export default function ProductDetailView({
     return () => {
       isMounted = false;
     };
-  }, [currentProduct?.id]);
+  }, [currentProduct]);
 
   const [userMeasureState, setUserMeasureState] = useState(() =>
-    getUserMeasurements(profile),
+    getUserMeasurements(profile)
   );
 
   useEffect(() => {
@@ -101,20 +105,15 @@ export default function ProductDetailView({
   }, [hasUserMeasurements, userMeasureState.measurements, sizeGuides]);
 
   const isRecommendedInStock = useMemo(() => {
-    if (!recommendedSize || !currentProduct?.product_variants) return false;
+    if (!recommendedSize || activeVariants.length === 0) return false;
     const currentColor = selectedVariant?.color;
-    return currentProduct.product_variants.some(
+    return activeVariants.some(
       (v) =>
         v.color === currentColor &&
         v.sizes?.name === recommendedSize &&
-        v.is_active !== false &&
-        (v.stock || 0) > 0,
+        (Number(v.stock) || 0) > 0
     );
-  }, [
-    recommendedSize,
-    currentProduct?.product_variants,
-    selectedVariant?.color,
-  ]);
+  }, [recommendedSize, activeVariants, selectedVariant?.color]);
 
   const derivedFamily = useMemo(() => {
     const slug = currentProduct?.categories?.slug;
@@ -134,7 +133,6 @@ export default function ProductDetailView({
     setSelectedVariant(initialVariant);
     setSelectedImage(currentProduct?.main_image_url || "");
     setQuantity(1);
-    setSuggestedNotice(null);
   }, [currentProduct, initialVariant]);
 
   const galleryImages = useMemo(() => {
@@ -155,32 +153,32 @@ export default function ProductDetailView({
   // Cantidad ya presente en el carrito para esta variante
   const inCartQuantity = useMemo(() => {
     if (!selectedVariant) return 0;
+    const targetId = Number(selectedVariant.id);
     const item = (cartItems || []).find(
       (i) =>
-        i.variantId === selectedVariant.id ||
-        i.variant_id === selectedVariant.id ||
-        i.id === selectedVariant.id,
+        Number(i.variantId) === targetId ||
+        Number(i.variant_id) === targetId ||
+        Number(i.id) === targetId
     );
-    return item ? item.quantity : 0;
+    return item ? Number(item.quantity) || 0 : 0;
   }, [cartItems, selectedVariant]);
 
   // Stock físico total registrado en BD
-  const totalStock = selectedVariant?.stock ?? 0;
+  const totalStock = Number(selectedVariant?.stock ?? 0);
 
   // Stock disponible restando lo que ya está apartado en el carrito
   const stockAfterCart = Math.max(0, totalStock - inCartQuantity);
 
-  // Unidades restantes que quedan en inventario si se adquiere la cantidad seleccionada
+  // Regla de Negocio 3: Cálculo reactivo (stockAfterCart - quantity)
   const availableLeft = Math.max(0, stockAfterCart - quantity);
 
   const isOutOfStock =
-    !selectedVariant || selectedVariant.is_active === false || totalStock === 0;
+    !selectedVariant || selectedVariant.is_active === false || totalStock <= 0;
 
   const isCartLimitReached = !isOutOfStock && stockAfterCart === 0;
   const isSelectionLimitReached =
     !isOutOfStock && !isCartLimitReached && quantity >= stockAfterCart;
 
-  // Ajuste automático de cantidad si sobrepasa el stock disponible
   useEffect(() => {
     if (stockAfterCart > 0 && quantity > stockAfterCart) {
       setQuantity(stockAfterCart);
@@ -189,7 +187,7 @@ export default function ProductDetailView({
     }
   }, [stockAfterCart, quantity]);
 
-  // Progresión dinámica del estado del Badge superior
+  // Regla de Negocio 4: Progresión dinámica y ocultamiento de stock exacto (> 10 -> "En stock")
   const stockStatus = useMemo(() => {
     if (isOutOfStock) {
       return {
@@ -216,7 +214,7 @@ export default function ProductDetailView({
       const label =
         availableLeft === 1
           ? "¡Última unidad disponible!"
-          : `¡Últimos ${availableLeft} disponibles!`;
+          : "¡Últimos " + availableLeft + " disponibles!";
       return {
         label,
         badgeVariant: "warning",
@@ -249,15 +247,13 @@ export default function ProductDetailView({
   const handleSizeSelected = (sizeName) => {
     setUserMeasureState(getUserMeasurements(profile));
 
-    const variants = currentProduct?.product_variants || [];
     const currentColor = selectedVariant?.color;
 
-    const matchingVariant = variants.find(
+    const matchingVariant = activeVariants.find(
       (v) =>
         v.color === currentColor &&
         v.sizes?.name === sizeName &&
-        v.stock > 0 &&
-        v.is_active !== false,
+        Number(v.stock) > 0
     );
 
     if (matchingVariant) {
@@ -283,7 +279,6 @@ export default function ProductDetailView({
   const handleVariantChange = (newVariant) => {
     setSelectedVariant(newVariant);
     setQuantity(1);
-    setSuggestedNotice(null);
   };
 
   const handleAddToCartClick = () => {
@@ -310,7 +305,7 @@ export default function ProductDetailView({
             stock: selectedVariant.stock,
             imageUrl: currentProduct.main_image_url,
           },
-          qtyToAdd,
+          qtyToAdd
         );
       }
     }
@@ -365,15 +360,16 @@ export default function ProductDetailView({
                       key={index}
                       type="button"
                       onClick={() => setSelectedImage(imgUrl)}
-                      className={`relative w-20 h-24 rounded-card overflow-hidden border transition-all flex-shrink-0 focus:outline-none ${
-                        isSelected
+                      className={
+                        "relative w-20 h-24 rounded-card overflow-hidden border transition-all flex-shrink-0 focus:outline-none " +
+                        (isSelected
                           ? "border-brand-primary ring-2 ring-brand-primary ring-offset-1"
-                          : "border-border hover:border-border-strong opacity-75 hover:opacity-100"
-                      }`}
+                          : "border-border hover:border-border-strong opacity-75 hover:opacity-100")
+                      }
                     >
                       <img
                         src={imgUrl}
-                        alt={`Miniatura ${index + 1}`}
+                        alt={"Miniatura " + (index + 1)}
                         className="w-full h-full object-cover"
                       />
                     </button>
@@ -398,7 +394,6 @@ export default function ProductDetailView({
                   </Badge>
                 )}
 
-                {/* Única etiqueta superior dinámica de stock */}
                 {selectedVariant && (
                   <Badge variant={stockStatus.badgeVariant}>
                     {stockStatus.label}
@@ -431,7 +426,7 @@ export default function ProductDetailView({
             {/* Selector de Variantes */}
             <div className="border-t border-border pt-4 space-y-4">
               <VariantSelector
-                variants={currentProduct?.product_variants || []}
+                variants={activeVariants}
                 selectedVariant={selectedVariant}
                 onVariantChange={handleVariantChange}
               />
@@ -449,8 +444,8 @@ export default function ProductDetailView({
                   className="inline-flex items-center text-xs font-semibold text-accent hover:text-accent-hover transition-colors focus:outline-none"
                 >
                   {hasUserMeasurements
-                    ? "🔄 Modificar mis medidas / Recalcular"
-                    : "📏 Calculador de Talla"}
+                    ? "Modificar mis medidas / Recalcular"
+                    : "Calculador de Talla"}
                 </button>
               </div>
 
@@ -531,7 +526,7 @@ export default function ProductDetailView({
                 </div>
               </div>
 
-              {/* Advertencia Sanitaria */}
+              {/* Regla de Negocio 1: Advertencia Sanitaria Obligatoria */}
               <div className="flex items-start gap-2.5 p-3 rounded-card bg-surface-subtle border border-border text-brand-secondary">
                 <ShieldAlert className="w-4 h-4 text-brand-muted flex-shrink-0 mt-0.5" />
                 <p className="text-xs leading-relaxed">

@@ -1,22 +1,20 @@
 import { supabase } from "../supabase";
 
-/**
- * Servicio wrapper para la pasarela de pagos Culqi Checkout v4.
- * Aísla y centraliza las llamadas a la API global window.Culqi.
- */
+const CULQI_PUBLIC_KEY = (import.meta.env.VITE_CULQI_PUBLIC_KEY || "").trim();
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim();
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 
-const CULQI_PUBLIC_KEY = import.meta.env.VITE_CULQI_PUBLIC_KEY;
+export function initCulqi({ title, currency = "PEN", amountInCents }) {
+  if (typeof window === "undefined" || !window.Culqi) {
+    throw new Error(
+      "El script de Culqi Checkout no se encuentra disponible. Recarga la página o revisa tu conexión."
+    );
+  }
 
-/**
- * Inicializa la configuración de Culqi Checkout v4.
- * @param {Object} options
- * @param {string} options.title - Título a mostrar en el modal de checkout.
- * @param {string} [options.currency='PEN'] - Código de moneda (ISO 4217).
- * @param {number} options.amountInCents - Monto total en céntimos (ej. S/ 10.50 => 1050).
- */
-export function initCulqi({ title, currency = 'PEN', amountInCents }) {
-  if (typeof window === 'undefined' || !window.Culqi) {
-    throw new Error('El script de Culqi Checkout no se encuentra disponible. Por favor recarga la página o revisa tu conexión.');
+  if (!CULQI_PUBLIC_KEY || !CULQI_PUBLIC_KEY.startsWith("pk_")) {
+    throw new Error(
+      "Configuración faltante: VITE_CULQI_PUBLIC_KEY no es válida en las variables de entorno."
+    );
   }
 
   window.Culqi.publicKey = CULQI_PUBLIC_KEY;
@@ -24,11 +22,11 @@ export function initCulqi({ title, currency = 'PEN', amountInCents }) {
   window.Culqi.settings({
     title,
     currency,
-    amount: Math.round(amountInCents),
+    amount: Math.round(Number(amountInCents) || 0),
   });
 
   window.Culqi.options({
-    lang: 'es',
+    lang: "es",
     installments: false,
     paymentMethods: {
       tarjeta: true,
@@ -39,59 +37,66 @@ export function initCulqi({ title, currency = 'PEN', amountInCents }) {
   });
 }
 
-/**
- * Abre el modal de pago de Culqi.
- */
 export function openCulqi() {
-  if (typeof window !== 'undefined' && window.Culqi) {
+  if (typeof window !== "undefined" && window.Culqi) {
     window.Culqi.open();
   }
 }
 
-/**
- * Cierra el modal de pago de Culqi.
- */
 export function closeCulqi() {
-  if (typeof window !== 'undefined' && window.Culqi) {
+  if (typeof window !== "undefined" && window.Culqi) {
     window.Culqi.close();
   }
 }
 
-/**
- * Procesa el cobro seguro delegando el token a la Edge Function
- * @param {Object} params
- * @param {string} params.tokenId - Token devuelto por Culqi Checkout (ej. tkn_test_...)
- * @param {number} params.amount - Monto total en Soles (PEN) en formato decimal (ej. 36.00)
- * @param {string} params.email - Email del comprador
- * @param {string} params.orderId - UUID de la orden creada en Supabase
- */
 export const processCulqiCharge = async ({ tokenId, amount, email, orderId }) => {
-  const { data, error } = await supabase.functions.invoke('create-culqi-charge', {
-    body: {
+  const endpoint = SUPABASE_URL + "/functions/v1/create-culqi-charge";
+
+  const headers = {
+    "Content-Type": "application/json",
+    apikey: SUPABASE_ANON_KEY,
+  };
+
+  // Solo adjuntar Authorization Bearer si la llave es un JWT (eyJ...)
+  if (SUPABASE_ANON_KEY.startsWith("eyJ")) {
+    headers.Authorization = "Bearer " + SUPABASE_ANON_KEY;
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
       token: tokenId,
       amount: Number(amount),
       email: email,
       order_id: orderId,
-    },
+    }),
   });
 
-  if (error) {
+  if (response.status === 401) {
     throw new Error(
-      error.message || 'Error de comunicación con el servicio de pagos.'
+      "Error 401 en Supabase Gateway: Entra a Supabase -> Edge Functions -> create-culqi-charge y desactiva 'Enforce JWT Verification'."
     );
   }
 
-  if (data?.error) {
+  if (response.status === 404) {
+    throw new Error(
+      "Error 404: Verifica que la Edge Function en Supabase se llame exactamente 'create-culqi-charge'."
+    );
+  }
+
+  const responseData = await response.json();
+
+  if (responseData?.error) {
     const errorMsg =
-      typeof data.error === 'string'
-        ? data.error
-        : data.error.user_message ||
-          data.error.merchant_message ||
-          data.error.message ||
-          JSON.stringify(data.error);
+      typeof responseData.error === "string"
+        ? responseData.error
+        : responseData.error.user_message ||
+        responseData.error.merchant_message ||
+        responseData.error.message ||
+        JSON.stringify(responseData.error);
     throw new Error(errorMsg);
   }
 
-  return data;
+  return responseData;
 };
-
