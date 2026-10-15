@@ -116,11 +116,9 @@ export default function OrderDetailView() {
         <CardHeader><CardTitle>Control operativo</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
-            <OrderStatusBadge status={order.status} />
             <select disabled={saving} value={order.status} onChange={(e) => changeStatus(e.target.value)} className="h-10 px-3 border border-border rounded-button bg-white text-sm">
               {transitions.map((status) => <option key={status} value={status}>{labels[status]}</option>)}
             </select>
-            <p className="text-xs text-brand-secondary">El cambio se refleja mediante Supabase Realtime en el seguimiento del cliente.</p>
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-4 pt-4 border-t border-border">
             <label className="text-xs font-bold text-brand-primary">

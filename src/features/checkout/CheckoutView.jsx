@@ -28,6 +28,9 @@ import {
   Landmark,
   UserCheck,
   Trash2,
+  Shield,
+  ShieldOff,
+  ShieldCheck,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -2439,9 +2442,6 @@ export default function CheckoutView() {
                             <span className="text-sm font-bold text-brand-primary">
                               Yape / Plin o Transferencia Bancaria Directa
                             </span>
-                            <Badge variant="neutral" className="text-[10px]">
-                              Sin comisión
-                            </Badge>
                           </div>
                           <p className="text-xs text-brand-secondary mt-1">
                             Escanea nuestro QR o transfiere a nuestras cuentas
@@ -2558,10 +2558,10 @@ export default function CheckoutView() {
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-brand-primary">
-                              Pago en Línea con Tarjeta o Yape (Culqi)
+                              Tarjetas de Crédito/Débito o Yape
                             </span>
                             <Badge variant="success" className="text-[10px]">
-                              Confirmación Inmediata
+                              <ShieldCheck className="w-3 h-3" /> Pago seguro con Culqi
                             </Badge>
                           </div>
                           <CreditCard className="w-4 h-4 text-accent" />

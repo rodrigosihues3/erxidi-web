@@ -161,7 +161,7 @@ export default function DashboardView() {
               onChange={(e) => setTimeRange(e.target.value)}
               className="h-9 px-3 border border-border rounded-button bg-white text-xs font-semibold text-brand-primary cursor-pointer"
             >
-              <option value="today">Hoy (desde las 00:00)</option>
+              <option value="today">Hoy</option>
               <option value="7days">Últimos 7 días</option>
               <option value="30days">Últimos 30 días</option>
               <option value="all">Todo el historial</option>
@@ -171,10 +171,10 @@ export default function DashboardView() {
             {timeRange === "today"
               ? "Actividad del día local actual."
               : timeRange === "7days"
-              ? "Actividad de los últimos 7 días."
-              : timeRange === "30days"
-              ? "Actividad de los últimos 30 días."
-              : "Actividad histórica acumulada."}
+                ? "Actividad de los últimos 7 días."
+                : timeRange === "30days"
+                  ? "Actividad de los últimos 30 días."
+                  : "Actividad histórica acumulada."}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => navigate("/admin/pedidos")}>
@@ -221,11 +221,10 @@ export default function DashboardView() {
             <button
               type="button"
               onClick={() => setDispatchFilter("all")}
-              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                dispatchFilter === "all"
-                  ? "bg-brand-primary text-white"
-                  : "bg-surface-subtle text-brand-secondary hover:text-brand-primary border border-border"
-              }`}
+              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "all"
+                ? "bg-brand-primary text-white"
+                : "bg-surface-subtle text-brand-secondary hover:text-brand-primary border border-border"
+                }`}
             >
               <span>Todos</span>
               <span className="font-mono text-[11px] opacity-80">({dispatchCounts.all})</span>
@@ -234,11 +233,10 @@ export default function DashboardView() {
             <button
               type="button"
               onClick={() => setDispatchFilter("express")}
-              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                dispatchFilter === "express"
-                  ? "bg-amber-500 text-white"
-                  : "bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
-              }`}
+              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "express"
+                ? "bg-amber-500 text-white"
+                : "bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
+                }`}
             >
               <Zap className="w-3 h-3" />
               <span>Express</span>
@@ -248,11 +246,10 @@ export default function DashboardView() {
             <button
               type="button"
               onClick={() => setDispatchFilter("scheduled")}
-              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                dispatchFilter === "scheduled"
-                  ? "bg-blue-600 text-white"
-                  : "bg-blue-50 text-blue-900 border border-blue-200 hover:bg-blue-100"
-              }`}
+              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "scheduled"
+                ? "bg-blue-600 text-white"
+                : "bg-blue-50 text-blue-900 border border-blue-200 hover:bg-blue-100"
+                }`}
             >
               <Calendar className="w-3 h-3" />
               <span>Programado</span>
@@ -262,11 +259,10 @@ export default function DashboardView() {
             <button
               type="button"
               onClick={() => setDispatchFilter("pickup")}
-              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-                dispatchFilter === "pickup"
-                  ? "bg-slate-700 text-white"
-                  : "bg-surface-subtle text-brand-secondary border border-border hover:bg-slate-200"
-              }`}
+              className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "pickup"
+                ? "bg-slate-700 text-white"
+                : "bg-surface-subtle text-brand-secondary border border-border hover:bg-slate-200"
+                }`}
             >
               <Store className="w-3 h-3" />
               <span>Tienda</span>

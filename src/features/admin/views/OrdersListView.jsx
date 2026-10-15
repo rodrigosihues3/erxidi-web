@@ -110,11 +110,11 @@ export default function OrdersListView() {
         prev.map((o) =>
           o.id === order.id
             ? {
-                ...o,
-                ...updated,
-                assigned_delivery_id: deliveryId || null,
-                status: nextStatus,
-              }
+              ...o,
+              ...updated,
+              assigned_delivery_id: deliveryId || null,
+              status: nextStatus,
+            }
             : o,
         ),
       );
@@ -206,7 +206,7 @@ export default function OrdersListView() {
                 <tr>
                   <th className="text-left p-4">Pedido / Cliente</th>
                   <th className="text-left p-4">Fecha</th>
-                  <th className="text-left p-4">Despacho / Zona</th>
+                  <th className="text-left p-4">Despacho</th>
                   <th className="text-left p-4">Pago</th>
                   <th className="text-left p-4">Repartidor</th>
                   <th className="text-left p-4">Estado</th>
@@ -255,9 +255,6 @@ export default function OrdersListView() {
                               Programado
                             </Badge>
                           )}
-                          <p className="text-xs font-semibold text-brand-primary">
-                            {isPickup ? "Tienda física" : extractDistrict(order.delivery_address)}
-                          </p>
                         </div>
                       </td>
 
