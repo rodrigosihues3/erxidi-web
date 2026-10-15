@@ -2,12 +2,13 @@ import { supabase } from '../supabase';
 
 /**
  * Servicio de integración con la API de Decolecta (RENIEC / SUNAT).
- * Permite la validación y autocompletado de documentos de identidad peruanos (DNI y RUC).
- * Implementa Caché Read-Through (sessionStorage -> Supabase identity_cache -> Decolecta API).
+ * Utiliza el proxy relativo (/api-decolecta) para evitar bloqueos de CORS tanto
+ * en Vite local (server.proxy) como en Vercel (rewrites en vercel.json).
  */
 
 const DECOLECTA_TOKEN = import.meta.env.VITE_DNI_API_TOKEN || "";
-const BASE_URL = "https://api.decolecta.com/v1";
+// Ruta relativa para que sea interceptada por Vite en local y por Vercel en producción
+const BASE_URL = "/api-decolecta";
 
 /**
  * Helper interno para consultar y guardar en caché.
@@ -53,8 +54,8 @@ async function fetchWithCache(documentType, documentNumber, fetcherFn) {
     if (typeof window !== "undefined") {
       sessionStorage.setItem(cacheKey, JSON.stringify(result));
     }
-    
-    // Guardar en Supabase sin bloquear el flujo (en segundo plano)
+
+    // Guardar en Supabase sin bloquear el flujo
     supabase
       .from("identity_cache")
       .insert([
@@ -75,7 +76,6 @@ async function fetchWithCache(documentType, documentNumber, fetcherFn) {
 /**
  * Consulta información de persona natural por DNI (8 dígitos).
  * @param {string} dni
- * @returns {Promise<{ success: boolean, names?: string, firstLastName?: string, secondLastName?: string, fullName?: string, error?: string }>}
  */
 export async function fetchDni(dni) {
   const cleanDni = String(dni || "").trim();
@@ -100,24 +100,11 @@ export async function fetchDni(dni) {
           : `Bearer ${DECOLECTA_TOKEN}`;
       }
 
-      let response;
-      try {
-        response = await fetch(endpointUrl, {
-          method: "GET",
-          headers,
-          signal: controller.signal,
-        });
-      } catch (networkErr) {
-        // Fallback defensivo a proxy en entorno DEV si ocurre bloqueo de red/CORS
-        if (import.meta.env.DEV) {
-          response = await fetch(`/api-decolecta/reniec/dni?numero=${cleanDni}`, {
-            method: "GET",
-            headers,
-          });
-        } else {
-          throw networkErr;
-        }
-      }
+      const response = await fetch(endpointUrl, {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
 
       clearTimeout(timeoutId);
 
@@ -157,7 +144,6 @@ export async function fetchDni(dni) {
 /**
  * Consulta información de contribuyente por RUC (11 dígitos, comienza con 10 o 20).
  * @param {string} ruc
- * @returns {Promise<{ success: boolean, legalName?: string, address?: string, status?: string, error?: string }>}
  */
 export async function fetchRuc(ruc) {
   const cleanRuc = String(ruc || "").trim();
@@ -182,24 +168,11 @@ export async function fetchRuc(ruc) {
           : `Bearer ${DECOLECTA_TOKEN}`;
       }
 
-      let response;
-      try {
-        response = await fetch(endpointUrl, {
-          method: "GET",
-          headers,
-          signal: controller.signal,
-        });
-      } catch (networkErr) {
-        // Fallback defensivo a proxy en entorno DEV si ocurre bloqueo de red/CORS
-        if (import.meta.env.DEV) {
-          response = await fetch(`/api-decolecta/sunat/ruc?numero=${cleanRuc}`, {
-            method: "GET",
-            headers,
-          });
-        } else {
-          throw networkErr;
-        }
-      }
+      const response = await fetch(endpointUrl, {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
 
       clearTimeout(timeoutId);
 
