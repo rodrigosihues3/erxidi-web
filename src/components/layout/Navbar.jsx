@@ -11,9 +11,13 @@ import {
   Package,
   ShieldCheck,
   Truck,
+  Search,
+  ArrowRight,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
+import { supabase } from "../../services/supabase";
 import Button from "../ui/Button";
 
 export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
@@ -25,33 +29,95 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
 
-  // Cerrar menú de usuario al hacer clic fuera o presionar Escape
+  // Estados del buscador
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [matchingProducts, setMatchingProducts] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const searchContainerRef = useRef(null);
+
+  // Búsqueda en Supabase con debounce de 300ms sobre productos reales
+  useEffect(() => {
+    const query = searchTerm.trim();
+    if (!query || query.length < 2) {
+      setMatchingProducts([]);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        // Criterio: Coincidencia en nombre o slug del producto activo en BD real
+        const safeQuery = query.replace(/[%_,]/g, " ");
+        const { data, error } = await supabase
+          .from("products")
+          .select("id, name, slug, price, main_image_url, target_gender, categories(name)")
+          .eq("is_active", true)
+          .ilike("name", `%${safeQuery}%`)
+          .limit(4);
+
+        if (!error && data) {
+          setMatchingProducts(data);
+        }
+      } catch (err) {
+        console.error("Error en búsqueda rápida de navbar:", err);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // Cerrar dropdown al hacer clic fuera o Escape
   useEffect(() => {
     function handleClickOutside(event) {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
         setUserMenuOpen(false);
       }
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(event.target)
+      ) {
+        setIsSearchOpen(false);
+      }
     }
     function handleKeyDown(event) {
       if (event.key === "Escape") {
         setUserMenuOpen(false);
+        setIsSearchOpen(false);
       }
     }
 
-    if (userMenuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("keydown", handleKeyDown);
-    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [userMenuOpen]);
+  }, []);
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const query = searchTerm.trim();
+    setIsSearchOpen(false);
+    if (query) {
+      navigate(`/catalogo?q=${encodeURIComponent(query)}`);
+    } else {
+      navigate("/catalogo");
+    }
+  };
+
+  const handleSelectProduct = (slug) => {
+    setIsSearchOpen(false);
+    setSearchTerm("");
+    navigate(`/producto/${slug}`);
+  };
 
   const navLinks = [
     { label: "Inicio", path: "/" },
     { label: "Catálogo", path: "/catalogo" },
-    // { label: "Sistema UI", path: "/ui" },
   ];
 
   const displayName =
@@ -70,7 +136,6 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
     navigate("/login");
   };
 
-  // Evaluación robusta considerando auth context, profile, metadata y ruta actual
   const isDelivery =
     authIsDelivery ||
     role === "delivery" ||
@@ -79,9 +144,6 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
     user?.app_metadata?.role === "delivery" ||
     location.pathname.startsWith("/reparto");
 
-  // -----------------------------------------------------------------
-  // 1. HEADER EXCLUSIVO PARA REPARTIDOR (Visible en Móvil y Desktop)
-  // -----------------------------------------------------------------
   if (isDelivery) {
     return (
       <header className="sticky top-0 z-40 w-full border-b border-border bg-surface-card px-4 py-3 shadow-xs">
@@ -124,14 +186,11 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
     );
   }
 
-  // -----------------------------------------------------------------
-  // 2. HEADER GENERAL DE TIENDA Y ADMINISTRACIÓN
-  // -----------------------------------------------------------------
   return (
     <header className="sticky top-0 z-40 bg-brand-primary/95 backdrop-blur-md border-b border-border/20 text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Left Structure: Brand Logo & Navigation Links */}
-        <div className="flex items-center gap-8">
+        {/* Logotipo y Navegación izquierda */}
+        <div className="flex items-center gap-6 lg:gap-8 shrink-0">
           <Link
             to="/"
             className="font-extrabold tracking-tight text-white text-xl hover:opacity-90 transition-opacity"
@@ -146,10 +205,7 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 key={link.path}
                 to={link.path}
                 className={({ isActive }) =>
-                  `text-xs font-semibold uppercase tracking-wider transition-colors duration-150 ${
-                    isActive
-                      ? "text-accent"
-                      : "text-brand-muted hover:text-white"
+                  `text-xs font-semibold uppercase tracking-wider transition-colors duration-150 ${isActive ? "text-accent" : "text-brand-muted hover:text-white"
                   }`
                 }
               >
@@ -159,20 +215,125 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
           </nav>
         </div>
 
-        {/* Right Structure: Cart, Auth, and Mobile Toggle */}
-        <div className="flex items-center gap-3 sm:gap-4">
-          {/* Size Matcher Global Trigger */}
+        {/* Buscador Compacto conectado a Supabase */}
+        <div
+          ref={searchContainerRef}
+          className="relative flex-1 max-w-xs sm:max-w-sm md:max-w-md mx-2 sm:mx-6 min-w-0"
+        >
+          <form onSubmit={handleSearchSubmit} className="relative w-full" role="search">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted pointer-events-none" />
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setIsSearchOpen(true);
+              }}
+              onFocus={() => {
+                if (searchTerm.trim()) setIsSearchOpen(true);
+              }}
+              placeholder="Buscar por nombre de prenda..."
+              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-full bg-white/10 hover:bg-white/15 focus:bg-white/20 border border-white/20 text-white placeholder:text-brand-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-all duration-150"
+              aria-label="Buscar prendas"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm("");
+                  setIsSearchOpen(false);
+                  setMatchingProducts([]);
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand-muted hover:text-white p-0.5 rounded-full"
+                title="Limpiar búsqueda"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </form>
+
+          {/* Resultados Flotantes */}
+          {isSearchOpen && searchTerm.trim().length >= 2 && (
+            <div className="absolute left-0 right-0 top-full mt-2 bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden z-50 text-brand-primary">
+              <div className="px-3.5 py-2 border-b border-border bg-surface-subtle/50 flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-muted">
+                  Resultados sugeridos
+                </span>
+                {searching && <Loader2 className="w-3 h-3 animate-spin text-accent" />}
+              </div>
+
+              {matchingProducts.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {matchingProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => handleSelectProduct(product.slug)}
+                      className="w-full text-left px-3.5 py-2.5 hover:bg-surface-subtle transition-colors flex items-center gap-3 group focus:outline-none"
+                    >
+                      <div className="w-10 h-10 rounded border border-border bg-surface-subtle overflow-hidden shrink-0">
+                        {product.main_image_url ? (
+                          <img
+                            src={product.main_image_url}
+                            alt={product.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-brand-muted">
+                            Sin foto
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-brand-primary truncate group-hover:text-accent transition-colors">
+                          {product.name}
+                        </p>
+                        <p className="text-[11px] text-brand-secondary truncate">
+                          {product.categories?.name || "Prenda"} •{" "}
+                          <span className="capitalize">{product.target_gender}</span>
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-xs font-mono font-bold text-brand-primary">
+                          S/ {Number(product.price || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={handleSearchSubmit}
+                    className="w-full px-3.5 py-2.5 bg-surface-subtle/70 hover:bg-surface-subtle text-xs font-semibold text-accent hover:text-accent-hover flex items-center justify-center gap-1.5 transition-colors border-t border-border"
+                  >
+                    <span>Ver todos los resultados en el catálogo</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : !searching ? (
+                <div className="p-4 text-center">
+                  <p className="text-xs font-medium text-brand-secondary">
+                    No se encontraron prendas con &ldquo;{searchTerm}&rdquo;
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {/* Acciones del lado derecho */}
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <button
             type="button"
             onClick={onOpenSizeMatcher}
-            className="hover:bg-slate-800 rounded px-2.5 py-1.5 text-xs text-brand-muted hover:text-white transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="hover:bg-slate-800 rounded px-2 sm:px-2.5 py-1.5 text-xs text-brand-muted hover:text-white transition-colors flex items-center gap-1.5 focus:outline-none"
             aria-label="Calcular mi talla"
+            title="Calcular mi talla"
           >
             <Ruler className="w-4 h-4 text-accent" />
-            <span>Calcular mi talla</span>
+            <span className="hidden sm:inline">Calcular mi talla</span>
           </button>
 
-          {/* Cart Interactive Button */}
           <button
             type="button"
             onClick={onOpenCartDrawer}
@@ -187,14 +348,10 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
             )}
           </button>
 
-          {/* Desktop Auth Section */}
           <div className="hidden lg:flex items-center gap-3 pl-2 border-l border-border/20">
             {user ? (
               <div className="flex items-center gap-3">
-                {/* Botón Panel Admin exclusivo para Dueña */}
-                {(role === "owner" ||
-                  role === "admin" ||
-                  profile?.role === "owner") && (
+                {(role === "owner" || role === "admin" || profile?.role === "owner") && (
                   <Link
                     to="/admin"
                     className="flex items-center gap-2 px-3 py-1.5 rounded-button text-xs font-semibold text-white bg-white/10 hover:bg-accent transition-colors"
@@ -205,27 +362,12 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                   </Link>
                 )}
 
-                {/* Botón Panel Reparto para Repartidores */}
-                {(role === "delivery" || profile?.role === "delivery" || isDelivery) && (
-                  <Link
-                    to="/reparto"
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-button text-xs font-semibold text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 transition-colors"
-                    title="Ir al panel de reparto"
-                  >
-                    <Truck className="w-4 h-4 text-amber-300" />
-                    <span>Panel Reparto</span>
-                  </Link>
-                )}
-
-                {/* Dropdown de Usuario con Perfil y Mis Pedidos */}
                 <div className="relative" ref={userMenuRef}>
                   <button
                     type="button"
                     onClick={() => setUserMenuOpen((prev) => !prev)}
                     className="flex items-center gap-2 p-1.5 rounded-button text-xs hover:bg-white/10 transition-colors focus:outline-none"
                     aria-expanded={userMenuOpen}
-                    aria-haspopup="true"
-                    aria-label="Abrir menú de usuario"
                   >
                     <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center font-bold text-xs shadow-xs">
                       {userInitial}
@@ -234,14 +376,13 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                       {displayName}
                     </span>
                     <ChevronDown
-                      className={`w-3.5 h-3.5 text-brand-muted transition-transform duration-150 ${
-                        userMenuOpen ? "rotate-180 text-white" : ""
-                      }`}
+                      className={`w-3.5 h-3.5 text-brand-muted transition-transform duration-150 ${userMenuOpen ? "rotate-180 text-white" : ""
+                        }`}
                     />
                   </button>
 
                   {userMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-52 bg-surface-card border border-border rounded-card shadow-lg py-1.5 z-50 animate-in fade-in duration-100 text-brand-primary">
+                    <div className="absolute right-0 mt-2 w-52 bg-surface-card border border-border rounded-card shadow-lg py-1.5 z-50 text-brand-primary">
                       <div className="px-3.5 py-2 border-b border-border">
                         <p className="text-xs font-bold truncate text-brand-primary">
                           {displayName}
@@ -268,17 +409,6 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                         <Package className="w-4 h-4 text-accent" />
                         Mis Pedidos
                       </Link>
-
-                      {(role === "delivery" || profile?.role === "delivery" || isDelivery) && (
-                        <Link
-                          to="/reparto"
-                          onClick={() => setUserMenuOpen(false)}
-                          className="flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors"
-                        >
-                          <Truck className="w-4 h-4 text-amber-600" />
-                          Panel de Reparto
-                        </Link>
-                      )}
 
                       <div className="my-1 border-t border-border" />
 
@@ -318,149 +448,16 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
             )}
           </div>
 
-          {/* Mobile Menu Hamburger Button */}
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
             className="lg:hidden p-2 rounded-button text-brand-muted hover:text-white hover:bg-white/5 transition-colors focus:outline-none"
-            aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
-            aria-expanded={mobileMenuOpen}
+            aria-label="Abrir menú"
           >
-            {mobileMenuOpen ? (
-              <X className="w-6 h-6" />
-            ) : (
-              <Menu className="w-6 h-6" />
-            )}
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </div>
       </div>
-
-      {/* Responsive Mobile Drawer/Menu */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden bg-brand-primary border-b border-border/20 px-4 pt-3 pb-5 space-y-4 animate-in slide-in-from-top-2 duration-150">
-          <nav className="flex flex-col space-y-2">
-            {navLinks.map((link) => (
-              <NavLink
-                key={link.path}
-                to={link.path}
-                onClick={() => setMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `px-3 py-2 rounded-button text-sm font-semibold transition-colors ${
-                    isActive
-                      ? "bg-white/10 text-accent"
-                      : "text-brand-muted hover:text-white hover:bg-white/5"
-                  }`
-                }
-              >
-                {link.label}
-              </NavLink>
-            ))}
-          </nav>
-
-          {/* Mobile Auth Divider */}
-          <div className="pt-3 border-t border-border/20">
-            {user ? (
-              <div className="space-y-2">
-                {(role === "owner" ||
-                  role === "admin" ||
-                  profile?.role === "owner") && (
-                  <Link
-                    to="/admin"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-button text-sm font-semibold text-white bg-white/10 hover:bg-accent transition-colors"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-accent" />
-                    <span>Panel Admin</span>
-                  </Link>
-                )}
-
-                {(role === "delivery" || profile?.role === "delivery" || isDelivery) && (
-                  <Link
-                    to="/reparto"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-button text-sm font-semibold text-amber-300 bg-white/10 hover:bg-accent transition-colors"
-                  >
-                    <Truck className="w-4 h-4" />
-                    <span>Panel de Reparto</span>
-                  </Link>
-                )}
-
-                <div className="flex items-center gap-2.5 px-3 py-2 bg-white/5 rounded-button">
-                  <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center font-bold text-xs">
-                    {userInitial}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-white truncate">
-                      {displayName}
-                    </p>
-                    <p className="text-[10px] text-brand-muted truncate">
-                      {user.email}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col space-y-1">
-                  <Link
-                    to="/mi-cuenta"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-brand-muted hover:text-white hover:bg-white/5 rounded-button"
-                  >
-                    <User className="w-4 h-4 text-accent" />
-                    Mi Perfil
-                  </Link>
-
-                  <Link
-                    to="/mi-cuenta/pedidos"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-brand-muted hover:text-white hover:bg-white/5 rounded-button"
-                  >
-                    <Package className="w-4 h-4 text-accent" />
-                    Mis Pedidos
-                  </Link>
-
-                  <button
-                    type="button"
-                    onClick={handleSignOut}
-                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-white/5 rounded-button text-left"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Cerrar Sesión
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <Link
-                  to="/login?tab=register"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="block"
-                >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full border-white/20 bg-transparent text-white hover:bg-white/10 text-xs font-semibold h-8"
-                  >
-                    Registrarse
-                  </Button>
-                </Link>
-                <Link
-                  to="/login"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="block"
-                >
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="w-full bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-8"
-                  >
-                    Ingresar
-                  </Button>
-                </Link>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </header>
   );
 }
