@@ -1,28 +1,52 @@
-import React, { useMemo, useEffect } from 'react';
-import { X, Filter, RotateCcw, Check } from 'lucide-react';
-import Button from '../../../components/ui/Button';
-import Badge from '../../../components/ui/Badge';
+import React, { useMemo, useState, useEffect } from "react";
+import { X, Filter, RotateCcw, Check, ChevronDown, ChevronRight } from "lucide-react";
+import Button from "../../../components/ui/Button";
+import Badge from "../../../components/ui/Badge";
 
 export default function FilterSidebar({
   categories = [],
   materials = [],
+  brands = [],
   selectedFilters = {
     categoryIds: [],
+    brandIds: [],
     materialIds: [],
     inStockOnly: false,
-    minPrice: null,
-    maxPrice: null,
   },
   onFilterChange,
   onResetFilters,
   isMobileOpen = false,
   onCloseMobile,
 }) {
-  // Calculate active filter count
+  const [expandedCategories, setExpandedCategories] = useState({});
+
+  // Clasificar categorías raíz (parent_id == null) y subcategorías dependientes
+  const { rootCategories, subcategoriesByParent } = useMemo(() => {
+    const roots = [];
+    const childrenMap = {};
+
+    categories.forEach((cat) => {
+      if (cat.parent_id == null) {
+        roots.push(cat);
+      } else {
+        if (!childrenMap[cat.parent_id]) {
+          childrenMap[cat.parent_id] = [];
+        }
+        childrenMap[cat.parent_id].push(cat);
+      }
+    });
+
+    return { rootCategories: roots, subcategoriesByParent: childrenMap };
+  }, [categories]);
+
+  // Contador de filtros activos en la barra lateral
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (selectedFilters?.categoryIds?.length) {
       count += selectedFilters.categoryIds.length;
+    }
+    if (selectedFilters?.brandIds?.length) {
+      count += selectedFilters.brandIds.length;
     }
     if (selectedFilters?.materialIds?.length) {
       count += selectedFilters.materialIds.length;
@@ -30,50 +54,52 @@ export default function FilterSidebar({
     if (selectedFilters?.inStockOnly) {
       count += 1;
     }
-    if (selectedFilters?.minPrice !== null && selectedFilters?.minPrice !== undefined) {
-      count += 1;
-    }
-    if (selectedFilters?.maxPrice !== null && selectedFilters?.maxPrice !== undefined) {
-      count += 1;
-    }
     return count;
   }, [selectedFilters]);
 
-  // Handle ESC key for mobile drawer
+  // Cierre por tecla ESC en vista móvil
   useEffect(() => {
     if (!isMobileOpen) return;
-
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        onCloseMobile?.();
-      }
+      if (e.key === "Escape") onCloseMobile?.();
     };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMobileOpen, onCloseMobile]);
 
-  // Prevent body scroll when mobile drawer is open
+  // Bloqueo de scroll cuando el drawer móvil está abierto
   useEffect(() => {
     if (isMobileOpen) {
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = "hidden";
     } else {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     }
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     };
   }, [isMobileOpen]);
+
+  const toggleAccordion = (catId) => {
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [catId]: !prev[catId],
+    }));
+  };
 
   const handleToggleCategory = (id) => {
     const current = selectedFilters?.categoryIds || [];
     const next = current.includes(id)
       ? current.filter((catId) => catId !== id)
       : [...current, id];
-    onFilterChange?.({
-      ...selectedFilters,
-      categoryIds: next,
-    });
+    onFilterChange?.({ ...selectedFilters, categoryIds: next });
+  };
+
+  const handleToggleBrand = (id) => {
+    const current = selectedFilters?.brandIds || [];
+    const next = current.includes(id)
+      ? current.filter((bId) => bId !== id)
+      : [...current, id];
+    onFilterChange?.({ ...selectedFilters, brandIds: next });
   };
 
   const handleToggleMaterial = (id) => {
@@ -81,10 +107,7 @@ export default function FilterSidebar({
     const next = current.includes(id)
       ? current.filter((matId) => matId !== id)
       : [...current, id];
-    onFilterChange?.({
-      ...selectedFilters,
-      materialIds: next,
-    });
+    onFilterChange?.({ ...selectedFilters, materialIds: next });
   };
 
   const handleToggleInStock = () => {
@@ -94,29 +117,127 @@ export default function FilterSidebar({
     });
   };
 
-  // Reusable filter controls content
   const renderFilterSections = () => (
     <div className="space-y-6">
-      {/* Categories Block */}
-      {categories.length > 0 && (
+      {/* 1. Categorías de Prendas y Subcategorías */}
+      {rootCategories.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-xs font-bold text-brand-primary uppercase tracking-wider">
-            Categorías
+            Prendas
           </h3>
           <div className="space-y-1.5">
-            {categories.map((cat) => {
-              const isChecked = selectedFilters?.categoryIds?.includes(cat.id);
+            {rootCategories.map((root) => {
+              const children = subcategoriesByParent[root.id] || [];
+              const hasChildren = children.length > 0;
+              const isChecked = selectedFilters?.categoryIds?.includes(root.id);
+              const isExpanded = Boolean(expandedCategories[root.id]);
+
+              return (
+                <div key={root.id} className="space-y-1">
+                  <div className="flex items-center justify-between py-1 px-1.5 -mx-1.5 rounded-button hover:bg-surface-subtle transition-colors group">
+                    <label className="flex items-center gap-2.5 flex-1 cursor-pointer select-none">
+                      <div
+                        className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${isChecked
+                          ? "bg-brand-primary border-brand-primary text-white"
+                          : "border-border bg-surface-card group-hover:border-border-strong"
+                          }`}
+                      >
+                        {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={isChecked}
+                        onChange={() => handleToggleCategory(root.id)}
+                      />
+                      <span
+                        className={`text-sm ${isChecked
+                          ? "font-semibold text-brand-primary"
+                          : "text-brand-secondary group-hover:text-brand-primary"
+                          }`}
+                      >
+                        {root.name}
+                      </span>
+                    </label>
+
+                    {hasChildren && (
+                      <button
+                        type="button"
+                        onClick={() => toggleAccordion(root.id)}
+                        className="p-1 text-brand-secondary hover:text-brand-primary transition-transform"
+                        title={isExpanded ? "Ocultar subtipos" : "Ver subtipos"}
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {hasChildren && isExpanded && (
+                    <div className="pl-6 pr-1 py-1 space-y-1 border-l-2 border-border ml-2 bg-surface-subtle/40 rounded-r">
+                      {children.map((sub) => {
+                        const isSubChecked = selectedFilters?.categoryIds?.includes(sub.id);
+                        return (
+                          <label
+                            key={sub.id}
+                            className="flex items-center gap-2 py-1 px-1 rounded cursor-pointer hover:bg-surface-subtle transition-colors select-none"
+                          >
+                            <div
+                              className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-colors ${isSubChecked
+                                ? "bg-brand-primary border-brand-primary text-white"
+                                : "border-border bg-surface-card"
+                                }`}
+                            >
+                              {isSubChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                            </div>
+                            <input
+                              type="checkbox"
+                              className="sr-only"
+                              checked={isSubChecked}
+                              onChange={() => handleToggleCategory(sub.id)}
+                            />
+                            <span
+                              className={`text-xs ${isSubChecked
+                                ? "font-semibold text-brand-primary"
+                                : "text-brand-secondary"
+                                }`}
+                            >
+                              {sub.name}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 2. Marcas */}
+      {brands.length > 0 && (
+        <div className="space-y-3 pt-4 border-t border-border">
+          <h3 className="text-xs font-bold text-brand-primary uppercase tracking-wider">
+            Marcas
+          </h3>
+          <div className="space-y-1.5">
+            {brands.map((b) => {
+              const isChecked = selectedFilters?.brandIds?.includes(b.id);
               return (
                 <label
-                  key={cat.id}
+                  key={b.id}
                   className="flex items-center gap-2.5 py-1 px-1.5 -mx-1.5 rounded-button cursor-pointer hover:bg-surface-subtle transition-colors group select-none"
                 >
                   <div
-                    className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
-                      isChecked
-                        ? 'bg-brand-primary border-brand-primary text-white'
-                        : 'border-border bg-surface-card group-hover:border-border-strong'
-                    }`}
+                    className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${isChecked
+                      ? "bg-brand-primary border-brand-primary text-white"
+                      : "border-border bg-surface-card group-hover:border-border-strong"
+                      }`}
                   >
                     {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
                   </div>
@@ -124,16 +245,15 @@ export default function FilterSidebar({
                     type="checkbox"
                     className="sr-only"
                     checked={isChecked}
-                    onChange={() => handleToggleCategory(cat.id)}
+                    onChange={() => handleToggleBrand(b.id)}
                   />
                   <span
-                    className={`text-sm ${
-                      isChecked
-                        ? 'font-semibold text-brand-primary'
-                        : 'text-brand-secondary group-hover:text-brand-primary'
-                    }`}
+                    className={`text-sm ${isChecked
+                      ? "font-semibold text-brand-primary"
+                      : "text-brand-secondary group-hover:text-brand-primary"
+                      }`}
                   >
-                    {cat.name}
+                    {b.name}
                   </span>
                 </label>
               );
@@ -142,7 +262,7 @@ export default function FilterSidebar({
         </div>
       )}
 
-      {/* Materials Block */}
+      {/* 3. Materiales */}
       {materials.length > 0 && (
         <div className="space-y-3 pt-4 border-t border-border">
           <h3 className="text-xs font-bold text-brand-primary uppercase tracking-wider">
@@ -157,11 +277,10 @@ export default function FilterSidebar({
                   className="flex items-center gap-2.5 py-1 px-1.5 -mx-1.5 rounded-button cursor-pointer hover:bg-surface-subtle transition-colors group select-none"
                 >
                   <div
-                    className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
-                      isChecked
-                        ? 'bg-brand-primary border-brand-primary text-white'
-                        : 'border-border bg-surface-card group-hover:border-border-strong'
-                    }`}
+                    className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${isChecked
+                      ? "bg-brand-primary border-brand-primary text-white"
+                      : "border-border bg-surface-card group-hover:border-border-strong"
+                      }`}
                   >
                     {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
                   </div>
@@ -172,11 +291,10 @@ export default function FilterSidebar({
                     onChange={() => handleToggleMaterial(mat.id)}
                   />
                   <span
-                    className={`text-sm ${
-                      isChecked
-                        ? 'font-semibold text-brand-primary'
-                        : 'text-brand-secondary group-hover:text-brand-primary'
-                    }`}
+                    className={`text-sm ${isChecked
+                      ? "font-semibold text-brand-primary"
+                      : "text-brand-secondary group-hover:text-brand-primary"
+                      }`}
                   >
                     {mat.name}
                   </span>
@@ -187,7 +305,7 @@ export default function FilterSidebar({
         </div>
       )}
 
-      {/* Stock Availability Toggle */}
+      {/* 4. Disponibilidad en Stock */}
       <div className="pt-4 border-t border-border">
         <label className="flex items-center justify-between py-1 cursor-pointer select-none group">
           <div className="space-y-0.5 pr-2">
@@ -204,14 +322,12 @@ export default function FilterSidebar({
             role="switch"
             aria-checked={Boolean(selectedFilters?.inStockOnly)}
             onClick={handleToggleInStock}
-            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-              selectedFilters?.inStockOnly ? 'bg-brand-primary' : 'bg-border'
-            }`}
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${selectedFilters?.inStockOnly ? "bg-brand-primary" : "bg-border"
+              }`}
           >
             <span
-              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                selectedFilters?.inStockOnly ? 'translate-x-4' : 'translate-x-0'
-              }`}
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${selectedFilters?.inStockOnly ? "translate-x-4" : "translate-x-0"
+                }`}
             />
           </button>
         </label>
@@ -221,10 +337,8 @@ export default function FilterSidebar({
 
   return (
     <>
-      {/* Desktop Continuous Sidebar Panel */}
       <aside className="hidden lg:block w-64 flex-shrink-0">
         <div className="bg-surface-card border border-border rounded-card p-5 space-y-5 sticky top-20">
-          {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-brand-primary" />
@@ -249,12 +363,10 @@ export default function FilterSidebar({
             </Button>
           </div>
 
-          {/* Filters List */}
           {renderFilterSections()}
         </div>
       </aside>
 
-      {/* Mobile Drawer */}
       {isMobileOpen && (
         <div
           className="fixed inset-0 z-50 lg:hidden flex"
@@ -262,16 +374,13 @@ export default function FilterSidebar({
           aria-modal="true"
           aria-label="Panel de filtros"
         >
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
             onClick={onCloseMobile}
             aria-hidden="true"
           />
 
-          {/* Drawer Panel */}
           <div className="relative z-10 w-full max-w-xs bg-surface-card border-r border-border shadow-dropdown flex flex-col h-full animate-in slide-in-from-left duration-200">
-            {/* Mobile Header */}
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-brand-primary" />
@@ -293,12 +402,8 @@ export default function FilterSidebar({
               </button>
             </div>
 
-            {/* Mobile Filter Content */}
-            <div className="flex-1 overflow-y-auto p-4">
-              {renderFilterSections()}
-            </div>
+            <div className="flex-1 overflow-y-auto p-4">{renderFilterSections()}</div>
 
-            {/* Mobile Footer Actions */}
             <div className="p-4 border-t border-border flex items-center gap-2 bg-surface-subtle">
               <Button
                 variant="outline"

@@ -16,6 +16,7 @@ import {
 const initial = {
   category_id: "",
   material_id: "",
+  brand_id: "",
   name: "",
   slug: "",
   description: "",
@@ -43,7 +44,7 @@ export default function ProductFormView() {
   const editing = Boolean(id);
   const [form, setForm] = useState(initial);
   const [variants, setVariants] = useState([]);
-  const [deps, setDeps] = useState({ categories: [], materials: [], sizes: [] });
+  const [deps, setDeps] = useState({ categories: [], materials: [], sizes: [], brands: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -59,8 +60,9 @@ export default function ProductFormView() {
           const product = await getProduct(id);
           if (!active) return;
           setForm({
-            category_id: product.category_id,
-            material_id: product.material_id,
+            category_id: product.category_id || "",
+            material_id: product.material_id || "",
+            brand_id: product.brand_id || "",
             name: product.name,
             slug: product.slug,
             description: product.description,
@@ -70,9 +72,9 @@ export default function ProductFormView() {
             has_size_guide: product.has_size_guide,
             is_featured: product.is_featured,
             is_active: product.is_active,
-            target_gender: product.target_gender || "unisex",
+            target_gender: product.target_gender || "hombre",
           });
-          // Hidratar únicamente variantes activas para evitar reaparición de variantes dadas de baja
+          // Hidratar únicamente variantes activas
           const activeVariants = (product.product_variants || [])
             .filter((variant) => variant.is_active !== false)
             .map((variant) => ({ ...variant, product_id: product.id }));
@@ -88,6 +90,22 @@ export default function ProductFormView() {
       active = false;
     };
   }, [id, editing]);
+
+  // Jerarquía ordenada de categorías para el selector
+  const categorizedOptions = useMemo(() => {
+    const roots = deps.categories.filter((c) => c.parent_id == null);
+    const options = [];
+
+    roots.forEach((root) => {
+      options.push({ id: root.id, name: root.name, isChild: false });
+      const children = deps.categories.filter((c) => c.parent_id === root.id);
+      children.forEach((child) => {
+        options.push({ id: child.id, name: `— ${child.name}`, isChild: true });
+      });
+    });
+
+    return options.length > 0 ? options : deps.categories;
+  }, [deps.categories]);
 
   const colors = useMemo(
     () => [...new Set(variants.map((variant) => variant.color).filter(Boolean))],
@@ -117,11 +135,12 @@ export default function ProductFormView() {
     if (
       !form.category_id ||
       !form.material_id ||
+      !form.brand_id ||
       !form.name.trim() ||
       !form.description.trim() ||
       Number(form.price) <= 0
     ) {
-      throw new Error("Completa los campos obligatorios del producto.");
+      throw new Error("Completa los campos obligatorios del producto (incluyendo Categoría, Marca y Material).");
     }
 
     if (!form.slug.trim()) {
@@ -169,6 +188,7 @@ export default function ProductFormView() {
     return {
       category_id: Number(form.category_id),
       material_id: Number(form.material_id),
+      brand_id: Number(form.brand_id),
       name: form.name.trim(),
       slug: form.slug.trim(),
       description: form.description.trim(),
@@ -245,7 +265,7 @@ export default function ProductFormView() {
               required
             />
             <label className="text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-              Categoría
+              Categoría / Tipo de Prenda
               <select
                 required
                 value={form.category_id}
@@ -253,7 +273,23 @@ export default function ProductFormView() {
                 className="mt-1.5 w-full h-10 px-3 border border-border rounded-button bg-white text-sm"
               >
                 <option value="">Selecciona</option>
-                {deps.categories.map((item) => (
+                {categorizedOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+              Marca
+              <select
+                required
+                value={form.brand_id}
+                onChange={(e) => update("brand_id", e.target.value)}
+                className="mt-1.5 w-full h-10 px-3 border border-border rounded-button bg-white text-sm"
+              >
+                <option value="">Selecciona</option>
+                {(deps.brands || []).map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
@@ -277,7 +313,7 @@ export default function ProductFormView() {
               </select>
             </label>
             <Input
-              label="Precio regular"
+              label="Precio regular (S/)"
               type="number"
               min="0.01"
               step="0.01"
@@ -286,15 +322,20 @@ export default function ProductFormView() {
               required
             />
             <label className="text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-              Público
+              Público Objetivo
               <select
                 value={form.target_gender}
                 onChange={(e) => update("target_gender", e.target.value)}
                 className="mt-1.5 w-full h-10 px-3 border border-border rounded-button bg-white text-sm"
               >
-                {["hombre", "mujer", "nino", "nina", "unisex"].map((item) => (
-                  <option key={item} value={item}>
-                    {item}
+                {[
+                  { value: "hombre", label: "Hombres" },
+                  { value: "mujer", label: "Mujeres" },
+                  { value: "nino", label: "Niños" },
+                  { value: "nina", label: "Niñas" },
+                ].map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
                   </option>
                 ))}
               </select>

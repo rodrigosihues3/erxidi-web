@@ -222,8 +222,8 @@ export default function DashboardView() {
               type="button"
               onClick={() => setDispatchFilter("all")}
               className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "all"
-                  ? "bg-brand-primary text-white"
-                  : "bg-surface-subtle text-brand-secondary hover:text-brand-primary border border-border"
+                ? "bg-brand-primary text-white"
+                : "bg-surface-subtle text-brand-secondary hover:text-brand-primary border border-border"
                 }`}
             >
               <span>Todos</span>
@@ -234,8 +234,8 @@ export default function DashboardView() {
               type="button"
               onClick={() => setDispatchFilter("express")}
               className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "express"
-                  ? "bg-amber-500 text-white"
-                  : "bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
+                ? "bg-amber-500 text-white"
+                : "bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
                 }`}
             >
               <Zap className="w-3 h-3" />
@@ -247,8 +247,8 @@ export default function DashboardView() {
               type="button"
               onClick={() => setDispatchFilter("scheduled")}
               className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "scheduled"
-                  ? "bg-blue-600 text-white"
-                  : "bg-blue-50 text-blue-900 border border-blue-200 hover:bg-blue-100"
+                ? "bg-blue-600 text-white"
+                : "bg-blue-50 text-blue-900 border border-blue-200 hover:bg-blue-100"
                 }`}
             >
               <Calendar className="w-3 h-3" />
@@ -260,8 +260,8 @@ export default function DashboardView() {
               type="button"
               onClick={() => setDispatchFilter("pickup")}
               className={`px-3 py-1.5 rounded-button text-xs font-semibold transition-colors flex items-center gap-1.5 ${dispatchFilter === "pickup"
-                  ? "bg-slate-700 text-white"
-                  : "bg-surface-subtle text-brand-secondary border border-border hover:bg-slate-200"
+                ? "bg-slate-700 text-white"
+                : "bg-surface-subtle text-brand-secondary border border-border hover:bg-slate-200"
                 }`}
             >
               <Store className="w-3 h-3" />

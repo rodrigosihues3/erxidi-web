@@ -1,9 +1,10 @@
 import { supabase } from "../supabase";
 
 const PRODUCT_RELATIONAL_FIELDS = [
-  "id, name, slug, description, price, main_image_url, gallery_urls, target_gender, is_featured, is_active,",
-  "categories!inner(id, name, slug, is_active),",
+  "id, name, slug, description, price, main_image_url, gallery_urls, target_gender, is_featured, is_active, brand_id, category_id, material_id,",
+  "categories!inner(id, name, slug, parent_id, is_active),",
   "materials(id, name, is_active),",
+  "brands(id, name, slug, is_active),",
   "product_variants(id, size_id, color, color_hex, stock, sku, is_active, sizes(id, name, display_order)),",
   "size_guides(id, size_id, measurements, sizes(id, name, display_order))",
 ].join(" ");
@@ -20,13 +21,14 @@ function sanitizeProductVariants(product) {
 }
 
 /**
- * Consulta la tabla categories filtrando solo las activas y ordenadas por display_order ascendente.
+ * Consulta la tabla categories filtrando solo las activas y ordenadas por display_order.
+ * Incluye parent_id para construir el árbol jerárquico de subcategorías.
  */
 export async function getCategories() {
   try {
     const { data, error } = await supabase
       .from("categories")
-      .select("id, name, slug, description, image_url")
+      .select("id, name, slug, description, image_url, parent_id")
       .eq("is_active", true)
       .order("display_order", { ascending: true });
 
@@ -39,7 +41,27 @@ export async function getCategories() {
 }
 
 /**
- * Consulta la tabla materials filtrando solo los activos y ordenados por name ascendente.
+ * Consulta la tabla maestra brands filtrando solo las activas.
+ */
+export async function getBrands() {
+  try {
+    const { data, error } = await supabase
+      .from("brands")
+      .select("id, name, slug")
+      .eq("is_active", true)
+      .order("display_order", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error("Error al obtener marcas:", error.message || error);
+    throw error;
+  }
+}
+
+/**
+ * Consulta la tabla materials filtrando solo los activos y ordenados por nombre.
  */
 export async function getMaterials() {
   try {
@@ -58,8 +80,7 @@ export async function getMaterials() {
 }
 
 /**
- * Realiza una consulta relacional sobre products filtrando is_active = true
- * y excluyendo variantes dadas de baja lógica.
+ * Realiza una consulta relacional sobre products filtrando is_active = true.
  */
 export async function getProducts({ categorySlug, targetGender } = {}) {
   try {
@@ -90,7 +111,7 @@ export async function getProducts({ categorySlug, targetGender } = {}) {
 }
 
 /**
- * Consulta relacional filtrando por slug único y limpiando variantes inactivas.
+ * Consulta relacional por slug único del producto.
  */
 export async function getProductBySlug(slug) {
   try {

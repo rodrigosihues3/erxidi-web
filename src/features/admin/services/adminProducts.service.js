@@ -4,11 +4,12 @@ export async function listProducts({ search = "", activeOnly = false } = {}) {
   let query = supabase
     .from("products")
     .select(`
-      id, category_id, material_id, name, slug, description, price,
+      id, category_id, material_id, brand_id, name, slug, description, price,
       main_image_url, gallery_urls, has_size_guide, is_featured,
       is_active, target_gender, created_at, updated_at,
-      categories:category_id (id, name),
+      categories:category_id (id, name, parent_id),
       materials:material_id (id, name),
+      brands:brand_id (id, name),
       product_variants (id, size_id, color, color_hex, stock, sku, is_active,
         sizes:size_id (id, name, display_order))
     `)
@@ -29,7 +30,7 @@ export async function getProduct(id) {
   const { data, error } = await supabase
     .from("products")
     .select(`
-      id, category_id, material_id, name, slug, description, price,
+      id, category_id, material_id, brand_id, name, slug, description, price,
       main_image_url, gallery_urls, has_size_guide, is_featured,
       is_active, target_gender, created_at, updated_at,
       product_variants (id, size_id, color, color_hex, stock, sku, is_active,
@@ -45,13 +46,14 @@ export async function getProduct(id) {
 }
 
 export async function getProductDependencies() {
-  const [categories, materials, sizes] = await Promise.all([
-    supabase.from("categories").select("id, name").eq("is_active", true).order("display_order"),
+  const [categories, materials, sizes, brands] = await Promise.all([
+    supabase.from("categories").select("id, name, parent_id").eq("is_active", true).order("display_order"),
     supabase.from("materials").select("id, name").eq("is_active", true).order("name"),
     supabase.from("sizes").select("id, name, display_order").eq("is_active", true).order("display_order"),
+    supabase.from("brands").select("id, name").eq("is_active", true).order("display_order"),
   ]);
 
-  for (const result of [categories, materials, sizes]) {
+  for (const result of [categories, materials, sizes, brands]) {
     if (result.error) throw result.error;
   }
 
@@ -59,6 +61,7 @@ export async function getProductDependencies() {
     categories: categories.data ?? [],
     materials: materials.data ?? [],
     sizes: sizes.data ?? [],
+    brands: brands.data ?? [],
   };
 }
 
