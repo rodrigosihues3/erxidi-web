@@ -5,6 +5,7 @@ import {
   Tags,
   Truck,
   MapPin,
+  Settings,
   Store,
   LogOut,
   UserCircle,
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { label: "Categorías", path: "/admin/categorias", icon: Tags },
   { label: "Repartidores", path: "/admin/repartidores", icon: Truck },
   { label: "Zona de Cobertura", path: "/admin/cobertura", icon: MapPin },
+  { label: "Ajustes", path: "/admin/ajustes", icon: Settings },
 ];
 
 export default function AdminSidebar({
