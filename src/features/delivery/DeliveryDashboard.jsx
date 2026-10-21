@@ -84,11 +84,14 @@ const destination = addressText
   .replace(/\s+/g, " ")
   .trim();
 
-const mapsUrl = destination
-  ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-      `${destination}, Lima, Perú`,
-    )}&travelmode=driving`
-  : null;
+const mapsUrl =
+  order.delivery_latitude && order.delivery_longitude
+    ? `https://www.google.com/maps/dir/?api=1&destination=${order.delivery_latitude},${order.delivery_longitude}&travelmode=driving`
+    : destination
+      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+          `${destination}, Lima, Perú`,
+        )}&travelmode=driving`
+      : null;
 
   return (
     <Card className="!p-0 overflow-hidden">
@@ -117,7 +120,7 @@ const mapsUrl = destination
             <span className="truncate">{addressText ?? "Sin dirección"}</span>
           </span>
           <span className="flex items-center gap-3 flex-shrink-0">
-            <span>{order.total_items} artículos</span>
+            <span>{order.total_items} {order.total_items === 1 ? "artículo" : "artículos"}</span>
             <span className="font-semibold text-brand-primary">
               {soles(order.total_amount)}
             </span>

@@ -1,0 +1,151 @@
+Listado de rutas de carpetas
+El número de serie del volumen es 3EC8-75D8
+C:\USERS\USUARIO\DOCUMENTS\UTP\INNOVACIÓN Y TRANSFORMACIÓN DIGITAL\PROJECT\ERXIDI-WEB\SRC
+|   App.css
+|   App.jsx
+|   index.css
+|   main.jsx
+|   
++---assets
+|       hero.png
+|       react.svg
+|       vite.svg
+|       
++---components
+|   |   RoleRoute.jsx
+|   |   
+|   +---layout
+|   |       Footer.jsx
+|   |       MainLayout.jsx
+|   |       Navbar.jsx
+|   |       
+|   \---ui
+|           Badge.jsx
+|           Button.jsx
+|           Card.jsx
+|           Input.jsx
+|           LocationPickerMap.jsx
+|           Skeleton.jsx
+|           
++---context
+|       AuthContext.jsx
+|       CartContext.jsx
+|       
++---features
+|   +---account
+|   |   |   OrdersHistoryView.jsx
+|   |   |   ProfileView.jsx
+|   |   |   
+|   |   \---components
+|   |           AddressModal.jsx
+|   |           
+|   +---admin
+|   |   +---components
+|   |   |       AdminLayout.jsx
+|   |   |       AdminSidebar.jsx
+|   |   |       KpiCard.jsx
+|   |   |       OrderStatusBadge.jsx
+|   |   |       ProductDropzone.jsx
+|   |   |       ProtectedRoute.jsx
+|   |   |       VariantMatrix.jsx
+|   |   |       
+|   |   +---hooks
+|   |   |       useAdminOrders.js
+|   |   |       useAdminProducts.js
+|   |   |       
+|   |   +---services
+|   |   |       adminCategories.service.js
+|   |   |       adminDelivery.service.js
+|   |   |       adminOrders.service.js
+|   |   |       adminProducts.service.js
+|   |   |       adminSettings.service.js
+|   |   |       
+|   |   \---views
+|   |           CategoriesView.jsx
+|   |           CoverageSettingsView.jsx
+|   |           DashboardView.jsx
+|   |           DeliveryStaffModal.jsx
+|   |           DeliveryStaffView.jsx
+|   |           DeliveryUsersView.jsx
+|   |           OrderDetailView.jsx
+|   |           OrdersListView.jsx
+|   |           ProductFormView.jsx
+|   |           ProductsListView.jsx
+|   |           
+|   +---auth
+|   |       LoginView.jsx
+|   |       UpdatePasswordView.jsx
+|   |       
+|   +---cart
+|   |       CartDrawer.jsx
+|   |       
+|   +---catalog
+|   |   |   CatalogView.jsx
+|   |   |   ProductDetailView.jsx
+|   |   |   
+|   |   +---components
+|   |   |       FilterSidebar.jsx
+|   |   |       ProductCard.jsx
+|   |   |       SizeMatcherModal.jsx
+|   |   |       VariantSelector.jsx
+|   |   |       
+|   |   +---data
+|   |   |       mockCatalog.js
+|   |   |       
+|   |   +---hooks
+|   |   |       useCatalog.js
+|   |   |       
+|   |   +---services
+|   |   |       sizeMatcherService.js
+|   |   |       
+|   |   \---utils
+|   |           sizeCalculator.js
+|   |           
+|   +---checkout
+|   |   |   CheckoutView.jsx
+|   |   |   OrderConfirmationView.jsx
+|   |   |   
+|   |   +---data
+|   |   |       mockDeliveryZones.js
+|   |   |       
+|   |   \---services
+|   |           culqiService.js
+|   |           
+|   +---delivery
+|   |       DeliveryDashboard.jsx
+|   |       deliveryStatus.js
+|   |       useDeliveryOrders.js
+|   |       
+|   +---dev
+|   |       DesignSystemShowcase.jsx
+|   |       
+|   +---home
+|   |       HomeView.jsx
+|   |       
+|   +---profile
+|   |   \---components
+|   |           AddressesTab.jsx
+|   |           SizePreferencesTab.jsx
+|   |           
+|   \---tracking
+|           OrderTrackingView.jsx
+|           
++---routes
+|       ProtectedRoute.jsx
+|       
++---services
+|   |   supabase.jsx
+|   |   
+|   +---api
+|   |       catalogService.js
+|   |       checkoutService.js
+|   |       decolectaService.js
+|   |       dniService.js
+|   |       
+|   \---payment
+|           culqiService.js
+|           
+\---utils
+        geoUtils.js
+        pdfReceiptGenerator.js
+        

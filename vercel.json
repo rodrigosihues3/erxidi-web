@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api-decolecta/:path*",
+      "destination": "https://api.decolecta.com/v1/:path*"
+    },
+    {
+      "source": "/((?!api-decolecta/|assets/|favicon\\.svg|icons\\.svg|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
