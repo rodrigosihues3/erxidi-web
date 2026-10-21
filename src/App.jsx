@@ -14,9 +14,9 @@ import { CartProvider, useCart } from "./context/CartContext";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import DesignSystemShowcase from "./features/dev/DesignSystemShowcase";
 import LoginView from "./features/auth/LoginView";
-import LoginView from "./features/auth/LoginView";
 import MainLayout from "./components/layout/MainLayout";
 import Button from "./components/ui/Button";
+import { DeliveryAvailabilityProvider } from "./features/delivery/DeliveryAvailabilityContext";
 // Admin
 import AdminLayout from "./features/admin/components/AdminLayout";
 import AdminProtectedRoute from "./features/admin/components/ProtectedRoute";
@@ -146,6 +146,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <CartProvider>
+          <DeliveryAvailabilityProvider>
 <Routes>
   {/* Layout Global con Navbar y Footer */}
   <Route element={<MainLayout />}>
@@ -242,6 +243,7 @@ export default function App() {
             {/* Fallback Global: Redirección inmediata al Home ante cualquier ruta inexistente */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+           </DeliveryAvailabilityProvider>
         </CartProvider>
       </AuthProvider>
     </BrowserRouter>

@@ -19,6 +19,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
 import { supabase } from "../../services/supabase";
 import Button from "../ui/Button";
+import UserMenu from "./UserMenu";
 
 export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
   const { user, profile, role, isDelivery: authIsDelivery, signOut } = useAuth();
@@ -162,24 +163,8 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="w-7 h-7 rounded-full bg-amber-500/20 text-amber-800 flex items-center justify-center font-bold text-xs shrink-0">
-                {userInitial}
-              </span>
-              <span className="text-xs font-semibold text-brand-primary hidden sm:inline truncate max-w-[150px]">
-                {displayName}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-button text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors cursor-pointer"
-              title="Cerrar sesión de repartidor"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Cerrar sesión</span>
-            </button>
+                    <div className="shrink-0">
+            <UserMenu />
           </div>
         </div>
       </header>

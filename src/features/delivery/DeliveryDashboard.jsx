@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Truck,
   Package,
@@ -26,6 +26,7 @@ import {
 } from "../../components/ui/Card";
 import { useDeliveryOrders } from "./useDeliveryOrders";
 import { STATUS_CONFIG, NEXT_ACTIONS, CASH_METHODS } from "./deliveryStatus";
+import { useDeliveryAvailability } from "./DeliveryAvailabilityContext";
 
 // Cada filtro agrupa uno o más estados. "activos" es el que se ve al abrir:
 // los entregados quedan ocultos hasta que el repartidor los pida.
@@ -114,13 +115,18 @@ const mapsUrl =
           </Badge>
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-brand-secondary">
-          <span className="flex items-center gap-1 min-w-0">
-            <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">{addressText ?? "Sin dirección"}</span>
+        <div className="mt-3 space-y-2 text-xs text-brand-secondary">
+          <span className="flex items-start gap-1 min-w-0">
+            <MapPin className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            <span className="break-words line-clamp-2">
+              {addressText ?? "Sin dirección"}
+            </span>
           </span>
-          <span className="flex items-center gap-3 flex-shrink-0">
-            <span>{order.total_items} {order.total_items === 1 ? "artículo" : "artículos"}</span>
+          <span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <span>
+              {order.total_items}{" "}
+              {order.total_items === 1 ? "artículo" : "artículos"}
+            </span>
             <span className="font-semibold text-brand-primary">
               {soles(order.total_amount)}
             </span>
@@ -197,13 +203,13 @@ const mapsUrl =
             {phone && (
               <a
                 href={`tel:${phone}`}
-                className="inline-flex items-center gap-1.5 text-xs text-accent font-semibold"
+                className="inline-flex flex-wrap items-center gap-1.5 text-xs text-accent font-semibold break-words"
               >
                 <Phone className="w-3.5 h-3.5" />
                 {address?.receiver_name ?? customerName} · {phone}
               </a>
             )}
-                        {mapsUrl && (
+                        {mapsUrl && !["entregado", "cancelado"].includes(order.status) && (
   <a
     href={mapsUrl}
     target="_blank"
@@ -214,7 +220,11 @@ const mapsUrl =
     Navegar
   </a>
 )}
-            <OrderMap destination={destination} />
+                        {order.status !== "entregado" && (
+  <div className="w-full max-w-full overflow-hidden rounded-button">
+    <OrderMap destination={destination} />
+  </div>
+)}
           </div>
 
           {/* Cobro */}
@@ -276,6 +286,19 @@ export default function DeliveryDashboard({ useMock = false }) {
 
   const [filter, setFilter] = useState("activos");
   const [openId, setOpenId] = useState(null);
+    const { available, setActiveRoutes } = useDeliveryAvailability();
+
+  // Rutas iniciadas = pedidos en camino o cerca del cliente
+  const activeRoutes = orders.filter((o) =>
+    ["en_camino", "cerca"].includes(o.status),
+  ).length;
+
+  useEffect(() => {
+    setActiveRoutes(activeRoutes);
+  }, [activeRoutes, setActiveRoutes]);
+
+  // Al salir del módulo (por ejemplo, cerrar sesión) se reinicia el conteo
+  useEffect(() => () => setActiveRoutes(0), [setActiveRoutes]);
 
   // Contadores calculados desde los pedidos (no se guardan en la BD)
   const countOf = (...statuses) =>
@@ -287,14 +310,28 @@ export default function DeliveryDashboard({ useMock = false }) {
   );
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 max-w-3xl w-full mx-auto overflow-x-hidden">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-primary">
             Hola{repartidorName ? `, ${repartidorName}` : ""}
           </h1>
-          <p className="text-sm text-brand-secondary">
+                    <p className="text-sm text-brand-secondary">
             Aquí tienes tus pedidos de hoy.
+          </p>
+          <p
+            className={`mt-2 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-badge border ${
+              available
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "bg-rose-50 text-rose-700 border-rose-200"
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                available ? "bg-emerald-500" : "bg-rose-500"
+              }`}
+            />
+            Tu estado es: {available ? "Disponible" : "No disponible"}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
