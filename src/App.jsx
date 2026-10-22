@@ -17,6 +17,7 @@ import LoginView from "./features/auth/LoginView";
 import MainLayout from "./components/layout/MainLayout";
 import Button from "./components/ui/Button";
 import { DeliveryAvailabilityProvider } from "./features/delivery/DeliveryAvailabilityContext";
+import DeliveryProfileView from "./features/delivery/views/DeliveryProfileView";
 // Admin
 import AdminLayout from "./features/admin/components/AdminLayout";
 import AdminProtectedRoute from "./features/admin/components/ProtectedRoute";
@@ -203,6 +204,14 @@ export default function App() {
     element={
       <DeliveryOnlyRoute>
         <DeliveryDashboard />
+      </DeliveryOnlyRoute>
+    }
+  />
+  <Route
+    path="/reparto/perfil"
+    element={
+      <DeliveryOnlyRoute>
+        <DeliveryProfileView />
       </DeliveryOnlyRoute>
     }
   />

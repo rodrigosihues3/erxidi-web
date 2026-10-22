@@ -286,16 +286,17 @@ export default function DeliveryDashboard({ useMock = false }) {
 
   const [filter, setFilter] = useState("activos");
   const [openId, setOpenId] = useState(null);
-    const { available, setActiveRoutes } = useDeliveryAvailability();
+      const { setActiveRoutes } = useDeliveryAvailability();
 
   // Rutas iniciadas = pedidos en camino o cerca del cliente
   const activeRoutes = orders.filter((o) =>
     ["en_camino", "cerca"].includes(o.status),
   ).length;
 
+    // Espera a que carguen los pedidos para no marcar "disponible" por error
   useEffect(() => {
-    setActiveRoutes(activeRoutes);
-  }, [activeRoutes, setActiveRoutes]);
+    if (!loading) setActiveRoutes(activeRoutes);
+  }, [loading, activeRoutes, setActiveRoutes]);
 
   // Al salir del módulo (por ejemplo, cerrar sesión) se reinicia el conteo
   useEffect(() => () => setActiveRoutes(0), [setActiveRoutes]);
@@ -310,7 +311,7 @@ export default function DeliveryDashboard({ useMock = false }) {
   );
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-3xl w-full mx-auto overflow-x-hidden">
+    <div className="p-4 w-full overflow-x-hidden">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-primary">
@@ -319,20 +320,7 @@ export default function DeliveryDashboard({ useMock = false }) {
                     <p className="text-sm text-brand-secondary">
             Aquí tienes tus pedidos de hoy.
           </p>
-          <p
-            className={`mt-2 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-badge border ${
-              available
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-rose-50 text-rose-700 border-rose-200"
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                available ? "bg-emerald-500" : "bg-rose-500"
-              }`}
-            />
-            Tu estado es: {available ? "Disponible" : "No disponible"}
-          </p>
+          
         </div>
         <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
           <RefreshCw className="w-3.5 h-3.5 mr-1.5" />

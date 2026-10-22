@@ -1,4 +1,14 @@
-import { Truck, Package, CheckCircle2, MapPin } from "lucide-react";
+import {
+  Truck,
+  Package,
+  CheckCircle2,
+  MapPin,
+  AlertTriangle,
+} from "lucide-react";
+
+// Estados nuevos de la Fase 0
+export const POOL_STATUS = "por_asignar_repartidor"; // en la bolsa, sin repartidor
+export const INCIDENT_STATUS = "incidencia_transporte"; // no se pudo entregar
 
 // La BD acepta cada estado en inglés y en español (orders_status_check).
 // Aquí se unifican a un solo nombre para no repetir lógica en la pantalla.
@@ -11,10 +21,15 @@ export const STATUS_ALIASES = {
   cerca: "cerca",
   delivered: "entregado",
   entregado: "entregado",
+  [POOL_STATUS]: POOL_STATUS,
+  [INCIDENT_STATUS]: INCIDENT_STATUS,
 };
 
-// Estados de BD que el repartidor puede ver (el resto aún no está listo o fue cancelado)
-export const VISIBLE_DB_STATUSES = Object.keys(STATUS_ALIASES);
+// Estados que el repartidor ve en "Mis asignados". La bolsa y las incidencias
+// quedan fuera: un pedido en incidencia ya no cuenta para su cupo.
+export const VISIBLE_DB_STATUSES = Object.keys(STATUS_ALIASES).filter(
+  (s) => s !== POOL_STATUS && s !== INCIDENT_STATUS,
+);
 
 // Recojo en tienda: no lo reparte nadie
 export const PICKUP_TYPES = ["recojo", "pickup"];
@@ -30,6 +45,12 @@ export const STATUS_CONFIG = {
   en_camino: { label: "En camino", variant: "warning", icon: Truck },
   cerca: { label: "Cerca", variant: "warning", icon: MapPin },
   entregado: { label: "Entregado", variant: "success", icon: CheckCircle2 },
+  [POOL_STATUS]: { label: "En bolsa", variant: "neutral", icon: Package },
+  [INCIDENT_STATUS]: {
+    label: "Incidencia",
+    variant: "neutral",
+    icon: AlertTriangle,
+  },
 };
 
 // Botones disponibles según el estado actual. `to` es el valor que se guarda en BD.
