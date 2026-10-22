@@ -300,15 +300,6 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                       </div>
                     </button>
                   ))}
-
-                  <button
-                    type="button"
-                    onClick={handleSearchSubmit}
-                    className="w-full px-3.5 py-2.5 bg-surface-subtle/70 hover:bg-surface-subtle text-xs font-semibold text-accent hover:text-accent-hover flex items-center justify-center gap-1.5 transition-colors border-t border-border"
-                  >
-                    <span>Ver todos los resultados en el catálogo</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               ) : !searching ? (
                 <div className="p-4 text-center">

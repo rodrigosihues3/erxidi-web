@@ -3,9 +3,11 @@ import { supabase } from "../../../services/supabase";
 export const ORDER_STATUS = {
   RECEIVED: "received",
   PREPARING: "en_preparacion",
+  READY_FOR_DELIVERY: "por_asignar_repartidor",
   DISPATCHED: "en_camino",
   DELIVERED: "entregado",
   CANCELLED: "cancelado",
+  INCIDENT: "incidencia_transporte",
 };
 
 export const ORDER_STATUS_LABELS = {
@@ -15,10 +17,12 @@ export const ORDER_STATUS_LABELS = {
   pagado: "Pagado",
   preparing: "En preparación",
   en_preparacion: "En preparación",
+  por_asignar_repartidor: "Por asignar repartidor",
   dispatched: "En camino",
   en_camino: "En camino",
   nearby: "Cerca",
   cerca: "Cerca",
+  incidencia_transporte: "Incidencia en reparto",
   delivered: "Entregado",
   entregado: "Entregado",
   cancelled: "Cancelado",
@@ -30,6 +34,7 @@ const ORDER_SELECT = `
   delivery_address, scheduled_time_slot, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_gateway_tx_id, status, payment_status,
   invoice_type, invoice_data, created_at, updated_at, assigned_delivery_id,
+  incident_reason, incident_comment,
   profiles:customer_id (
     id, dni, first_name, paternal_surname, maternal_surname, email, phone
   )
@@ -105,8 +110,62 @@ export async function updateOrderStatus(orderId, status) {
 }
 
 /**
- * Obtiene la lista de usuarios con rol de repartidor
+ * Aprueba un pago manual verificado (Yape, Plin o Transferencia)
+ * y traslada la orden automáticamente a 'en_preparacion'.
  */
+export async function verifyOrderPayment(orderId) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      payment_status: "paid",
+      status: "en_preparacion",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("id, order_number, status, payment_status, updated_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Marca el empaque como listo y traslada la orden a la bolsa de repartidores ('por_asignar_repartidor').
+ */
+export async function markOrderReadyForDelivery(orderId) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "por_asignar_repartidor",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("id, order_number, status, updated_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Resuelve una incidencia de transporte (reencolar a la bolsa o devolver a preparación).
+ */
+export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_repartidor") {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: targetStatus,
+      assigned_delivery_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("id, order_number, status, assigned_delivery_id, updated_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function getDeliveryStaff() {
   const { data, error } = await supabase
     .from("profiles")
@@ -117,9 +176,6 @@ export async function getDeliveryStaff() {
   return data || [];
 }
 
-/**
- * Actualizar datos del repartidor en tabla profiles
- */
 export async function updateDeliveryStaff(id, payload) {
   const { data, error } = await supabase
     .from("profiles")
@@ -139,12 +195,11 @@ export async function updateDeliveryStaff(id, payload) {
   return data;
 }
 
-/**
- * Asigna un repartidor a una orden y actualiza su estado si está en 'received'
- */
 export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
-  const nextStatus = currentStatus === "received" ? "en_preparacion" : currentStatus;
-  
+  const nextStatus = currentStatus === "received" || currentStatus === "por_asignar_repartidor"
+    ? "en_camino"
+    : currentStatus;
+
   const { data, error } = await supabase
     .from("orders")
     .update({
@@ -189,15 +244,10 @@ export async function getDashboardOrders(filterRange = "30days") {
   }
 
   const { data, error } = await query;
-
   if (error) throw error;
   return data ?? [];
 }
 
-/**
- * Consulta de pedidos para la Cola de Despacho Inmediato:
- * Filtra únicamente pedidos operativos en estado 'received' o 'en_preparacion'.
- */
 export async function getImmediateDispatchOrders() {
   const { data, error } = await supabase
     .from("orders")
@@ -206,17 +256,13 @@ export async function getImmediateDispatchOrders() {
       payment_status, created_at, customer_name, customer_email,
       customer_phone, delivery_address, scheduled_time_slot
     `)
-    .in("status", ["received", "en_preparacion"])
+    .in("status", ["received", "en_preparacion", "por_asignar_repartidor"])
     .order("created_at", { ascending: false });
 
   if (error) throw error;
   return data ?? [];
 }
 
-/**
- * Calcula el total de ventas sumando total_amount sobre todos los pedidos
- * donde status !== 'cancelado' y status !== 'cancelled' y payment_status !== 'failed'
- */
 export function calculateDashboardSales(orders = []) {
   return orders
     .filter(
@@ -228,9 +274,6 @@ export function calculateDashboardSales(orders = []) {
     .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
 }
 
-/**
- * Consulta de ventas totales acumuladas en Supabase filtradas por fecha_inicio
- */
 export async function getDashboardTotalSales(sinceDate) {
   let query = supabase
     .from("orders")

@@ -28,9 +28,8 @@ import {
   Landmark,
   UserCheck,
   Trash2,
-  Shield,
-  ShieldOff,
   ShieldCheck,
+  Timer,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -39,7 +38,11 @@ import Badge from "../../components/ui/Badge";
 import Input from "../../components/ui/Input";
 import LocationPickerMap from "../../components/ui/LocationPickerMap";
 import { fetchDni, fetchRuc } from "../../services/api/decolectaService";
-import { createOrder } from "../../services/api/checkoutService";
+import {
+  createOrder,
+  reserveStock,
+  verifyPreflight,
+} from "../../services/api/checkoutService";
 import { supabase } from "../../services/supabase";
 import {
   initCulqi,
@@ -52,34 +55,15 @@ import {
   defaultDeliverySlots,
   pickupStoreInfo,
 } from "./data/mockDeliveryZones";
-import { getStoreDeliverySettings } from "../admin/services/adminSettings.service";
+import {
+  getAllStoreSettings,
+  getStoreDeliverySettings,
+} from "../admin/services/adminSettings.service";
 import {
   isPointInPolygon,
   calculateDistanceKm,
-  calculateDeliveryFee,
 } from "../../utils/geoUtils";
 import { triggerOrderConfirmationEmail } from "../../services/api/orderEmailService";
-
-const BANK_ACCOUNTS = [
-  {
-    bank: "BCP ( Soles )",
-    account: "191-98451234-0-45",
-    cci: "002-191009845123404591",
-    holder: "ERXIDI CONFECCIONES S.A.C.",
-  },
-  {
-    bank: "Interbank ( Soles )",
-    account: "200-3004589120",
-    cci: "003-20000300458912034",
-    holder: "ERXIDI CONFECCIONES S.A.C.",
-  },
-  {
-    bank: "BBVA ( Soles )",
-    account: "0011-0117-0100045891",
-    cci: "011-117-000100045891-95",
-    holder: "ERXIDI CONFECCIONES S.A.C.",
-  },
-];
 
 export default function CheckoutView() {
   const navigate = useNavigate();
@@ -90,8 +74,61 @@ export default function CheckoutView() {
   const [completedSteps, setCompletedSteps] = useState({ 1: false, 2: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isValidatingPreflight, setIsValidatingPreflight] = useState(false);
+  const [preflightError, setPreflightError] = useState("");
   const [copiedAccount, setCopiedAccount] = useState("");
   const createdOrderRef = useRef(null);
+
+  // Reserva de Stock con TTL (10 minutos)
+  const [reservationToken, setReservationToken] = useState(null);
+  const [reservationTimeLeft, setReservationTimeLeft] = useState(600);
+
+  // Cuentas y ajustes dinámicos desde Base de Datos
+  const [dynamicSettings, setDynamicSettings] = useState({
+    identity: {},
+    paymentMethods: { bank_accounts: [], digital_wallets: {} },
+    emergencyFlags: {},
+    businessHours: {},
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    getAllStoreSettings()
+      .then((res) => {
+        if (isMounted) setDynamicSettings(res);
+      })
+      .catch((err) => console.error("Error al cargar ajustes maestros:", err));
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Temporizador de vigencia de reserva (Paso 3)
+  useEffect(() => {
+    if (currentStep !== 3 || !reservationToken) return;
+
+    const timer = setInterval(() => {
+      setReservationTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setPreflightError(
+            "El tiempo de reserva de tus prendas (10 min) ha expirado. Por favor, verifica nuevamente tu carrito."
+          );
+          setCurrentStep(2);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [currentStep, reservationToken]);
+
+  const formatTimer = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
 
   // -------------------------------------------------------------
   // PASO 1: Identificación y Contacto
@@ -153,14 +190,12 @@ export default function CheckoutView() {
         setLastName(
           [res.firstLastName || "", res.secondLastName || ""].join(" ").trim()
         );
-        // Bloqueo inmutable cuando RENIEC encuentra el DNI
         setIsNameLocked(true);
         setDniFeedback({
           type: "success",
           message: "Identidad verificada exitosamente en RENIEC.",
         });
       } else {
-        // Solo si RENIEC no lo encuentra se habilita la edición manual
         setIsNameLocked(false);
         setDniFeedback({
           type: "info",
@@ -191,7 +226,6 @@ export default function CheckoutView() {
     }
   };
 
-  // Botón de basurero: borra el DNI, limpia nombres autocompletados y desbloquea edición
   const handleClearDni = () => {
     setDni("");
     setDniFeedback(null);
@@ -224,7 +258,7 @@ export default function CheckoutView() {
   };
 
   // -------------------------------------------------------------
-  // PASO 2: Método de Entrega, Horarios y Direcciones (Intacto)
+  // PASO 2: Método de Entrega, SLA Dinámico y Direcciones
   // -------------------------------------------------------------
   const [deliveryType, setDeliveryType] = useState("scheduled");
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
@@ -249,11 +283,6 @@ export default function CheckoutView() {
 
   const [coveragePolygon, setCoveragePolygon] = useState(null);
   const [storeLocationData, setStoreLocationData] = useState(null);
-  const [deliveryPricing, setDeliveryPricing] = useState({
-    baseFee: 7.0,
-    baseKm: 3.0,
-    pricePerExtraKm: 1.5,
-  });
 
   useEffect(() => {
     let isMounted = true;
@@ -265,13 +294,6 @@ export default function CheckoutView() {
         }
         if (settings.storeLocation) {
           setStoreLocationData(settings.storeLocation);
-        }
-        if (settings.pricing) {
-          setDeliveryPricing({
-            baseFee: Number(settings.pricing.baseFee ?? 7.0),
-            baseKm: Number(settings.pricing.baseKm ?? 3.0),
-            pricePerExtraKm: Number(settings.pricing.pricePerExtraKm ?? 1.5),
-          });
         }
       })
       .catch(() => { });
@@ -355,9 +377,7 @@ export default function CheckoutView() {
             defaultAddr.latitude != null ? Number(defaultAddr.latitude) : null
           );
           setDeliveryLongitude(
-            defaultAddr.longitude != null
-              ? Number(defaultAddr.longitude)
-              : null
+            defaultAddr.longitude != null ? Number(defaultAddr.longitude) : null
           );
         } else {
           setSavedAddresses([]);
@@ -402,6 +422,62 @@ export default function CheckoutView() {
       deliveryZones[0],
     [deliveryZones, selectedZoneId]
   );
+
+  const deliveryDistanceKm = useMemo(() => {
+    if (
+      !activeCoordinates ||
+      !storeLocationData?.lat ||
+      !storeLocationData?.lng
+    ) {
+      return null;
+    }
+    return calculateDistanceKm(
+      [storeLocationData.lat, storeLocationData.lng],
+      activeCoordinates
+    );
+  }, [activeCoordinates, storeLocationData]);
+
+  // ESQUEMA TARIFARIO ACORDADO
+  const deliveryCost = useMemo(() => {
+    if (deliveryType === "pickup") return 0;
+    if (deliveryType === "scheduled") return 5.0; // S/ 5.00 plano para programado
+
+    // Express: S/ 8.00 base hasta 3 km + S/ 1.00 por cada km adicional
+    const km = deliveryDistanceKm ?? 2.0;
+    const baseFee = 8.0;
+    if (km <= 3.0) return baseFee;
+    const extraKm = Math.ceil(km - 3.0);
+    return Number((baseFee + extraKm * 1.0).toFixed(2));
+  }, [deliveryType, deliveryDistanceKm]);
+
+  const totalAmount = subtotal + deliveryCost;
+
+  // SLA DINÁMICO: 15 min alistamiento + Factor de tortuosidad urbano (1.35) a 20 km/h
+  const dynamicSla = useMemo(() => {
+    const km = deliveryDistanceKm ?? 3.0;
+    const roadDistance = km * 1.35;
+    const transitMinutes = Math.round((roadDistance / 20) * 60);
+    const totalMinutes = 15 + transitMinutes;
+    const minRange = Math.max(35, totalMinutes - 10);
+    const maxRange = totalMinutes + 15;
+
+    const now = new Date();
+    const start = new Date(now.getTime() + minRange * 60000);
+    const end = new Date(now.getTime() + maxRange * 60000);
+
+    const formatH = (d) =>
+      String(d.getHours()).padStart(2, "0") +
+      ":" +
+      String(d.getMinutes()).padStart(2, "0");
+
+    return {
+      totalEstimated: maxRange,
+      label: `Llegada estimada hoy entre las ${formatH(start)} y ${formatH(
+        end
+      )} hrs (${minRange}-${maxRange} min)`,
+      isHighDemand: maxRange > 90,
+    };
+  }, [deliveryDistanceKm]);
 
   const handleMapLocationChange = async ({ lat, lng }) => {
     setDeliveryLatitude(lat);
@@ -452,7 +528,7 @@ export default function CheckoutView() {
         }
       }
     } catch {
-      // Fallo silencioso
+      // Silencioso
     } finally {
       setIsGeocoding(false);
     }
@@ -476,61 +552,11 @@ export default function CheckoutView() {
         setDeliveryLongitude(lon);
       }
     } catch {
-      // Fallo silencioso
+      // Silencioso
     } finally {
       setIsGeocoding(false);
     }
   };
-
-  const expressTimeWindow = useMemo(() => {
-    const now = new Date();
-    const start = new Date(now.getTime() + 45 * 60000);
-    const end = new Date(now.getTime() + 90 * 60000);
-    const formatH = (d) =>
-      String(d.getHours()).padStart(2, "0") +
-      ":" +
-      String(d.getMinutes()).padStart(2, "0");
-    return (
-      "Tu pedido llegará hoy entre las " +
-      formatH(start) +
-      " y " +
-      formatH(end) +
-      " hrs"
-    );
-  }, []);
-
-  const deliveryDistanceKm = useMemo(() => {
-    if (
-      !activeCoordinates ||
-      !storeLocationData?.lat ||
-      !storeLocationData?.lng
-    ) {
-      return null;
-    }
-    return calculateDistanceKm(
-      [storeLocationData.lat, storeLocationData.lng],
-      activeCoordinates
-    );
-  }, [activeCoordinates, storeLocationData]);
-
-  const deliveryCost = useMemo(() => {
-    if (deliveryType === "pickup") return 0;
-
-    let baseShippingFee = selectedZone?.delivery_cost || 10.0;
-    if (deliveryDistanceKm !== null) {
-      baseShippingFee = calculateDeliveryFee(
-        deliveryDistanceKm,
-        deliveryPricing
-      );
-    }
-
-    if (deliveryType === "express") {
-      return Number((baseShippingFee + 5.0).toFixed(2));
-    }
-    return baseShippingFee;
-  }, [deliveryType, selectedZone, deliveryDistanceKm, deliveryPricing]);
-
-  const totalAmount = subtotal + deliveryCost;
 
   const isStep2Valid = useMemo(() => {
     if (deliveryType === "pickup") return true;
@@ -548,11 +574,50 @@ export default function CheckoutView() {
     deliveryReference,
   ]);
 
-  const handleNextFromStep2 = (e) => {
+  // TRANSICIÓN AL PASO 3: RESERVA ATÓMICA Y PRE-FLIGHT CHECK
+  const handleNextFromStep2 = async (e) => {
     if (e) e.preventDefault();
-    if (isStep2Valid) {
+    if (!isStep2Valid || isValidatingPreflight) return;
+
+    setIsValidatingPreflight(true);
+    setPreflightError("");
+
+    try {
+      // 1. Reserva atómica en Supabase (TTL 10 min)
+      const reserveResult = await reserveStock(items, user?.id || null);
+      if (!reserveResult?.success || !reserveResult?.reservation_token) {
+        throw new Error(
+          reserveResult?.message ||
+          "Inventario insuficiente para una o más prendas seleccionadas."
+        );
+      }
+
+      const token = reserveResult.reservation_token;
+      setReservationToken(token);
+      setReservationTimeLeft(600);
+
+      // 2. Pre-Flight Check (Horarios en Lima, Cierre de emergencia y Flota)
+      const preflightResult = await verifyPreflight({
+        reservationToken: token,
+        deliveryType,
+        totalItems: totalUnits,
+      });
+
+      if (!preflightResult?.success) {
+        throw new Error(
+          preflightResult?.message ||
+          "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
+        );
+      }
+
       setCompletedSteps((prev) => ({ ...prev, 2: true }));
       setCurrentStep(3);
+    } catch (err) {
+      setPreflightError(
+        err.message || "Error al verificar las condiciones del pedido."
+      );
+    } finally {
+      setIsValidatingPreflight(false);
     }
   };
 
@@ -584,7 +649,6 @@ export default function CheckoutView() {
     [dni]
   );
 
-  // Búsqueda manual de DNI para Boleta en Paso 3 (Bloqueo estricto si RENIEC lo encuentra)
   const triggerBoletaDniLookup = async (dniToQuery = boletaDni) => {
     const clean = String(dniToQuery || "")
       .replace(/\D/g, "")
@@ -752,6 +816,7 @@ export default function CheckoutView() {
     savedAddresses,
     deliveryLatitude,
     deliveryLongitude,
+    reservationToken,
   };
 
   const maybeSaveNewAddress = async () => {
@@ -918,6 +983,7 @@ export default function CheckoutView() {
       invoice_type: ctx.receiptType,
       invoice_data: invoiceData,
       items: ctx.items,
+      reservationToken: ctx.reservationToken,
     };
   };
 
@@ -1578,7 +1644,7 @@ export default function CheckoutView() {
           )}
 
           {/* ========================================================= */}
-          {/* PASO 2: Método de Entrega y Horarios (Intacto) */}
+          {/* PASO 2: Método de Entrega y Horarios */}
           {/* ========================================================= */}
           {currentStep === 2 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
@@ -1588,9 +1654,21 @@ export default function CheckoutView() {
                 </h2>
                 <p className="text-xs text-brand-secondary mt-0.5">
                   Elige la modalidad de entrega y verifica tu ubicación dentro
-                  del polígono de cobertura.
+                  del polígono delimitado.
                 </p>
               </div>
+
+              {preflightError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-bold">
+                      Inconveniente para continuar:
+                    </strong>
+                    <span>{preflightError}</span>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-6">
                 {deliveryType !== "pickup" && isOutOfCoverage && (
@@ -1670,7 +1748,7 @@ export default function CheckoutView() {
                         Envío Express
                       </span>
                       <span className="block text-[11px] text-brand-secondary mt-1 leading-snug">
-                        Entrega prioritaria en 45 a 90 min
+                        Prioritario (S/ 8.00 base)
                       </span>
                     </div>
                   </label>
@@ -1702,7 +1780,7 @@ export default function CheckoutView() {
                         Envío Programado
                       </span>
                       <span className="block text-[11px] text-brand-secondary mt-1 leading-snug">
-                        Elige tu ventana horaria preferida
+                        Día siguiente (S/ 5.00 plano)
                       </span>
                     </div>
                   </label>
@@ -1750,10 +1828,15 @@ export default function CheckoutView() {
                 {deliveryType !== "pickup" && (
                   <div className="space-y-5 pt-2 border-t border-border">
                     {deliveryType === "express" && (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
+                      <div
+                        className={`p-3 rounded text-xs flex items-center gap-2 ${dynamicSla.isHighDemand
+                          ? "bg-amber-50 border border-amber-300 text-amber-900"
+                          : "bg-emerald-50 border border-emerald-200 text-emerald-900"
+                          }`}
+                      >
                         <Zap className="w-4 h-4 text-accent shrink-0" />
                         <span className="font-semibold">
-                          {expressTimeWindow}
+                          {dynamicSla.label}
                         </span>
                       </div>
                     )}
@@ -1868,10 +1951,7 @@ export default function CheckoutView() {
                                     <p className="text-[11px] text-brand-secondary mt-0.5">
                                       {zoneInfo.name} &bull; Flete:{" "}
                                       <span className="font-mono font-medium text-brand-primary">
-                                        S/{" "}
-                                        {isSelected
-                                          ? deliveryCost.toFixed(2)
-                                          : Number(zoneInfo.cost).toFixed(2)}
+                                        S/ {deliveryCost.toFixed(2)}
                                       </span>
                                     </p>
                                     {addr.reference && (
@@ -2042,10 +2122,13 @@ export default function CheckoutView() {
                       type="button"
                       variant="primary"
                       size="md"
-                      disabled={!isStep2Valid}
+                      disabled={!isStep2Valid || isValidatingPreflight}
+                      isLoading={isValidatingPreflight}
                       onClick={handleNextFromStep2}
                     >
-                      Continuar al Pago
+                      {isValidatingPreflight
+                        ? "Verificando disponibilidad..."
+                        : "Continuar al Pago"}
                       <ChevronRight className="w-4 h-4 ml-1.5" />
                     </Button>
                   </div>
@@ -2055,18 +2138,29 @@ export default function CheckoutView() {
           )}
 
           {/* ========================================================= */}
-          {/* PASO 3: Pago y Comprobante */}
+          {/* PASO 3: Pago y Comprobante (Con Countdown de Reserva) */}
           {/* ========================================================= */}
           {currentStep === 3 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
-              <div className="border-b border-border pb-3">
-                <h2 className="text-base font-bold text-brand-primary">
-                  3. Pago y Comprobante
-                </h2>
-                <p className="text-xs text-brand-secondary mt-0.5">
-                  Selecciona tu modalidad de pago y el tipo de comprobante
-                  electrónico.
-                </p>
+              <div className="border-b border-border pb-3 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-brand-primary">
+                    3. Pago y Comprobante
+                  </h2>
+                  <p className="text-xs text-brand-secondary mt-0.5">
+                    Selecciona tu modalidad de pago y el tipo de comprobante
+                    electrónico.
+                  </p>
+                </div>
+
+                {reservationToken && (
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold shadow-xs">
+                    <Timer className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                    <span>
+                      Reserva activa: {formatTimer(reservationTimeLeft)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <form onSubmit={handleConfirmOrder} className="space-y-6">
@@ -2130,7 +2224,7 @@ export default function CheckoutView() {
                     })}
                   </div>
 
-                  {/* Nota de Venta */}
+                  {/* Mensaje de Nota de Venta */}
                   {receiptType === "nota_venta" && (
                     <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary">
                       Comprobante interno para control de pedido y seguimiento
@@ -2404,14 +2498,14 @@ export default function CheckoutView() {
                   )}
                 </div>
 
-                {/* Tarjetas de Método de Pago */}
+                {/* Métodos de Pago Dinámicos desde store_settings */}
                 <div className="space-y-3 pt-4 border-t border-border">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Método de Pago
                   </label>
 
                   <div className="space-y-3">
-                    {/* OPCIÓN 1: Yape / Plin / Transferencia Bancaria */}
+                    {/* Billeteras Digitales y Transferencias Dinámicas */}
                     <div
                       className={
                         "rounded-card border transition-all overflow-hidden " +
@@ -2438,14 +2532,12 @@ export default function CheckoutView() {
                           )}
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <span className="text-sm font-bold text-brand-primary">
-                              Yape / Plin o Transferencia Bancaria Directa
-                            </span>
-                          </div>
+                          <span className="text-sm font-bold text-brand-primary">
+                            Yape / Plin o Transferencia Bancaria Directa
+                          </span>
                           <p className="text-xs text-brand-secondary mt-1">
-                            Escanea nuestro QR o transfiere a nuestras cuentas
-                            corporativas BCP, Interbank o BBVA.
+                            Paga escaneando nuestro QR o mediante transferencia
+                            a nuestras cuentas oficiales autorizadas.
                           </p>
                         </div>
                       </button>
@@ -2459,10 +2551,14 @@ export default function CheckoutView() {
                               </div>
                               <div>
                                 <span className="block text-xs font-bold text-brand-primary">
-                                  Yape / Plin: 987 654 321
+                                  Yape / Plin:{" "}
+                                  {dynamicSettings.paymentMethods?.digital_wallets
+                                    ?.yape_number || "987 654 321"}
                                 </span>
                                 <span className="block text-[11px] text-brand-secondary">
-                                  Titular: ERXIDI CONFECCIONES S.A.C.
+                                  Titular:{" "}
+                                  {dynamicSettings.paymentMethods?.digital_wallets
+                                    ?.holder_name || "ERXIDI Oficial"}
                                 </span>
                               </div>
                               <div className="px-3 py-1 rounded-badge bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold">
@@ -2479,9 +2575,12 @@ export default function CheckoutView() {
                               </div>
 
                               <div className="space-y-2">
-                                {BANK_ACCOUNTS.map((b) => (
+                                {(
+                                  dynamicSettings.paymentMethods?.bank_accounts ||
+                                  []
+                                ).map((b, idx) => (
                                   <div
-                                    key={b.bank}
+                                    key={idx}
                                     className="p-2.5 bg-white border border-border rounded-button text-xs space-y-1"
                                   >
                                     <div className="flex items-center justify-between">
@@ -2491,7 +2590,10 @@ export default function CheckoutView() {
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          handleCopyAccount(b.account, b.bank)
+                                          handleCopyAccount(
+                                            b.account_number,
+                                            b.bank
+                                          )
                                         }
                                         className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
                                       >
@@ -2502,7 +2604,8 @@ export default function CheckoutView() {
                                       </button>
                                     </div>
                                     <p className="font-mono text-[11px] text-brand-primary">
-                                      Cuenta: <strong>{b.account}</strong>
+                                      Cuenta:{" "}
+                                      <strong>{b.account_number}</strong>
                                     </p>
                                     <p className="font-mono text-[10px] text-brand-muted">
                                       CCI: {b.cci}
@@ -2531,7 +2634,7 @@ export default function CheckoutView() {
                       )}
                     </div>
 
-                    {/* OPCIÓN 2: Pasarela Culqi */}
+                    {/* Pasarela Culqi */}
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("culqi_gateway")}
@@ -2561,7 +2664,8 @@ export default function CheckoutView() {
                               Tarjetas de Crédito/Débito o Yape
                             </span>
                             <Badge variant="success" className="text-[10px]">
-                              <ShieldCheck className="w-3 h-3" /> Pago seguro con Culqi
+                              <ShieldCheck className="w-3 h-3" /> Pago seguro
+                              con Culqi
                             </Badge>
                           </div>
                           <CreditCard className="w-4 h-4 text-accent" />
@@ -2573,7 +2677,7 @@ export default function CheckoutView() {
                       </div>
                     </button>
 
-                    {/* OPCIÓN 3: Pago Contra Entrega */}
+                    {/* Pago Contra Entrega */}
                     <button
                       type="button"
                       disabled={!isCashOnDeliveryAllowed}
@@ -2608,17 +2712,14 @@ export default function CheckoutView() {
 
                       <div className="flex-1">
                         <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-brand-primary">
-                              Pago Contra Entrega (Efectivo al recibir)
-                            </span>
-                            {!isCashOnDeliveryAllowed && (
-                              <Badge variant="warning" className="text-[10px]">
-                                Solo cuentas verificadas
-                              </Badge>
-                            )}
-                          </div>
-                          <Banknote className="w-4 h-4 text-accent" />
+                          <span className="text-sm font-bold text-brand-primary">
+                            Pago Contra Entrega (Efectivo al recibir)
+                          </span>
+                          {!isCashOnDeliveryAllowed && (
+                            <Badge variant="warning" className="text-[10px]">
+                              Solo cuentas verificadas
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-brand-secondary mt-1">
                           Paga al repartidor al recibir tu pedido en la puerta
@@ -2665,7 +2766,12 @@ export default function CheckoutView() {
                     type="submit"
                     variant="primary"
                     size="md"
-                    disabled={!isStep3Valid || isSubmitting || isProcessing}
+                    disabled={
+                      !isStep3Valid ||
+                      isSubmitting ||
+                      isProcessing ||
+                      reservationTimeLeft <= 0
+                    }
                     isLoading={isSubmitting || isProcessing}
                     className="bg-accent hover:bg-accent-hover text-white px-8"
                   >
