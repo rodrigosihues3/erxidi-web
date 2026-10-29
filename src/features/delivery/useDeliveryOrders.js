@@ -8,15 +8,17 @@ import {
   normalizeStatus,
 } from "./deliveryStatus";
 
+export const MAX_ITEMS_PER_TRIP = 30;
+
 // Misma forma que repartidor.json: pedido -> customer, shipping_address, items
 // Los nombres después de "!" son las llaves foráneas reales de la tabla orders.
 const ORDERS_SELECT = `
   id, order_number, status, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_status, created_at, updated_at,
   customer_name, customer_phone, delivery_address, scheduled_time_slot,
-  delivery_latitude, delivery_longitude,
+  delivery_latitude, delivery_longitude, incident_reason, incident_comment,
   items:order_items(
-    id, quantity, unit_price, subtotal,
+    id, quantity, unit_price, subtotal, variant_id,
     variant:product_variants(
       id, sku, color,
       sizes(name),
@@ -25,19 +27,32 @@ const ORDERS_SELECT = `
   )
 `;
 
+const POOL_ORDERS_SELECT = `
+  id, order_number, status, delivery_type, delivery_cost, subtotal,
+  total_amount, payment_method, payment_status, created_at, updated_at,
+  customer_name, customer_phone, delivery_address, scheduled_time_slot,
+  delivery_latitude, delivery_longitude,
+  order_items ( id, quantity, variant_id, product_variants ( products ( name ) ) )
+`;
+
 function prepare(row) {
+  const rawItems = row.items ?? row.order_items ?? [];
   return {
     ...row,
     status: normalizeStatus(row.status),
-    total_items: (row.items ?? []).reduce((n, i) => n + i.quantity, 0),
-    items: (row.items ?? []).map((it) => ({
-      ...it,
-      variant: {
-        ...it.variant,
-        product: it.variant?.products || { name: "Prenda" },
-        size: it.variant?.sizes || null,
-      },
-    })),
+    total_items: rawItems.reduce((n, i) => n + (Number(i.quantity) || 0), 0),
+    order_items: rawItems,
+    items: rawItems.map((it) => {
+      const v = it.variant ?? it.product_variants;
+      return {
+        ...it,
+        variant: {
+          ...v,
+          product: v?.products || { name: "Prenda" },
+          size: v?.sizes || null,
+        },
+      };
+    }),
   };
 }
 
@@ -45,6 +60,7 @@ function prepare(row) {
 export function useDeliveryOrders({ useMock = false } = {}) {
   const { user, profile } = useAuth();
   const [orders, setOrders] = useState([]);
+  const [poolOrders, setPoolOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
@@ -59,19 +75,31 @@ export function useDeliveryOrders({ useMock = false } = {}) {
     }
 
     setLoading(true);
-    const { data, error: queryError } = await supabase
-      .from("orders")
-      .select(ORDERS_SELECT)
-      .eq("assigned_delivery_id", user.id)
-      .in("status", VISIBLE_DB_STATUSES)
-      .not("delivery_type", "in", `(${PICKUP_TYPES.join(",")})`)
-      .order("created_at", { ascending: false });
+    const [assignedRes, poolRes] = await Promise.all([
+      supabase
+        .from("orders")
+        .select(ORDERS_SELECT)
+        .eq("assigned_delivery_id", user.id)
+        .in("status", VISIBLE_DB_STATUSES)
+        .not("delivery_type", "in", `(${PICKUP_TYPES.join(",")})`)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("orders")
+        .select(POOL_ORDERS_SELECT)
+        .eq("status", "por_asignar_repartidor")
+        .is("assigned_delivery_id", null)
+        .not("delivery_type", "in", `(${PICKUP_TYPES.join(",")})`)
+        .order("created_at", { ascending: false }),
+    ]);
 
+    const queryError = assignedRes.error || poolRes.error;
     if (queryError) {
       setError(queryError.message);
       setOrders([]);
+      setPoolOrders([]);
     } else {
-      setOrders((data ?? []).map(prepare));
+      setOrders((assignedRes.data ?? []).map(prepare));
+      setPoolOrders((poolRes.data ?? []).map(prepare));
     }
     setLoading(false);
   }, [user, useMock]);
@@ -79,6 +107,19 @@ export function useDeliveryOrders({ useMock = false } = {}) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Suma total de quantity de los pedidos activos asignados en ruta (en_camino y cerca)
+  const currentTripItemsCount = orders
+    .filter((o) => o.status === "en_camino" || o.status === "cerca")
+    .reduce(
+      (sum, o) =>
+        sum +
+        (o.order_items ?? o.items ?? []).reduce(
+          (acc, item) => acc + (Number(item.quantity) || 0),
+          0,
+        ),
+      0,
+    );
 
   // Cambia el estado de un pedido (iniciar ruta, estoy cerca, entregado)
   async function changeStatus(orderId, newStatus) {
@@ -143,14 +184,101 @@ export function useDeliveryOrders({ useMock = false } = {}) {
     return true;
   }
 
+  // Toma un pedido disponible de la bolsa respetando el límite de 30 prendas por viaje
+  async function claimOrder(orderId) {
+    setActionError(null);
+    const poolOrder =
+      poolOrders.find((o) => o.id === orderId) ??
+      orders.find((o) => o.id === orderId);
+
+    const orderItemsCount = (
+      poolOrder?.order_items ??
+      poolOrder?.items ??
+      []
+    ).reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+
+    if (currentTripItemsCount + orderItemsCount > MAX_ITEMS_PER_TRIP) {
+      const capacityError = `Capacidad de mochila excedida: Máximo 30 prendas por viaje (actual: ${currentTripItemsCount}, pedido: ${orderItemsCount})`;
+      setActionError(capacityError);
+      throw new Error(capacityError);
+    }
+
+    setUpdatingId(orderId);
+
+    if (!useMock) {
+      const { data, error: claimError } = await supabase
+        .from("orders")
+        .update({
+          assigned_delivery_id: user.id,
+          status: "en_camino",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", orderId)
+        .is("assigned_delivery_id", null)
+        .select("id");
+
+      if (claimError) {
+        setActionError(claimError.message);
+        setUpdatingId(null);
+        return false;
+      }
+
+      if (!data?.length) {
+        setActionError(
+          "Otro repartidor ya tomó este pedido. Actualizando bolsa de pedidos...",
+        );
+        setUpdatingId(null);
+        await load();
+        return false;
+      }
+    }
+
+    await load();
+    setUpdatingId(null);
+    return true;
+  }
+
+  // Reporta una incidencia en ruta y retira el pedido de entregas activas
+  async function reportIncident(orderId, { reason, comment }) {
+    setActionError(null);
+    setUpdatingId(orderId);
+
+    if (!useMock) {
+      const { error: incidentError } = await supabase
+        .from("orders")
+        .update({
+          status: "incidencia_transporte",
+          incident_reason: reason,
+          incident_comment: comment,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", orderId);
+
+      if (incidentError) {
+        setActionError(incidentError.message);
+        setUpdatingId(null);
+        return false;
+      }
+    }
+
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    setUpdatingId(null);
+    return true;
+  }
+
   return {
     repartidorName: profile?.first_name,
     orders,
+    poolOrders,
+    currentTripItemsCount,
+    MAX_ITEMS_PER_TRIP,
     loading,
     error,
     actionError,
     updatingId,
     reload: load,
     changeStatus,
+    claimOrder,
+    reportIncident,
   };
 }
