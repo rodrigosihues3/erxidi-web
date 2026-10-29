@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  Truck,
-  Package,
-  CheckCircle2,
-  ClipboardList,
   MapPin,
   Phone,
   Clock,
@@ -46,18 +42,16 @@ const fullName = (p) =>
         .join(" ")
     : "Cliente";
 
-function StatCard({ label, value, icon: Icon }) {
+// Contador compacto: número arriba y etiqueta debajo
+function StatCard({ label, value }) {
   return (
-    <Card className="flex items-center gap-3 !p-4">
-      <div className="w-10 h-10 rounded-button bg-surface-subtle flex items-center justify-center">
-        <Icon className="w-5 h-5 text-brand-secondary" />
-      </div>
-      <div>
-        <p className="text-2xl font-bold leading-none text-brand-primary">
-          {value}
-        </p>
-        <p className="text-xs text-brand-secondary mt-1">{label}</p>
-      </div>
+    <Card className="flex flex-col items-center justify-center text-center !px-1 !py-2">
+      <p className="text-lg font-bold font-mono leading-none text-brand-primary">
+        {value}
+      </p>
+      <p className="text-[10px] leading-tight text-brand-secondary mt-1">
+        {label}
+      </p>
     </Card>
   );
 }
@@ -77,22 +71,23 @@ function OrderCard({ order, isOpen, onToggle, onChangeStatus, isUpdating }) {
   const addressText =
     order.delivery_address ??
     (address ? `${address.street_address}, ${address.district}` : null);
-  // Google se confunde con textos como "(Ref: estadio nacional)", así que
-// la referencia se quita solo para la ruta (en pantalla se sigue viendo)
-const destination = addressText
-  ?.replace(/\(.*?\)/g, "")
-  .replace(/\s+-\s+/g, ", ")
-  .replace(/\s+/g, " ")
-  .trim();
 
-const mapsUrl =
-  order.delivery_latitude && order.delivery_longitude
-    ? `https://www.google.com/maps/dir/?api=1&destination=${order.delivery_latitude},${order.delivery_longitude}&travelmode=driving`
-    : destination
-      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-          `${destination}, Lima, Perú`,
-        )}&travelmode=driving`
-      : null;
+  // Google se confunde con textos como "(Ref: estadio nacional)", así que
+  // la referencia se quita solo para la ruta (en pantalla se sigue viendo)
+  const destination = addressText
+    ?.replace(/\(.*?\)/g, "")
+    .replace(/\s+-\s+/g, ", ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const mapsUrl =
+    order.delivery_latitude && order.delivery_longitude
+      ? `https://www.google.com/maps/dir/?api=1&destination=${order.delivery_latitude},${order.delivery_longitude}&travelmode=driving`
+      : destination
+        ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+            `${destination}, Lima, Perú`,
+          )}&travelmode=driving`
+        : null;
 
   return (
     <Card className="!p-0 overflow-hidden">
@@ -209,22 +204,22 @@ const mapsUrl =
                 {address?.receiver_name ?? customerName} · {phone}
               </a>
             )}
-                        {mapsUrl && !["entregado", "cancelado"].includes(order.status) && (
-  <a
-    href={mapsUrl}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="mt-2 inline-flex w-full items-center justify-center gap-2 h-10 rounded-button bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition-colors"
-  >
-    <Navigation className="w-4 h-4" />
-    Navegar
-  </a>
-)}
-                        {order.status !== "entregado" && (
-  <div className="w-full max-w-full overflow-hidden rounded-button">
-    <OrderMap destination={destination} />
-  </div>
-)}
+            {mapsUrl && !["entregado", "cancelado"].includes(order.status) && (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex w-full items-center justify-center gap-2 h-10 rounded-button bg-accent text-white text-sm font-semibold hover:bg-accent-hover transition-colors"
+              >
+                <Navigation className="w-4 h-4" />
+                Navegar
+              </a>
+            )}
+            {order.status !== "entregado" && (
+              <div className="w-full max-w-full overflow-hidden rounded-button">
+                <OrderMap destination={destination} />
+              </div>
+            )}
           </div>
 
           {/* Cobro */}
@@ -286,20 +281,17 @@ export default function DeliveryDashboard({ useMock = false }) {
 
   const [filter, setFilter] = useState("activos");
   const [openId, setOpenId] = useState(null);
-      const { setActiveRoutes } = useDeliveryAvailability();
+  const { setActiveRoutes } = useDeliveryAvailability();
 
   // Rutas iniciadas = pedidos en camino o cerca del cliente
   const activeRoutes = orders.filter((o) =>
     ["en_camino", "cerca"].includes(o.status),
   ).length;
 
-    // Espera a que carguen los pedidos para no marcar "disponible" por error
+  // Espera a que carguen los pedidos para no marcar "disponible" por error
   useEffect(() => {
     if (!loading) setActiveRoutes(activeRoutes);
   }, [loading, activeRoutes, setActiveRoutes]);
-
-  // Al salir del módulo (por ejemplo, cerrar sesión) se reinicia el conteo
-  useEffect(() => () => setActiveRoutes(0), [setActiveRoutes]);
 
   // Contadores calculados desde los pedidos (no se guardan en la BD)
   const countOf = (...statuses) =>
@@ -312,15 +304,14 @@ export default function DeliveryDashboard({ useMock = false }) {
 
   return (
     <div className="p-4 w-full overflow-x-hidden">
-      <header className="mb-6 flex items-start justify-between gap-3">
+      <header className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-primary">
             Hola{repartidorName ? `, ${repartidorName}` : ""}
           </h1>
-                    <p className="text-sm text-brand-secondary">
+          <p className="text-sm text-brand-secondary">
             Aquí tienes tus pedidos de hoy.
           </p>
-          
         </div>
         <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
           <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
@@ -328,27 +319,11 @@ export default function DeliveryDashboard({ useMock = false }) {
         </Button>
       </header>
 
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <StatCard
-          label="Total de pedidos"
-          value={orders.length}
-          icon={ClipboardList}
-        />
-        <StatCard
-          label="En camino"
-          value={countOf("en_camino", "cerca")}
-          icon={Truck}
-        />
-        <StatCard
-          label="Por entregar"
-          value={countOf("en_preparacion")}
-          icon={Package}
-        />
-        <StatCard
-          label="Entregados"
-          value={countOf("entregado")}
-          icon={CheckCircle2}
-        />
+      <section className="grid grid-cols-4 gap-2 mb-4">
+        <StatCard label="Total" value={orders.length} />
+        <StatCard label="En camino" value={countOf("en_camino", "cerca")} />
+        <StatCard label="Por entregar" value={countOf("en_preparacion")} />
+        <StatCard label="Entregados" value={countOf("entregado")} />
       </section>
 
       <Card>
