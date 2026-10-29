@@ -20,7 +20,7 @@ export const VISIBLE_DB_STATUSES = Object.keys(STATUS_ALIASES);
 export const PICKUP_TYPES = ["recojo", "pickup"];
 
 // Medios de pago en los que el repartidor cobra en mano
-export const CASH_METHODS = ["contraentrega", "efectivo"];
+export const CASH_METHODS = ["contraentrega", "efectivo", "cash_on_delivery"];
 
 export const normalizeStatus = (s) => STATUS_ALIASES[s] ?? s;
 

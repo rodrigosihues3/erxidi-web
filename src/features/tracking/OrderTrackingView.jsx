@@ -65,6 +65,8 @@ const STATUS_INDEX = {
   pagado: 0,
   preparing: 1,
   en_preparacion: 1,
+  por_asignar_repartidor: 1,
+  incidencia_transporte: 2,
   dispatched: 2,
   en_camino: 2,
   nearby: 3,
@@ -262,6 +264,10 @@ export default function OrderTrackingView() {
       case "preparing":
       case "en_preparacion":
         return { label: "En Preparación", variant: "neutral" };
+      case "por_asignar_repartidor":
+        return { label: "Empacado · Asignando Unidad", variant: "warning" };
+      case "incidencia_transporte":
+        return { label: "Incidencia en Entrega", variant: "danger" };
       default:
         return { label: "Pedido en Proceso", variant: "neutral" };
     }
@@ -348,6 +354,7 @@ export default function OrderTrackingView() {
     yape_plin: "Yape / Plin",
     card: "Tarjeta de Débito / Crédito",
     cash_on_delivery: "Pago Contra Entrega",
+    contraentrega: "Pago Contra Entrega",
   };
 
   // -------------------------------------------------------------
@@ -482,7 +489,7 @@ export default function OrderTrackingView() {
                 {/* Ícono de Estado */}
                 <span
                   className={`z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                    order?.status === 'entregado' && index === TRACKING_STEPS.length - 1
+                    (order?.status === 'entregado' || order?.status === 'delivered') && index === TRACKING_STEPS.length - 1
                       ? "border-emerald-600 bg-emerald-600 text-white"
                       : isCompleted
                         ? "border-emerald-600 bg-emerald-600 text-white"
@@ -492,7 +499,7 @@ export default function OrderTrackingView() {
                   }`}
                   aria-current={isActive ? "step" : undefined}
                 >
-                  {order?.status === 'entregado' && index === TRACKING_STEPS.length - 1 ? (
+                  {(order?.status === 'entregado' || order?.status === 'delivered') && index === TRACKING_STEPS.length - 1 ? (
                     <Check className="h-4 w-4" />
                   ) : (
                     <StepIcon className="h-4 w-4" />
@@ -513,13 +520,13 @@ export default function OrderTrackingView() {
                   <p className="mt-1 text-[11px] leading-relaxed text-brand-secondary">
                     {step.detail}
                   </p>
-                  {isActive && order?.status !== 'entregado' && (
+                  {isActive && order?.status !== 'entregado' && order?.status !== 'delivered' && (
                     <span className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] font-bold text-accent uppercase">
                       <Clock3 className="h-3 w-3" />
                       Estado actual
                     </span>
                   )}
-                  {order?.status === 'entregado' && index === TRACKING_STEPS.length - 1 && (
+                  {(order?.status === 'entregado' || order?.status === 'delivered') && index === TRACKING_STEPS.length - 1 && (
                     <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">✓ PEDIDO FINALIZADO</span>
                   )}
                 </div>

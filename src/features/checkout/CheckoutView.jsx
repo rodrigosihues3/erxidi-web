@@ -858,6 +858,8 @@ export default function CheckoutView() {
     methodOverride = "culqi_gateway"
   ) => {
     const ctx = orderContextRef.current;
+    const normalizedMethod =
+      methodOverride === "cash_on_delivery" ? "contraentrega" : methodOverride;
     const fullName = [ctx.firstName.trim(), ctx.lastName.trim()]
       .join(" ")
       .trim();
@@ -974,8 +976,8 @@ export default function CheckoutView() {
       scheduledTimeSlot: resolvedSlot,
       subtotal: ctx.subtotal,
       totalAmount: ctx.totalAmount,
-      payment_method: methodOverride,
-      paymentMethod: methodOverride,
+      payment_method: normalizedMethod,
+      paymentMethod: normalizedMethod,
       payment_status: paymentStatus,
       paymentStatus,
       payment_gateway_tx_id: gatewayTxId,
@@ -1185,7 +1187,7 @@ export default function CheckoutView() {
         const { error: updateOrderError } = await supabase
           .from("orders")
           .update({
-            payment_method: paymentMethod,
+            payment_method: orderPayload.payment_method,
             payment_status: targetStatus,
             payment_gateway_tx_id: targetTxId,
             invoice_type: orderPayload.invoice_type,
@@ -1200,7 +1202,7 @@ export default function CheckoutView() {
 
         const updatedOrderObj = {
           ...createdOrderRef.current,
-          payment_method: paymentMethod,
+          payment_method: orderPayload.payment_method,
           payment_status: targetStatus,
           payment_gateway_tx_id: targetTxId,
           invoice_type: orderPayload.invoice_type,

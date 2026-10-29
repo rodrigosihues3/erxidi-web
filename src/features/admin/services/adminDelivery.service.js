@@ -4,13 +4,21 @@ import { supabase } from "../../../services/supabase";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const authAdminClient = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-  },
-});
+let _authAdminClient = null;
+
+function getAuthAdminClient() {
+  if (!_authAdminClient) {
+    _authAdminClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storageKey: "sb-erxidi-delivery-signup-token",
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+  }
+  return _authAdminClient;
+}
 
 /**
  * Obtener todos los repartidores
@@ -105,7 +113,8 @@ export async function updateDeliveryUser(id, values) {
  */
 export async function createDeliveryStaff(payload) {
   // 1. Registro en Auth con cliente aislado (no toca localStorage)
-  const { data: authData, error: authError } = await authAdminClient.auth.signUp({
+  const authClient = getAuthAdminClient();
+  const { data: authData, error: authError } = await authClient.auth.signUp({
     email: payload.email,
     password: payload.password,
     options: {
@@ -125,7 +134,7 @@ export async function createDeliveryStaff(payload) {
 
   // 2. Si el registro devolvió sesión en el cliente aislado, actualizamos con ese token,
   // de lo contrario usamos el cliente principal con la sesión de owner
-  const clientToUse = authData.session ? authAdminClient : supabase;
+  const clientToUse = authData.session ? authClient : supabase;
 
   // Breve espera de 300ms para permitir la ejecución del trigger de perfiles en BD
   await new Promise((resolve) => setTimeout(resolve, 300));
@@ -173,12 +182,26 @@ export async function createDeliveryUser(payload) {
  * Eliminación segura con desvinculación foránea
  */
 export async function deleteDeliveryStaff(staffId) {
-  // A. Desvincular de pedidos activos no completados para evitar conflictos de integridad
+  // A. Pedidos en ruta/incidencia vuelven a la bolsa común; el resto de pedidos no finalizados solo se desvincula
+  const FINAL_STATUSES = '("entregado","delivered","cancelado","cancelled")';
+
+  await supabase
+    .from("orders")
+    .update({
+      assigned_delivery_id: null,
+      status: "por_asignar_repartidor",
+      incident_reason: null,
+      incident_comment: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("assigned_delivery_id", staffId)
+    .in("status", ["en_camino", "cerca", "dispatched", "nearby", "incidencia_transporte"]);
+
   await supabase
     .from("orders")
     .update({ assigned_delivery_id: null })
     .eq("assigned_delivery_id", staffId)
-    .neq("status", "entregado");
+    .not("status", "in", FINAL_STATUSES);
 
   // B. Eliminar el perfil en la tabla profiles
   const { error } = await supabase

@@ -53,19 +53,6 @@ export function useDeliveryOrders({ useMock = false } = {}) {
   const load = useCallback(async () => {
     setError(null);
 
-    if (useMock) {
-      setOrders(
-        mockData.pedidos.map((p) =>
-          prepare({
-            ...p,
-            status: p.status === "por_entregar" ? "en_preparacion" : p.status,
-          }),
-        ),
-      );
-      setLoading(false);
-      return;
-    }
-
     if (!user) {
       setLoading(false);
       return;
@@ -157,7 +144,7 @@ export function useDeliveryOrders({ useMock = false } = {}) {
   }
 
   return {
-    repartidorName: useMock ? mockData.first_name : profile?.first_name,
+    repartidorName: profile?.first_name,
     orders,
     loading,
     error,

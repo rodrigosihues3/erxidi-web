@@ -156,6 +156,8 @@ export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_
     .update({
       status: targetStatus,
       assigned_delivery_id: null,
+      incident_reason: null,
+      incident_comment: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
@@ -195,10 +197,18 @@ export async function updateDeliveryStaff(id, payload) {
   return data;
 }
 
+const IN_ROUTE_STATUSES = ["en_camino", "cerca", "dispatched", "nearby"];
+
 export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
-  const nextStatus = currentStatus === "received" || currentStatus === "por_asignar_repartidor"
-    ? "en_camino"
-    : currentStatus;
+  let nextStatus = currentStatus;
+  if (!deliveryId) {
+    // Sin conductor, un pedido en ruta vuelve a la bolsa común
+    if (IN_ROUTE_STATUSES.includes(currentStatus)) {
+      nextStatus = "por_asignar_repartidor";
+    }
+  } else if (currentStatus === "received" || currentStatus === "por_asignar_repartidor") {
+    nextStatus = "en_camino";
+  }
 
   const { data, error } = await supabase
     .from("orders")
