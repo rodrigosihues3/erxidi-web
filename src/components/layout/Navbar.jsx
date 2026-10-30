@@ -87,6 +87,7 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
       if (event.key === "Escape") {
         setUserMenuOpen(false);
         setIsSearchOpen(false);
+        setMobileMenuOpen(false);
       }
     }
 
@@ -97,6 +98,11 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
+
+  // Cerrar menú móvil automáticamente al cambiar de ruta
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -449,6 +455,122 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
           </button>
         </div>
       </div>
+
+      {/* Menú Móvil Desplegable */}
+      {mobileMenuOpen && (
+        <div className="lg:hidden bg-brand-primary border-b border-border/20 px-4 pt-3 pb-5 space-y-4 animate-in slide-in-from-top-2 duration-150">
+          <nav className="flex flex-col space-y-2">
+            {navLinks.map((link) => (
+              <NavLink
+                key={link.path}
+                to={link.path}
+                onClick={() => setMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `px-3 py-2 rounded-button text-sm font-semibold transition-colors ${
+                    isActive
+                      ? "bg-white/10 text-accent"
+                      : "text-brand-muted hover:text-white hover:bg-white/5"
+                  }`
+                }
+              >
+                {link.label}
+              </NavLink>
+            ))}
+          </nav>
+
+          {/* Divisor de Autenticación Móvil */}
+          <div className="pt-3 border-t border-border/20">
+            {user ? (
+              <div className="space-y-2">
+                {(role === "owner" ||
+                  role === "admin" ||
+                  profile?.role === "owner") && (
+                  <Link
+                    to="/admin"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-button text-sm font-semibold text-white bg-white/10 hover:bg-accent transition-colors"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-accent" />
+                    <span>Panel Admin</span>
+                  </Link>
+                )}
+
+                <div className="flex items-center gap-2.5 px-3 py-2 bg-white/5 rounded-button">
+                  <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center font-bold text-xs">
+                    {userInitial}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-white truncate">
+                      {displayName}
+                    </p>
+                    <p className="text-[10px] text-brand-muted truncate">
+                      {user.email}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <Link
+                    to="/mi-cuenta"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-brand-muted hover:text-white hover:bg-white/5 rounded-button"
+                  >
+                    <User className="w-4 h-4 text-accent" />
+                    Mi Perfil
+                  </Link>
+
+                  <Link
+                    to="/mi-cuenta/pedidos"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-brand-muted hover:text-white hover:bg-white/5 rounded-button"
+                  >
+                    <Package className="w-4 h-4 text-accent" />
+                    Mis Pedidos
+                  </Link>
+
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-white/5 rounded-button text-left"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Cerrar Sesión
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <Link
+                  to="/login?tab=register"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block"
+                >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-white/20 bg-transparent text-white hover:bg-white/10 text-xs font-semibold h-8"
+                  >
+                    Registrarse
+                  </Button>
+                </Link>
+                <Link
+                  to="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block"
+                >
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-8"
+                  >
+                    Ingresar
+                  </Button>
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }
