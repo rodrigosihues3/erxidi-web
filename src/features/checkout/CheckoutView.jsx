@@ -41,6 +41,7 @@ import { fetchDni, fetchRuc } from "../../services/api/decolectaService";
 import {
   createOrder,
   reserveStock,
+  releaseStock,
   verifyPreflight,
 } from "../../services/api/checkoutService";
 import { supabase } from "../../services/supabase";
@@ -102,6 +103,49 @@ export default function CheckoutView() {
       isMounted = false;
     };
   }, []);
+
+  const isExpressAvailable = useMemo(() => {
+    if (!dynamicSettings) return true; // Fallback optimista durante carga inicial
+
+    // 1. Validar bandera de emergencia
+    if (
+      dynamicSettings.emergencyFlags?.close_store_today ||
+      dynamicSettings.emergencyFlags?.pause_express_only
+    ) {
+      return false;
+    }
+
+    if (
+      !dynamicSettings.businessHours ||
+      Object.keys(dynamicSettings.businessHours).length === 0
+    ) {
+      return true;
+    }
+
+    // 2. Validar día y rango horario según zona horaria de Lima (UTC-5)
+    try {
+      const nowLima = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "America/Lima" })
+      );
+      const dayOfWeek = nowLima.getDay().toString(); // 0 a 6
+      const schedule = dynamicSettings.businessHours?.[dayOfWeek];
+
+      if (!schedule || !schedule.enabled) return false;
+
+      const currentMinutes = nowLima.getHours() * 60 + nowLima.getMinutes();
+      const [openH, openM] = (schedule.open || "09:00").split(":").map(Number);
+      const [cutoffH, cutoffM] = (schedule.express_cutoff || "17:00")
+        .split(":")
+        .map(Number);
+
+      const openMinutes = openH * 60 + openM;
+      const cutoffMinutes = cutoffH * 60 + cutoffM;
+
+      return currentMinutes >= openMinutes && currentMinutes <= cutoffMinutes;
+    } catch {
+      return false;
+    }
+  }, [dynamicSettings]);
 
   // Temporizador de vigencia de reserva (Paso 3)
   useEffect(() => {
@@ -574,7 +618,13 @@ export default function CheckoutView() {
     deliveryReference,
   ]);
 
-  // TRANSICIÓN AL PASO 3: RESERVA ATÓMICA Y PRE-FLIGHT CHECK
+  useEffect(() => {
+    if (!isExpressAvailable && deliveryType === "express") {
+      setDeliveryType("scheduled");
+    }
+  }, [isExpressAvailable, deliveryType]);
+
+  // TRANSICIÓN AL PASO 3: PRE-FLIGHT CHECK, RESERVA ATÓMICA Y ROLLBACK
   const handleNextFromStep2 = async (e) => {
     if (e) e.preventDefault();
     if (!isStep2Valid || isValidatingPreflight) return;
@@ -582,23 +632,42 @@ export default function CheckoutView() {
     setIsValidatingPreflight(true);
     setPreflightError("");
 
+    let activeToken =
+      reservationToken && reservationTimeLeft > 0 ? reservationToken : null;
+
     try {
-      // 1. Reserva atómica en Supabase (TTL 10 min)
-      const reserveResult = await reserveStock(items, user?.id || null);
-      if (!reserveResult?.success || !reserveResult?.reservation_token) {
+      // 1. Primero: Validar Pre-vuelo sin reservar inventario
+      const initialPreflight = await verifyPreflight({
+        reservationToken: null,
+        deliveryType,
+        totalItems: totalUnits,
+      });
+
+      if (!initialPreflight?.success) {
         throw new Error(
-          reserveResult?.message ||
-          "Inventario insuficiente para una o más prendas seleccionadas."
+          initialPreflight?.message ||
+            "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
         );
       }
 
-      const token = reserveResult.reservation_token;
-      setReservationToken(token);
-      setReservationTimeLeft(600);
+      // 2. Segundo: Reservar Stock (reutilizar token vigente o generar uno nuevo)
+      if (!activeToken) {
+        const reserveResult = await reserveStock(items, user?.id || null);
+        if (!reserveResult?.success || !reserveResult?.reservation_token) {
+          throw new Error(
+            reserveResult?.message ||
+              "Inventario insuficiente para una o más prendas seleccionadas."
+          );
+        }
 
-      // 2. Pre-Flight Check (Horarios en Lima, Cierre de emergencia y Flota)
+        activeToken = reserveResult.reservation_token;
+        setReservationToken(activeToken);
+        setReservationTimeLeft(600);
+      }
+
+      // 3. Tercero: Re-verificación Pre-vuelo con Token
       const preflightResult = await verifyPreflight({
-        reservationToken: token,
+        reservationToken: activeToken,
         deliveryType,
         totalItems: totalUnits,
       });
@@ -606,13 +675,17 @@ export default function CheckoutView() {
       if (!preflightResult?.success) {
         throw new Error(
           preflightResult?.message ||
-          "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
+            "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
         );
       }
 
       setCompletedSteps((prev) => ({ ...prev, 2: true }));
       setCurrentStep(3);
     } catch (err) {
+      if (activeToken) {
+        await releaseStock(activeToken);
+        setReservationToken(null);
+      }
       setPreflightError(
         err.message || "Error al verificar las condiciones del pedido."
       );
@@ -1724,27 +1797,37 @@ export default function CheckoutView() {
                   </label>
 
                   <label
-                    onClick={() => setDeliveryType("express")}
+                    onClick={() => isExpressAvailable && setDeliveryType("express")}
                     className={
-                      "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none " +
-                      (deliveryType === "express"
-                        ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                        : "border-border bg-surface-card hover:border-border-strong")
+                      "p-3.5 rounded-card border transition-all flex flex-col justify-between select-none " +
+                      (!isExpressAvailable
+                        ? "opacity-50 cursor-not-allowed pointer-events-none border-border bg-surface-card"
+                        : deliveryType === "express"
+                          ? "cursor-pointer border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "cursor-pointer border-border bg-surface-card hover:border-border-strong")
                     }
                   >
                     <input
                       type="radio"
                       name="delivery-type"
+                      value="express"
+                      disabled={!isExpressAvailable}
                       checked={deliveryType === "express"}
-                      onChange={() => setDeliveryType("express")}
+                      onChange={() => isExpressAvailable && setDeliveryType("express")}
                       className="sr-only"
                     />
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Zap className="w-5 h-5 text-accent" />
-                        <Badge variant="warning" className="text-[10px]">
-                          Mismo Día
-                        </Badge>
+                        {isExpressAvailable ? (
+                          <Badge variant="warning" className="text-[10px]">
+                            Mismo Día
+                          </Badge>
+                        ) : (
+                          <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
+                            No disponible hoy
+                          </span>
+                        )}
                       </div>
                       <span className="block text-xs font-bold text-brand-primary">
                         Envío Express

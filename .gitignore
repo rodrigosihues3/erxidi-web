@@ -55,3 +55,6 @@ dist-ssr
 
 .hermes
 arbol_src
+
+# Supabase CLI metadatos locales y temporales
+supabase/.temp/

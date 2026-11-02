@@ -22,19 +22,32 @@ export async function reserveStock(cartItems, userId = null) {
 }
 
 /**
+ * Libera una reserva temporal de inventario ante fallos de pre-vuelo o cancelación previa al pago.
+ */
+export async function releaseStock(reservationToken) {
+  if (!reservationToken) return { success: false };
+  try {
+    const { data, error } = await supabase.rpc("release_checkout_stock", {
+      p_reservation_token: reservationToken,
+    });
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    console.error("Error al liberar reserva de stock:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Verificación integral de pre-vuelo (Horarios, Tienda abierta, Flota disponible y Reserva).
  */
-export async function verifyPreflight({ reservationToken, deliveryType, totalItems }) {
+export async function verifyPreflight({ reservationToken = null, deliveryType, totalItems = 1 }) {
   const { data, error } = await supabase.rpc("verify_checkout_preflight", {
     p_reservation_token: reservationToken,
     p_delivery_type: deliveryType,
     p_total_items: totalItems,
   });
-
-  if (error) {
-    throw new Error(error.message || "Error al validar las condiciones del pedido.");
-  }
-
+  if (error) throw error;
   return data;
 }
 
