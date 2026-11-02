@@ -108,6 +108,72 @@ export function useDeliveryOrders({ useMock = false } = {}) {
     load();
   }, [load]);
 
+  // Realtime: mutación in-memory de bolsa (poolOrders) y pedidos propios (orders)
+  useEffect(() => {
+    if (useMock || !user?.id) return undefined;
+
+    const merge = (list, row) =>
+      list.map((o) =>
+        o.id === row.id
+          ? { ...o, ...row, status: normalizeStatus(row.status) }
+          : o,
+      );
+
+    const channel = supabase
+      .channel("delivery-orders-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "orders" },
+        (payload) => {
+          const { eventType, new: newOrder, old: oldOrder } = payload;
+
+          if (eventType === "INSERT") {
+            const isPoolEligible =
+              !PICKUP_TYPES.includes(newOrder.delivery_type) &&
+              !newOrder.assigned_delivery_id &&
+              [
+                "preparando",
+                "por_asignar_repartidor",
+                "pendiente",
+              ].includes(newOrder.status);
+
+            if (isPoolEligible) {
+              setPoolOrders((prev) => [
+                prepare(newOrder),
+                ...prev.filter((o) => o.id !== newOrder.id),
+              ]);
+            }
+          }
+
+          if (eventType === "UPDATE") {
+            if (newOrder.assigned_delivery_id === user.id) {
+              setOrders((prev) =>
+                prev.some((o) => o.id === newOrder.id)
+                  ? merge(prev, newOrder)
+                  : [prepare(newOrder), ...prev],
+              );
+              setPoolOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
+            } else if (newOrder.assigned_delivery_id) {
+              setPoolOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
+              setOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
+            } else {
+              setPoolOrders((prev) => merge(prev, newOrder));
+            }
+          }
+
+          if (eventType === "DELETE") {
+            setPoolOrders((prev) => prev.filter((o) => o.id !== oldOrder.id));
+            setOrders((prev) => prev.filter((o) => o.id !== oldOrder.id));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, useMock]);
+
   // Suma total de quantity de los pedidos activos asignados en ruta (en_camino y cerca)
   const currentTripItemsCount = orders
     .filter((o) => o.status === "en_camino" || o.status === "cerca")

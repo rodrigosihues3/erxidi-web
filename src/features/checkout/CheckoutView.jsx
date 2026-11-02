@@ -66,6 +66,23 @@ import {
 } from "../../utils/geoUtils";
 import { triggerOrderConfirmationEmail } from "../../services/api/orderEmailService";
 
+const REQUIRED_MARK = (
+  <span
+    className="text-rose-500 font-bold ml-1 cursor-help select-none"
+    title="Campo obligatorio"
+  >
+    *
+  </span>
+);
+
+const OPTIONAL_MARK = (
+  <span className="text-xs text-muted-foreground font-normal ml-1.5">
+    (Opcional)
+  </span>
+);
+
+const INPUT_ERROR_CLASS = "border-rose-500 focus:ring-rose-200";
+
 export default function CheckoutView() {
   const navigate = useNavigate();
   const { items, totalUnits, subtotal, clearCart } = useCart();
@@ -602,6 +619,51 @@ export default function CheckoutView() {
     }
   };
 
+  // Validación reactiva onBlur (Pasos 1 y 2)
+  const [touched, setTouched] = useState({});
+  const markTouched = (field) =>
+    setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+
+  const fieldErrors = {
+    firstName:
+      firstName.trim().length < 2
+        ? "Ingresa tus nombres (mínimo 2 caracteres)."
+        : "",
+    lastName:
+      lastName.trim().length < 2
+        ? "Ingresa tus apellidos (mínimo 2 caracteres)."
+        : "",
+    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+      ? ""
+      : "Ingresa un correo válido, sin espacios.",
+    phone: /^9\d{8}$/.test(phone.trim())
+      ? ""
+      : "El celular debe tener 9 dígitos y empezar con 9.",
+    dni:
+      dni.length > 0 && !/^\d{8}$/.test(dni)
+        ? "El DNI debe tener exactamente 8 dígitos."
+        : "",
+    deliveryAddress:
+      deliveryType !== "pickup" && deliveryAddress.trim().length < 4
+        ? "Ingresa una dirección válida (mínimo 4 caracteres)."
+        : "",
+    deliveryReference:
+      deliveryType !== "pickup" && deliveryReference.trim().length < 3
+        ? "Ingresa una referencia válida (mínimo 3 caracteres)."
+        : "",
+  };
+
+  const errorOf = (field) => (touched[field] ? fieldErrors[field] : "");
+
+  const renderFieldError = (field) => {
+    const error = errorOf(field);
+    return error ? (
+      <p className="text-[11px] text-rose-600 font-medium mt-1 animate-in fade-in duration-150">
+        {error}
+      </p>
+    ) : null;
+  };
+
   const isStep2Valid = useMemo(() => {
     if (deliveryType === "pickup") return true;
     if (isOutOfCoverage) return false;
@@ -701,7 +763,7 @@ export default function CheckoutView() {
   const [yapeOpNumber, setYapeOpNumber] = useState("");
   const [culqiError, setCulqiError] = useState(null);
 
-  const [receiptType, setReceiptType] = useState("boleta");
+  const [receiptType, setReceiptType] = useState("nota_venta");
 
   const [useCustomBoleta, setUseCustomBoleta] = useState(false);
   const [boletaDni, setBoletaDni] = useState("");
@@ -721,6 +783,21 @@ export default function CheckoutView() {
     () => String(dni || "").replace(/\D/g, "").length === 8,
     [dni]
   );
+
+  const handleSelectReceiptType = (type) => {
+    setReceiptType(type);
+    if (type === "boleta" && hasValidStep1Dni && !boletaDni) {
+      setUseCustomBoleta(true);
+      setBoletaDni(String(dni).replace(/\D/g, ""));
+      setBoletaFullName(`${firstName} ${lastName}`.trim());
+      setIsBoletaNameLocked(isNameLocked);
+    }
+  };
+
+  const handleToggleElectronicReceipt = (checked) => {
+    if (checked) handleSelectReceiptType("boleta");
+    else setReceiptType("nota_venta");
+  };
 
   const triggerBoletaDniLookup = async (dniToQuery = boletaDni) => {
     const clean = String(dniToQuery || "")
@@ -973,6 +1050,9 @@ export default function CheckoutView() {
         ? null
         : selectedAddress?.longitude ?? ctx.deliveryLongitude ?? null;
 
+    const targetInvoiceType =
+      ctx.receiptType === "nota_venta" ? "none" : ctx.receiptType;
+
     const invoicePrefix =
       ctx.receiptType === "factura"
         ? "F001"
@@ -1055,7 +1135,7 @@ export default function CheckoutView() {
       paymentStatus,
       payment_gateway_tx_id: gatewayTxId,
       paymentGatewayTxId: gatewayTxId,
-      invoice_type: ctx.receiptType,
+      invoice_type: targetInvoiceType,
       invoice_data: invoiceData,
       items: ctx.items,
       reservationToken: ctx.reservationToken,
@@ -1363,7 +1443,7 @@ export default function CheckoutView() {
           htmlFor={prefixId + "-address"}
           className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
         >
-          Dirección Exacta <span className="text-rose-600">*</span>
+          Dirección Exacta{REQUIRED_MARK}
         </label>
         <div className="flex gap-2 items-center">
           <div className="flex-1">
@@ -1372,6 +1452,8 @@ export default function CheckoutView() {
               placeholder="Calle / Av. y número (presiona la lupa para ubicar en el mapa)"
               value={deliveryAddress}
               onChange={(e) => setDeliveryAddress(e.target.value)}
+              onBlur={() => markTouched("deliveryAddress")}
+              className={errorOf("deliveryAddress") ? INPUT_ERROR_CLASS : ""}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -1409,24 +1491,23 @@ export default function CheckoutView() {
           Escribe tu dirección y presiona el botón de lupa para fijar el pin en
           el mapa.
         </span>
+        {renderFieldError("deliveryAddress")}
       </div>
 
       <div>
         <Input
-          label="Referencia de Llegada (Obligatoria) *"
+          label={<>Referencia de Llegada{REQUIRED_MARK}</>}
           id={prefixId + "-ref"}
           placeholder="Ej. Dpto 402, portón negro frente al parque, timbre 2"
           value={deliveryReference}
           onChange={(e) => setDeliveryReference(e.target.value)}
+          onBlur={() => markTouched("deliveryReference")}
+          className={
+            errorOf("deliveryReference") ? INPUT_ERROR_CLASS : ""
+          }
           required
         />
-        {deliveryReference.trim().length > 0 &&
-          deliveryReference.trim().length < 3 && (
-            <span className="text-[11px] text-rose-600 mt-1 block">
-              Ingresa una referencia válida (mínimo 3 caracteres) para el
-              repartidor.
-            </span>
-          )}
+        {renderFieldError("deliveryReference")}
       </div>
     </div>
   );
@@ -1552,7 +1633,7 @@ export default function CheckoutView() {
                       htmlFor="checkout-dni"
                       className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                     >
-                      DNI (Opcional)
+                      DNI{OPTIONAL_MARK}
                     </label>
                     {isSearchingDni && (
                       <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -1572,6 +1653,8 @@ export default function CheckoutView() {
                         placeholder="Ingresa 8 dígitos numéricos"
                         value={dni}
                         onChange={handleDniChange}
+                        onBlur={() => markTouched("dni")}
+                        className={errorOf("dni") ? INPUT_ERROR_CLASS : ""}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
@@ -1614,12 +1697,14 @@ export default function CheckoutView() {
                     )}
                   </div>
 
-                  {dni.length > 0 && dni.length < 8 && (
+                  {dni.length > 0 && dni.length < 8 && !errorOf("dni") && (
                     <span className="text-[11px] text-amber-600 mt-1 block">
                       Completa los 8 dígitos o presiona el botón de papelera
                       para continuar sin DNI.
                     </span>
                   )}
+
+                  {renderFieldError("dni")}
 
                   {dniFeedback && (
                     <div
@@ -1641,53 +1726,70 @@ export default function CheckoutView() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Input
-                    label="Nombres"
-                    id="checkout-firstname"
-                    placeholder="Tus nombres"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    disabled={isNameLocked}
-                    readOnly={isNameLocked}
-                    className={
-                      isNameLocked
-                        ? "bg-slate-100 text-slate-700 cursor-not-allowed"
-                        : ""
-                    }
-                    required
-                  />
-
-                  <Input
-                    label="Apellidos"
-                    id="checkout-lastname"
-                    placeholder="Tus apellidos"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    disabled={isNameLocked}
-                    readOnly={isNameLocked}
-                    className={
-                      isNameLocked
-                        ? "bg-slate-100 text-slate-700 cursor-not-allowed"
-                        : ""
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Input
-                    label="Correo Electrónico"
-                    id="checkout-email"
-                    type="email"
-                    placeholder="tucorreo@ejemplo.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
+                  <div>
+                    <Input
+                      label={<>Nombres{REQUIRED_MARK}</>}
+                      id="checkout-firstname"
+                      placeholder="Tus nombres"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      onBlur={() => markTouched("firstName")}
+                      disabled={isNameLocked}
+                      readOnly={isNameLocked}
+                      className={
+                        isNameLocked
+                          ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                          : errorOf("firstName")
+                            ? INPUT_ERROR_CLASS
+                            : ""
+                      }
+                      required
+                    />
+                    {renderFieldError("firstName")}
+                  </div>
 
                   <div>
                     <Input
-                      label="WhatsApp / Celular"
+                      label={<>Apellidos{REQUIRED_MARK}</>}
+                      id="checkout-lastname"
+                      placeholder="Tus apellidos"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      onBlur={() => markTouched("lastName")}
+                      disabled={isNameLocked}
+                      readOnly={isNameLocked}
+                      className={
+                        isNameLocked
+                          ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                          : errorOf("lastName")
+                            ? INPUT_ERROR_CLASS
+                            : ""
+                      }
+                      required
+                    />
+                    {renderFieldError("lastName")}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Input
+                      label={<>Correo Electrónico{REQUIRED_MARK}</>}
+                      id="checkout-email"
+                      type="email"
+                      placeholder="tucorreo@ejemplo.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      onBlur={() => markTouched("email")}
+                      className={errorOf("email") ? INPUT_ERROR_CLASS : ""}
+                      required
+                    />
+                    {renderFieldError("email")}
+                  </div>
+
+                  <div>
+                    <Input
+                      label={<>WhatsApp / Celular{REQUIRED_MARK}</>}
                       id="checkout-phone"
                       type="tel"
                       placeholder="9XXXXXXXX (9 dígitos)"
@@ -1695,11 +1797,15 @@ export default function CheckoutView() {
                       onChange={(e) =>
                         setPhone(e.target.value.replace(/\D/g, "").slice(0, 9))
                       }
+                      onBlur={() => markTouched("phone")}
+                      className={errorOf("phone") ? INPUT_ERROR_CLASS : ""}
                       required
                     />
-                    <span className="text-[10px] text-brand-muted mt-1 block">
-                      Usado para validar el pago y coordinar la entrega.
-                    </span>
+                    {renderFieldError("phone") || (
+                      <span className="text-[10px] text-brand-muted mt-1 block">
+                        Usado para validar el pago y coordinar la entrega.
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2074,15 +2180,22 @@ export default function CheckoutView() {
                         {selectedAddressMode === "saved" && (
                           <div className="pt-2">
                             <Input
-                              label="Referencia de Llegada (Obligatoria) *"
+                              label={<>Referencia de Llegada{REQUIRED_MARK}</>}
                               id="checkout-saved-ref"
                               placeholder="Confirma o detalla la referencia del domicilio"
                               value={deliveryReference}
                               onChange={(e) =>
                                 setDeliveryReference(e.target.value)
                               }
+                              onBlur={() => markTouched("deliveryReference")}
+                              className={
+                                errorOf("deliveryReference")
+                                  ? INPUT_ERROR_CLASS
+                                  : ""
+                              }
                               required
                             />
+                            {renderFieldError("deliveryReference")}
                           </div>
                         )}
 
@@ -2130,7 +2243,7 @@ export default function CheckoutView() {
                               {saveAddressForFuture && (
                                 <div className="pl-6 max-w-xs">
                                   <Input
-                                    label="Alias de la dirección"
+                                    label={<>Alias de la dirección{OPTIONAL_MARK}</>}
                                     id="checkout-new-alias"
                                     placeholder="Ej. Casa, Oficina"
                                     value={newAddressAlias}
@@ -2251,69 +2364,57 @@ export default function CheckoutView() {
               <form onSubmit={handleConfirmOrder} className="space-y-6">
                 {/* Selector de Comprobante */}
                 <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-                    Tipo de Comprobante
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                    Comprobante de Pago
+                  </span>
+
+                  <label className="flex items-start gap-3 p-3.5 rounded-card border border-border bg-surface-card cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={receiptType !== "nota_venta"}
+                      onChange={(e) =>
+                        handleToggleElectronicReceipt(e.target.checked)
+                      }
+                      className="mt-0.5 w-4 h-4 text-accent border-border rounded"
+                    />
+                    <span className="text-sm font-semibold text-brand-primary">
+                      Solicitar comprobante electrónico (Boleta o Factura)
+                    </span>
                   </label>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {[
-                      {
-                        id: "nota_venta",
-                        title: "Nota de Venta",
-                        desc: "Control interno de pedido",
-                      },
-                      {
-                        id: "boleta",
-                        title: "Boleta de Venta",
-                        desc: "Consumo personal / DNI",
-                      },
-                      {
-                        id: "factura",
-                        title: "Factura Electrónica",
-                        desc: "Para empresas / RUC",
-                      },
-                    ].map((item) => {
-                      const active = receiptType === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setReceiptType(item.id)}
-                          className={
-                            "p-3.5 rounded-card border text-left transition-all flex flex-col justify-between " +
-                            (active
-                              ? "border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary shadow-xs"
-                              : "border-border bg-surface-card hover:border-border-strong")
-                          }
-                        >
-                          <div className="flex items-center justify-between w-full mb-1">
-                            <span className="text-sm font-bold text-brand-primary">
-                              {item.title}
-                            </span>
-                            <div
-                              className={
-                                "w-4 h-4 rounded-full border flex items-center justify-center " +
-                                (active
-                                  ? "border-brand-primary bg-brand-primary text-white"
-                                  : "border-border bg-white")
-                              }
-                            >
-                              {active && <Check className="w-2.5 h-2.5" />}
-                            </div>
-                          </div>
-                          <span className="text-xs text-brand-secondary">
-                            {item.desc}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Mensaje de Nota de Venta */}
-                  {receiptType === "nota_venta" && (
-                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary">
-                      Comprobante interno para control de pedido y seguimiento
-                      de entrega.
+                  {receiptType === "nota_venta" ? (
+                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary animate-in fade-in duration-150">
+                      Sin comprobante electrónico. Se registrará una nota de
+                      venta interna para el control y seguimiento de tu pedido.
+                    </div>
+                  ) : (
+                    <div
+                      className="flex flex-wrap gap-2 animate-in fade-in duration-150"
+                      role="group"
+                      aria-label="Tipo de comprobante electrónico"
+                    >
+                      {[
+                        { id: "boleta", title: "Boleta de Venta" },
+                        { id: "factura", title: "Factura Electrónica" },
+                      ].map((item) => {
+                        const active = receiptType === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => handleSelectReceiptType(item.id)}
+                            className={
+                              "px-4 h-9 rounded-full border text-xs font-bold transition-colors " +
+                              (active
+                                ? "border-brand-primary bg-brand-primary text-white"
+                                : "border-border bg-surface-card text-brand-secondary hover:border-brand-primary")
+                            }
+                          >
+                            {item.title}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -2384,7 +2485,7 @@ export default function CheckoutView() {
                                 htmlFor="boleta-custom-dni"
                                 className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                               >
-                                DNI del Titular (8 dígitos)
+                                DNI del Titular (8 dígitos){REQUIRED_MARK}
                               </label>
                               {isSearchingBoletaDni && (
                                 <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -2404,6 +2505,13 @@ export default function CheckoutView() {
                                   placeholder="Ingresa 8 dígitos numéricos"
                                   value={boletaDni}
                                   onChange={handleBoletaDniChange}
+                                  onBlur={() => markTouched("boletaDni")}
+                                  className={
+                                    touched.boletaDni &&
+                                    !/^\d{8}$/.test(boletaDni)
+                                      ? INPUT_ERROR_CLASS
+                                      : ""
+                                  }
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                       e.preventDefault();
@@ -2435,6 +2543,13 @@ export default function CheckoutView() {
                               </Button>
                             </div>
 
+                            {touched.boletaDni &&
+                              !/^\d{8}$/.test(boletaDni) && (
+                                <p className="text-[11px] text-rose-600 font-medium mt-1 animate-in fade-in duration-150">
+                                  El DNI debe tener exactamente 8 dígitos.
+                                </p>
+                              )}
+
                             {boletaDniFeedback && (
                               <p
                                 className={
@@ -2454,7 +2569,7 @@ export default function CheckoutView() {
                               htmlFor="boleta-custom-name"
                               className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1"
                             >
-                              Nombres y Apellidos del Titular
+                              Nombres y Apellidos del Titular{REQUIRED_MARK}
                             </label>
                             <Input
                               id="boleta-custom-name"
@@ -2493,7 +2608,7 @@ export default function CheckoutView() {
                             htmlFor="checkout-ruc"
                             className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                           >
-                            RUC (11 dígitos) *
+                            RUC (11 dígitos, verificado en SUNAT){REQUIRED_MARK}
                           </label>
                           {isSearchingRuc && (
                             <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -2513,6 +2628,12 @@ export default function CheckoutView() {
                               placeholder="20XXXXXXXXX o 10XXXXXXXXX"
                               value={ruc}
                               onChange={handleRucChange}
+                              onBlur={() => markTouched("ruc")}
+                              className={
+                                touched.ruc && !isValidRucFormat(ruc)
+                                  ? INPUT_ERROR_CLASS
+                                  : ""
+                              }
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
@@ -2541,6 +2662,12 @@ export default function CheckoutView() {
                           </Button>
                         </div>
 
+                        {touched.ruc && !isValidRucFormat(ruc) && (
+                          <p className="text-[11px] text-rose-600 font-medium mt-1 animate-in fade-in duration-150">
+                            El RUC debe tener 11 dígitos y empezar con 10 o 20.
+                          </p>
+                        )}
+
                         {rucFeedback && (
                           <p
                             className={
@@ -2558,7 +2685,7 @@ export default function CheckoutView() {
                       <div className="space-y-3">
                         <div className="w-full col-span-full">
                           <Input
-                            label="Razón Social"
+                            label={<>Razón Social{REQUIRED_MARK}</>}
                             id="checkout-company"
                             placeholder="Se autocompleta al validar el RUC con la lupa"
                             value={companyName}
@@ -2570,7 +2697,7 @@ export default function CheckoutView() {
 
                         <div className="w-full col-span-full">
                           <Input
-                            label="Dirección Fiscal"
+                            label={<>Dirección Fiscal{REQUIRED_MARK}</>}
                             id="checkout-fiscal-address"
                             placeholder="Se autocompleta al validar el RUC con la lupa"
                             value={fiscalAddress}
@@ -2703,7 +2830,7 @@ export default function CheckoutView() {
 
                           <div className="pt-3 border-t border-border">
                             <Input
-                              label="Número de Operación / Voucher (6 a 8 dígitos) *"
+                              label={<>Número de Operación / Voucher (6 a 8 dígitos){REQUIRED_MARK}</>}
                               id="checkout-yape-op"
                               placeholder="Ingresa el N° de operación de tu transferencia o Yape"
                               value={yapeOpNumber}
