@@ -4,13 +4,21 @@ import { supabase } from "../../../services/supabase";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const authAdminClient = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-  },
-});
+let _authAdminClient = null;
+
+function getAuthAdminClient() {
+  if (!_authAdminClient) {
+    _authAdminClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storageKey: "sb-erxidi-delivery-signup-token",
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+  }
+  return _authAdminClient;
+}
 
 /**
  * Obtener todos los repartidores
@@ -105,7 +113,8 @@ export async function updateDeliveryUser(id, values) {
  */
 export async function createDeliveryStaff(payload) {
   // 1. Registro en Auth con cliente aislado (no toca localStorage)
-  const { data: authData, error: authError } = await authAdminClient.auth.signUp({
+  const authClient = getAuthAdminClient();
+  const { data: authData, error: authError } = await authClient.auth.signUp({
     email: payload.email,
     password: payload.password,
     options: {
@@ -125,7 +134,7 @@ export async function createDeliveryStaff(payload) {
 
   // 2. Si el registro devolvió sesión en el cliente aislado, actualizamos con ese token,
   // de lo contrario usamos el cliente principal con la sesión de owner
-  const clientToUse = authData.session ? authAdminClient : supabase;
+  const clientToUse = authData.session ? authClient : supabase;
 
   // Breve espera de 300ms para permitir la ejecución del trigger de perfiles en BD
   await new Promise((resolve) => setTimeout(resolve, 300));
@@ -174,17 +183,20 @@ export async function createDeliveryUser(payload) {
  */
 export async function deleteDeliveryStaff(staffId) {
   const now = new Date().toISOString();
+  const FINAL_STATUSES = '("entregado","delivered","cancelado","cancelled")';
 
-  // A. Pedidos en ruta: vuelven a la bolsa para que otro repartidor los tome
+  // A. Pedidos en ruta o con incidencia: vuelven a la bolsa común para que otro repartidor los tome
   const { error: routeError } = await supabase
     .from("orders")
     .update({
       assigned_delivery_id: null,
       status: "por_asignar_repartidor",
+      incident_reason: null,
+      incident_comment: null,
       updated_at: now,
     })
     .eq("assigned_delivery_id", staffId)
-    .in("status", ["en_camino", "dispatched", "cerca", "nearby"]);
+    .in("status", ["en_camino", "dispatched", "cerca", "nearby", "incidencia_transporte"]);
 
   if (routeError) throw routeError;
 
@@ -193,7 +205,7 @@ export async function deleteDeliveryStaff(staffId) {
     .from("orders")
     .update({ assigned_delivery_id: null, updated_at: now })
     .eq("assigned_delivery_id", staffId)
-    .neq("status", "entregado");
+    .not("status", "in", FINAL_STATUSES);
 
   if (unlinkError) throw unlinkError;
 

@@ -28,9 +28,8 @@ import {
   Landmark,
   UserCheck,
   Trash2,
-  Shield,
-  ShieldOff,
   ShieldCheck,
+  Timer,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -39,7 +38,12 @@ import Badge from "../../components/ui/Badge";
 import Input from "../../components/ui/Input";
 import LocationPickerMap from "../../components/ui/LocationPickerMap";
 import { fetchDni, fetchRuc } from "../../services/api/decolectaService";
-import { createOrder } from "../../services/api/checkoutService";
+import {
+  createOrder,
+  reserveStock,
+  releaseStock,
+  verifyPreflight,
+} from "../../services/api/checkoutService";
 import { supabase } from "../../services/supabase";
 import {
   initCulqi,
@@ -52,34 +56,32 @@ import {
   defaultDeliverySlots,
   pickupStoreInfo,
 } from "./data/mockDeliveryZones";
-import { getStoreDeliverySettings } from "../admin/services/adminSettings.service";
+import {
+  getAllStoreSettings,
+  getStoreDeliverySettings,
+} from "../admin/services/adminSettings.service";
 import {
   isPointInPolygon,
   calculateDistanceKm,
-  calculateDeliveryFee,
 } from "../../utils/geoUtils";
 import { triggerOrderConfirmationEmail } from "../../services/api/orderEmailService";
 
-const BANK_ACCOUNTS = [
-  {
-    bank: "BCP ( Soles )",
-    account: "191-98451234-0-45",
-    cci: "002-191009845123404591",
-    holder: "ERXIDI CONFECCIONES S.A.C.",
-  },
-  {
-    bank: "Interbank ( Soles )",
-    account: "200-3004589120",
-    cci: "003-20000300458912034",
-    holder: "ERXIDI CONFECCIONES S.A.C.",
-  },
-  {
-    bank: "BBVA ( Soles )",
-    account: "0011-0117-0100045891",
-    cci: "011-117-000100045891-95",
-    holder: "ERXIDI CONFECCIONES S.A.C.",
-  },
-];
+const REQUIRED_MARK = (
+  <span
+    className="text-rose-500 font-bold ml-1 cursor-help select-none"
+    title="Campo obligatorio"
+  >
+    *
+  </span>
+);
+
+const OPTIONAL_MARK = (
+  <span className="text-xs text-muted-foreground font-normal ml-1.5">
+    (Opcional)
+  </span>
+);
+
+const INPUT_ERROR_CLASS = "border-rose-500 focus:ring-rose-200";
 
 export default function CheckoutView() {
   const navigate = useNavigate();
@@ -90,8 +92,104 @@ export default function CheckoutView() {
   const [completedSteps, setCompletedSteps] = useState({ 1: false, 2: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isValidatingPreflight, setIsValidatingPreflight] = useState(false);
+  const [preflightError, setPreflightError] = useState("");
   const [copiedAccount, setCopiedAccount] = useState("");
   const createdOrderRef = useRef(null);
+
+  // Reserva de Stock con TTL (10 minutos)
+  const [reservationToken, setReservationToken] = useState(null);
+  const [reservationTimeLeft, setReservationTimeLeft] = useState(600);
+
+  // Cuentas y ajustes dinámicos desde Base de Datos
+  const [dynamicSettings, setDynamicSettings] = useState({
+    identity: {},
+    paymentMethods: { bank_accounts: [], digital_wallets: {} },
+    emergencyFlags: {},
+    businessHours: {},
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    getAllStoreSettings()
+      .then((res) => {
+        if (isMounted) setDynamicSettings(res);
+      })
+      .catch((err) => console.error("Error al cargar ajustes maestros:", err));
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const isExpressAvailable = useMemo(() => {
+    if (!dynamicSettings) return true; // Fallback optimista durante carga inicial
+
+    // 1. Validar bandera de emergencia
+    if (
+      dynamicSettings.emergencyFlags?.close_store_today ||
+      dynamicSettings.emergencyFlags?.pause_express_only
+    ) {
+      return false;
+    }
+
+    if (
+      !dynamicSettings.businessHours ||
+      Object.keys(dynamicSettings.businessHours).length === 0
+    ) {
+      return true;
+    }
+
+    // 2. Validar día y rango horario según zona horaria de Lima (UTC-5)
+    try {
+      const nowLima = new Date(
+        new Date().toLocaleString("en-US", { timeZone: "America/Lima" })
+      );
+      const dayOfWeek = nowLima.getDay().toString(); // 0 a 6
+      const schedule = dynamicSettings.businessHours?.[dayOfWeek];
+
+      if (!schedule || !schedule.enabled) return false;
+
+      const currentMinutes = nowLima.getHours() * 60 + nowLima.getMinutes();
+      const [openH, openM] = (schedule.open || "09:00").split(":").map(Number);
+      const [cutoffH, cutoffM] = (schedule.express_cutoff || "17:00")
+        .split(":")
+        .map(Number);
+
+      const openMinutes = openH * 60 + openM;
+      const cutoffMinutes = cutoffH * 60 + cutoffM;
+
+      return currentMinutes >= openMinutes && currentMinutes <= cutoffMinutes;
+    } catch {
+      return false;
+    }
+  }, [dynamicSettings]);
+
+  // Temporizador de vigencia de reserva (Paso 3)
+  useEffect(() => {
+    if (currentStep !== 3 || !reservationToken) return;
+
+    const timer = setInterval(() => {
+      setReservationTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setPreflightError(
+            "El tiempo de reserva de tus prendas (10 min) ha expirado. Por favor, verifica nuevamente tu carrito."
+          );
+          setCurrentStep(2);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [currentStep, reservationToken]);
+
+  const formatTimer = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
 
   // -------------------------------------------------------------
   // PASO 1: Identificación y Contacto
@@ -153,14 +251,12 @@ export default function CheckoutView() {
         setLastName(
           [res.firstLastName || "", res.secondLastName || ""].join(" ").trim()
         );
-        // Bloqueo inmutable cuando RENIEC encuentra el DNI
         setIsNameLocked(true);
         setDniFeedback({
           type: "success",
           message: "Identidad verificada exitosamente en RENIEC.",
         });
       } else {
-        // Solo si RENIEC no lo encuentra se habilita la edición manual
         setIsNameLocked(false);
         setDniFeedback({
           type: "info",
@@ -191,7 +287,6 @@ export default function CheckoutView() {
     }
   };
 
-  // Botón de basurero: borra el DNI, limpia nombres autocompletados y desbloquea edición
   const handleClearDni = () => {
     setDni("");
     setDniFeedback(null);
@@ -224,7 +319,7 @@ export default function CheckoutView() {
   };
 
   // -------------------------------------------------------------
-  // PASO 2: Método de Entrega, Horarios y Direcciones (Intacto)
+  // PASO 2: Método de Entrega, SLA Dinámico y Direcciones
   // -------------------------------------------------------------
   const [deliveryType, setDeliveryType] = useState("scheduled");
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
@@ -249,11 +344,6 @@ export default function CheckoutView() {
 
   const [coveragePolygon, setCoveragePolygon] = useState(null);
   const [storeLocationData, setStoreLocationData] = useState(null);
-  const [deliveryPricing, setDeliveryPricing] = useState({
-    baseFee: 7.0,
-    baseKm: 3.0,
-    pricePerExtraKm: 1.5,
-  });
 
   useEffect(() => {
     let isMounted = true;
@@ -265,13 +355,6 @@ export default function CheckoutView() {
         }
         if (settings.storeLocation) {
           setStoreLocationData(settings.storeLocation);
-        }
-        if (settings.pricing) {
-          setDeliveryPricing({
-            baseFee: Number(settings.pricing.baseFee ?? 7.0),
-            baseKm: Number(settings.pricing.baseKm ?? 3.0),
-            pricePerExtraKm: Number(settings.pricing.pricePerExtraKm ?? 1.5),
-          });
         }
       })
       .catch(() => { });
@@ -355,9 +438,7 @@ export default function CheckoutView() {
             defaultAddr.latitude != null ? Number(defaultAddr.latitude) : null
           );
           setDeliveryLongitude(
-            defaultAddr.longitude != null
-              ? Number(defaultAddr.longitude)
-              : null
+            defaultAddr.longitude != null ? Number(defaultAddr.longitude) : null
           );
         } else {
           setSavedAddresses([]);
@@ -402,6 +483,62 @@ export default function CheckoutView() {
       deliveryZones[0],
     [deliveryZones, selectedZoneId]
   );
+
+  const deliveryDistanceKm = useMemo(() => {
+    if (
+      !activeCoordinates ||
+      !storeLocationData?.lat ||
+      !storeLocationData?.lng
+    ) {
+      return null;
+    }
+    return calculateDistanceKm(
+      [storeLocationData.lat, storeLocationData.lng],
+      activeCoordinates
+    );
+  }, [activeCoordinates, storeLocationData]);
+
+  // ESQUEMA TARIFARIO ACORDADO
+  const deliveryCost = useMemo(() => {
+    if (deliveryType === "pickup") return 0;
+    if (deliveryType === "scheduled") return 5.0; // S/ 5.00 plano para programado
+
+    // Express: S/ 8.00 base hasta 3 km + S/ 1.00 por cada km adicional
+    const km = deliveryDistanceKm ?? 2.0;
+    const baseFee = 8.0;
+    if (km <= 3.0) return baseFee;
+    const extraKm = Math.ceil(km - 3.0);
+    return Number((baseFee + extraKm * 1.0).toFixed(2));
+  }, [deliveryType, deliveryDistanceKm]);
+
+  const totalAmount = subtotal + deliveryCost;
+
+  // SLA DINÁMICO: 15 min alistamiento + Factor de tortuosidad urbano (1.35) a 20 km/h
+  const dynamicSla = useMemo(() => {
+    const km = deliveryDistanceKm ?? 3.0;
+    const roadDistance = km * 1.35;
+    const transitMinutes = Math.round((roadDistance / 20) * 60);
+    const totalMinutes = 15 + transitMinutes;
+    const minRange = Math.max(35, totalMinutes - 10);
+    const maxRange = totalMinutes + 15;
+
+    const now = new Date();
+    const start = new Date(now.getTime() + minRange * 60000);
+    const end = new Date(now.getTime() + maxRange * 60000);
+
+    const formatH = (d) =>
+      String(d.getHours()).padStart(2, "0") +
+      ":" +
+      String(d.getMinutes()).padStart(2, "0");
+
+    return {
+      totalEstimated: maxRange,
+      label: `Llegada estimada hoy entre las ${formatH(start)} y ${formatH(
+        end
+      )} hrs (${minRange}-${maxRange} min)`,
+      isHighDemand: maxRange > 90,
+    };
+  }, [deliveryDistanceKm]);
 
   const handleMapLocationChange = async ({ lat, lng }) => {
     setDeliveryLatitude(lat);
@@ -452,7 +589,7 @@ export default function CheckoutView() {
         }
       }
     } catch {
-      // Fallo silencioso
+      // Silencioso
     } finally {
       setIsGeocoding(false);
     }
@@ -476,61 +613,56 @@ export default function CheckoutView() {
         setDeliveryLongitude(lon);
       }
     } catch {
-      // Fallo silencioso
+      // Silencioso
     } finally {
       setIsGeocoding(false);
     }
   };
 
-  const expressTimeWindow = useMemo(() => {
-    const now = new Date();
-    const start = new Date(now.getTime() + 45 * 60000);
-    const end = new Date(now.getTime() + 90 * 60000);
-    const formatH = (d) =>
-      String(d.getHours()).padStart(2, "0") +
-      ":" +
-      String(d.getMinutes()).padStart(2, "0");
-    return (
-      "Tu pedido llegará hoy entre las " +
-      formatH(start) +
-      " y " +
-      formatH(end) +
-      " hrs"
-    );
-  }, []);
+  // Validación reactiva onBlur (Pasos 1 y 2)
+  const [touched, setTouched] = useState({});
+  const markTouched = (field) =>
+    setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
 
-  const deliveryDistanceKm = useMemo(() => {
-    if (
-      !activeCoordinates ||
-      !storeLocationData?.lat ||
-      !storeLocationData?.lng
-    ) {
-      return null;
-    }
-    return calculateDistanceKm(
-      [storeLocationData.lat, storeLocationData.lng],
-      activeCoordinates
-    );
-  }, [activeCoordinates, storeLocationData]);
+  const fieldErrors = {
+    firstName:
+      firstName.trim().length < 2
+        ? "Ingresa tus nombres (mínimo 2 caracteres)."
+        : "",
+    lastName:
+      lastName.trim().length < 2
+        ? "Ingresa tus apellidos (mínimo 2 caracteres)."
+        : "",
+    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+      ? ""
+      : "Ingresa un correo válido, sin espacios.",
+    phone: /^9\d{8}$/.test(phone.trim())
+      ? ""
+      : "El celular debe tener 9 dígitos y empezar con 9.",
+    dni:
+      dni.length > 0 && !/^\d{8}$/.test(dni)
+        ? "El DNI debe tener exactamente 8 dígitos."
+        : "",
+    deliveryAddress:
+      deliveryType !== "pickup" && deliveryAddress.trim().length < 4
+        ? "Ingresa una dirección válida (mínimo 4 caracteres)."
+        : "",
+    deliveryReference:
+      deliveryType !== "pickup" && deliveryReference.trim().length < 3
+        ? "Ingresa una referencia válida (mínimo 3 caracteres)."
+        : "",
+  };
 
-  const deliveryCost = useMemo(() => {
-    if (deliveryType === "pickup") return 0;
+  const errorOf = (field) => (touched[field] ? fieldErrors[field] : "");
 
-    let baseShippingFee = selectedZone?.delivery_cost || 10.0;
-    if (deliveryDistanceKm !== null) {
-      baseShippingFee = calculateDeliveryFee(
-        deliveryDistanceKm,
-        deliveryPricing
-      );
-    }
-
-    if (deliveryType === "express") {
-      return Number((baseShippingFee + 5.0).toFixed(2));
-    }
-    return baseShippingFee;
-  }, [deliveryType, selectedZone, deliveryDistanceKm, deliveryPricing]);
-
-  const totalAmount = subtotal + deliveryCost;
+  const renderFieldError = (field) => {
+    const error = errorOf(field);
+    return error ? (
+      <p className="text-[11px] text-rose-600 font-medium mt-1 animate-in fade-in duration-150">
+        {error}
+      </p>
+    ) : null;
+  };
 
   const isStep2Valid = useMemo(() => {
     if (deliveryType === "pickup") return true;
@@ -548,11 +680,79 @@ export default function CheckoutView() {
     deliveryReference,
   ]);
 
-  const handleNextFromStep2 = (e) => {
+  useEffect(() => {
+    if (!isExpressAvailable && deliveryType === "express") {
+      setDeliveryType("scheduled");
+    }
+  }, [isExpressAvailable, deliveryType]);
+
+  // TRANSICIÓN AL PASO 3: PRE-FLIGHT CHECK, RESERVA ATÓMICA Y ROLLBACK
+  const handleNextFromStep2 = async (e) => {
     if (e) e.preventDefault();
-    if (isStep2Valid) {
+    if (!isStep2Valid || isValidatingPreflight) return;
+
+    setIsValidatingPreflight(true);
+    setPreflightError("");
+
+    let activeToken =
+      reservationToken && reservationTimeLeft > 0 ? reservationToken : null;
+
+    try {
+      // 1. Primero: Validar Pre-vuelo sin reservar inventario
+      const initialPreflight = await verifyPreflight({
+        reservationToken: null,
+        deliveryType,
+        totalItems: totalUnits,
+      });
+
+      if (!initialPreflight?.success) {
+        throw new Error(
+          initialPreflight?.message ||
+            "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
+        );
+      }
+
+      // 2. Segundo: Reservar Stock (reutilizar token vigente o generar uno nuevo)
+      if (!activeToken) {
+        const reserveResult = await reserveStock(items, user?.id || null);
+        if (!reserveResult?.success || !reserveResult?.reservation_token) {
+          throw new Error(
+            reserveResult?.message ||
+              "Inventario insuficiente para una o más prendas seleccionadas."
+          );
+        }
+
+        activeToken = reserveResult.reservation_token;
+        setReservationToken(activeToken);
+        setReservationTimeLeft(600);
+      }
+
+      // 3. Tercero: Re-verificación Pre-vuelo con Token
+      const preflightResult = await verifyPreflight({
+        reservationToken: activeToken,
+        deliveryType,
+        totalItems: totalUnits,
+      });
+
+      if (!preflightResult?.success) {
+        throw new Error(
+          preflightResult?.message ||
+            "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
+        );
+      }
+
       setCompletedSteps((prev) => ({ ...prev, 2: true }));
       setCurrentStep(3);
+    } catch (err) {
+      if (activeToken) {
+        await releaseStock(activeToken);
+        setReservationToken(null);
+      }
+      setPreflightError(
+        err.message || "Error al verificar las condiciones del pedido."
+      );
+    } finally {
+      setIsValidatingPreflight(false);
     }
   };
 
@@ -563,7 +763,7 @@ export default function CheckoutView() {
   const [yapeOpNumber, setYapeOpNumber] = useState("");
   const [culqiError, setCulqiError] = useState(null);
 
-  const [receiptType, setReceiptType] = useState("boleta");
+  const [receiptType, setReceiptType] = useState("nota_venta");
 
   const [useCustomBoleta, setUseCustomBoleta] = useState(false);
   const [boletaDni, setBoletaDni] = useState("");
@@ -584,7 +784,21 @@ export default function CheckoutView() {
     [dni]
   );
 
-  // Búsqueda manual de DNI para Boleta en Paso 3 (Bloqueo estricto si RENIEC lo encuentra)
+  const handleSelectReceiptType = (type) => {
+    setReceiptType(type);
+    if (type === "boleta" && hasValidStep1Dni && !boletaDni) {
+      setUseCustomBoleta(true);
+      setBoletaDni(String(dni).replace(/\D/g, ""));
+      setBoletaFullName(`${firstName} ${lastName}`.trim());
+      setIsBoletaNameLocked(isNameLocked);
+    }
+  };
+
+  const handleToggleElectronicReceipt = (checked) => {
+    if (checked) handleSelectReceiptType("boleta");
+    else setReceiptType("nota_venta");
+  };
+
   const triggerBoletaDniLookup = async (dniToQuery = boletaDni) => {
     const clean = String(dniToQuery || "")
       .replace(/\D/g, "")
@@ -752,6 +966,7 @@ export default function CheckoutView() {
     savedAddresses,
     deliveryLatitude,
     deliveryLongitude,
+    reservationToken,
   };
 
   const maybeSaveNewAddress = async () => {
@@ -793,6 +1008,8 @@ export default function CheckoutView() {
     methodOverride = "culqi_gateway"
   ) => {
     const ctx = orderContextRef.current;
+    const normalizedMethod =
+      methodOverride === "cash_on_delivery" ? "contraentrega" : methodOverride;
     const fullName = [ctx.firstName.trim(), ctx.lastName.trim()]
       .join(" ")
       .trim();
@@ -832,6 +1049,9 @@ export default function CheckoutView() {
       ctx.deliveryType === "pickup"
         ? null
         : selectedAddress?.longitude ?? ctx.deliveryLongitude ?? null;
+
+    const targetInvoiceType =
+      ctx.receiptType === "nota_venta" ? "none" : ctx.receiptType;
 
     const invoicePrefix =
       ctx.receiptType === "factura"
@@ -909,15 +1129,16 @@ export default function CheckoutView() {
       scheduledTimeSlot: resolvedSlot,
       subtotal: ctx.subtotal,
       totalAmount: ctx.totalAmount,
-      payment_method: methodOverride,
-      paymentMethod: methodOverride,
+      payment_method: normalizedMethod,
+      paymentMethod: normalizedMethod,
       payment_status: paymentStatus,
       paymentStatus,
       payment_gateway_tx_id: gatewayTxId,
       paymentGatewayTxId: gatewayTxId,
-      invoice_type: ctx.receiptType,
+      invoice_type: targetInvoiceType,
       invoice_data: invoiceData,
       items: ctx.items,
+      reservationToken: ctx.reservationToken,
     };
   };
 
@@ -1119,7 +1340,7 @@ export default function CheckoutView() {
         const { error: updateOrderError } = await supabase
           .from("orders")
           .update({
-            payment_method: paymentMethod,
+            payment_method: orderPayload.payment_method,
             payment_status: targetStatus,
             payment_gateway_tx_id: targetTxId,
             invoice_type: orderPayload.invoice_type,
@@ -1134,7 +1355,7 @@ export default function CheckoutView() {
 
         const updatedOrderObj = {
           ...createdOrderRef.current,
-          payment_method: paymentMethod,
+          payment_method: orderPayload.payment_method,
           payment_status: targetStatus,
           payment_gateway_tx_id: targetTxId,
           invoice_type: orderPayload.invoice_type,
@@ -1222,7 +1443,7 @@ export default function CheckoutView() {
           htmlFor={prefixId + "-address"}
           className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5"
         >
-          Dirección Exacta <span className="text-rose-600">*</span>
+          Dirección Exacta{REQUIRED_MARK}
         </label>
         <div className="flex gap-2 items-center">
           <div className="flex-1">
@@ -1231,6 +1452,8 @@ export default function CheckoutView() {
               placeholder="Calle / Av. y número (presiona la lupa para ubicar en el mapa)"
               value={deliveryAddress}
               onChange={(e) => setDeliveryAddress(e.target.value)}
+              onBlur={() => markTouched("deliveryAddress")}
+              className={errorOf("deliveryAddress") ? INPUT_ERROR_CLASS : ""}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -1268,24 +1491,23 @@ export default function CheckoutView() {
           Escribe tu dirección y presiona el botón de lupa para fijar el pin en
           el mapa.
         </span>
+        {renderFieldError("deliveryAddress")}
       </div>
 
       <div>
         <Input
-          label="Referencia de Llegada (Obligatoria) *"
+          label={<>Referencia de Llegada{REQUIRED_MARK}</>}
           id={prefixId + "-ref"}
           placeholder="Ej. Dpto 402, portón negro frente al parque, timbre 2"
           value={deliveryReference}
           onChange={(e) => setDeliveryReference(e.target.value)}
+          onBlur={() => markTouched("deliveryReference")}
+          className={
+            errorOf("deliveryReference") ? INPUT_ERROR_CLASS : ""
+          }
           required
         />
-        {deliveryReference.trim().length > 0 &&
-          deliveryReference.trim().length < 3 && (
-            <span className="text-[11px] text-rose-600 mt-1 block">
-              Ingresa una referencia válida (mínimo 3 caracteres) para el
-              repartidor.
-            </span>
-          )}
+        {renderFieldError("deliveryReference")}
       </div>
     </div>
   );
@@ -1411,7 +1633,7 @@ export default function CheckoutView() {
                       htmlFor="checkout-dni"
                       className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                     >
-                      DNI (Opcional)
+                      DNI{OPTIONAL_MARK}
                     </label>
                     {isSearchingDni && (
                       <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -1431,6 +1653,8 @@ export default function CheckoutView() {
                         placeholder="Ingresa 8 dígitos numéricos"
                         value={dni}
                         onChange={handleDniChange}
+                        onBlur={() => markTouched("dni")}
+                        className={errorOf("dni") ? INPUT_ERROR_CLASS : ""}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
@@ -1473,12 +1697,14 @@ export default function CheckoutView() {
                     )}
                   </div>
 
-                  {dni.length > 0 && dni.length < 8 && (
+                  {dni.length > 0 && dni.length < 8 && !errorOf("dni") && (
                     <span className="text-[11px] text-amber-600 mt-1 block">
                       Completa los 8 dígitos o presiona el botón de papelera
                       para continuar sin DNI.
                     </span>
                   )}
+
+                  {renderFieldError("dni")}
 
                   {dniFeedback && (
                     <div
@@ -1500,53 +1726,70 @@ export default function CheckoutView() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Input
-                    label="Nombres"
-                    id="checkout-firstname"
-                    placeholder="Tus nombres"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    disabled={isNameLocked}
-                    readOnly={isNameLocked}
-                    className={
-                      isNameLocked
-                        ? "bg-slate-100 text-slate-700 cursor-not-allowed"
-                        : ""
-                    }
-                    required
-                  />
-
-                  <Input
-                    label="Apellidos"
-                    id="checkout-lastname"
-                    placeholder="Tus apellidos"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    disabled={isNameLocked}
-                    readOnly={isNameLocked}
-                    className={
-                      isNameLocked
-                        ? "bg-slate-100 text-slate-700 cursor-not-allowed"
-                        : ""
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Input
-                    label="Correo Electrónico"
-                    id="checkout-email"
-                    type="email"
-                    placeholder="tucorreo@ejemplo.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
+                  <div>
+                    <Input
+                      label={<>Nombres{REQUIRED_MARK}</>}
+                      id="checkout-firstname"
+                      placeholder="Tus nombres"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      onBlur={() => markTouched("firstName")}
+                      disabled={isNameLocked}
+                      readOnly={isNameLocked}
+                      className={
+                        isNameLocked
+                          ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                          : errorOf("firstName")
+                            ? INPUT_ERROR_CLASS
+                            : ""
+                      }
+                      required
+                    />
+                    {renderFieldError("firstName")}
+                  </div>
 
                   <div>
                     <Input
-                      label="WhatsApp / Celular"
+                      label={<>Apellidos{REQUIRED_MARK}</>}
+                      id="checkout-lastname"
+                      placeholder="Tus apellidos"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      onBlur={() => markTouched("lastName")}
+                      disabled={isNameLocked}
+                      readOnly={isNameLocked}
+                      className={
+                        isNameLocked
+                          ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                          : errorOf("lastName")
+                            ? INPUT_ERROR_CLASS
+                            : ""
+                      }
+                      required
+                    />
+                    {renderFieldError("lastName")}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Input
+                      label={<>Correo Electrónico{REQUIRED_MARK}</>}
+                      id="checkout-email"
+                      type="email"
+                      placeholder="tucorreo@ejemplo.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      onBlur={() => markTouched("email")}
+                      className={errorOf("email") ? INPUT_ERROR_CLASS : ""}
+                      required
+                    />
+                    {renderFieldError("email")}
+                  </div>
+
+                  <div>
+                    <Input
+                      label={<>WhatsApp / Celular{REQUIRED_MARK}</>}
                       id="checkout-phone"
                       type="tel"
                       placeholder="9XXXXXXXX (9 dígitos)"
@@ -1554,11 +1797,15 @@ export default function CheckoutView() {
                       onChange={(e) =>
                         setPhone(e.target.value.replace(/\D/g, "").slice(0, 9))
                       }
+                      onBlur={() => markTouched("phone")}
+                      className={errorOf("phone") ? INPUT_ERROR_CLASS : ""}
                       required
                     />
-                    <span className="text-[10px] text-brand-muted mt-1 block">
-                      Usado para validar el pago y coordinar la entrega.
-                    </span>
+                    {renderFieldError("phone") || (
+                      <span className="text-[10px] text-brand-muted mt-1 block">
+                        Usado para validar el pago y coordinar la entrega.
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1578,7 +1825,7 @@ export default function CheckoutView() {
           )}
 
           {/* ========================================================= */}
-          {/* PASO 2: Método de Entrega y Horarios (Intacto) */}
+          {/* PASO 2: Método de Entrega y Horarios */}
           {/* ========================================================= */}
           {currentStep === 2 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
@@ -1588,9 +1835,21 @@ export default function CheckoutView() {
                 </h2>
                 <p className="text-xs text-brand-secondary mt-0.5">
                   Elige la modalidad de entrega y verifica tu ubicación dentro
-                  del polígono de cobertura.
+                  del polígono delimitado.
                 </p>
               </div>
+
+              {preflightError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-bold">
+                      Inconveniente para continuar:
+                    </strong>
+                    <span>{preflightError}</span>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-6">
                 {deliveryType !== "pickup" && isOutOfCoverage && (
@@ -1644,33 +1903,43 @@ export default function CheckoutView() {
                   </label>
 
                   <label
-                    onClick={() => setDeliveryType("express")}
+                    onClick={() => isExpressAvailable && setDeliveryType("express")}
                     className={
-                      "p-3.5 rounded-card border cursor-pointer transition-all flex flex-col justify-between select-none " +
-                      (deliveryType === "express"
-                        ? "border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
-                        : "border-border bg-surface-card hover:border-border-strong")
+                      "p-3.5 rounded-card border transition-all flex flex-col justify-between select-none " +
+                      (!isExpressAvailable
+                        ? "opacity-50 cursor-not-allowed pointer-events-none border-border bg-surface-card"
+                        : deliveryType === "express"
+                          ? "cursor-pointer border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
+                          : "cursor-pointer border-border bg-surface-card hover:border-border-strong")
                     }
                   >
                     <input
                       type="radio"
                       name="delivery-type"
+                      value="express"
+                      disabled={!isExpressAvailable}
                       checked={deliveryType === "express"}
-                      onChange={() => setDeliveryType("express")}
+                      onChange={() => isExpressAvailable && setDeliveryType("express")}
                       className="sr-only"
                     />
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Zap className="w-5 h-5 text-accent" />
-                        <Badge variant="warning" className="text-[10px]">
-                          Mismo Día
-                        </Badge>
+                        {isExpressAvailable ? (
+                          <Badge variant="warning" className="text-[10px]">
+                            Mismo Día
+                          </Badge>
+                        ) : (
+                          <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
+                            No disponible hoy
+                          </span>
+                        )}
                       </div>
                       <span className="block text-xs font-bold text-brand-primary">
                         Envío Express
                       </span>
                       <span className="block text-[11px] text-brand-secondary mt-1 leading-snug">
-                        Entrega prioritaria en 45 a 90 min
+                        Prioritario (S/ 8.00 base)
                       </span>
                     </div>
                   </label>
@@ -1702,7 +1971,7 @@ export default function CheckoutView() {
                         Envío Programado
                       </span>
                       <span className="block text-[11px] text-brand-secondary mt-1 leading-snug">
-                        Elige tu ventana horaria preferida
+                        Día siguiente (S/ 5.00 plano)
                       </span>
                     </div>
                   </label>
@@ -1750,10 +2019,15 @@ export default function CheckoutView() {
                 {deliveryType !== "pickup" && (
                   <div className="space-y-5 pt-2 border-t border-border">
                     {deliveryType === "express" && (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
+                      <div
+                        className={`p-3 rounded text-xs flex items-center gap-2 ${dynamicSla.isHighDemand
+                          ? "bg-amber-50 border border-amber-300 text-amber-900"
+                          : "bg-emerald-50 border border-emerald-200 text-emerald-900"
+                          }`}
+                      >
                         <Zap className="w-4 h-4 text-accent shrink-0" />
                         <span className="font-semibold">
-                          {expressTimeWindow}
+                          {dynamicSla.label}
                         </span>
                       </div>
                     )}
@@ -1868,10 +2142,7 @@ export default function CheckoutView() {
                                     <p className="text-[11px] text-brand-secondary mt-0.5">
                                       {zoneInfo.name} &bull; Flete:{" "}
                                       <span className="font-mono font-medium text-brand-primary">
-                                        S/{" "}
-                                        {isSelected
-                                          ? deliveryCost.toFixed(2)
-                                          : Number(zoneInfo.cost).toFixed(2)}
+                                        S/ {deliveryCost.toFixed(2)}
                                       </span>
                                     </p>
                                     {addr.reference && (
@@ -1909,15 +2180,22 @@ export default function CheckoutView() {
                         {selectedAddressMode === "saved" && (
                           <div className="pt-2">
                             <Input
-                              label="Referencia de Llegada (Obligatoria) *"
+                              label={<>Referencia de Llegada{REQUIRED_MARK}</>}
                               id="checkout-saved-ref"
                               placeholder="Confirma o detalla la referencia del domicilio"
                               value={deliveryReference}
                               onChange={(e) =>
                                 setDeliveryReference(e.target.value)
                               }
+                              onBlur={() => markTouched("deliveryReference")}
+                              className={
+                                errorOf("deliveryReference")
+                                  ? INPUT_ERROR_CLASS
+                                  : ""
+                              }
                               required
                             />
+                            {renderFieldError("deliveryReference")}
                           </div>
                         )}
 
@@ -1965,7 +2243,7 @@ export default function CheckoutView() {
                               {saveAddressForFuture && (
                                 <div className="pl-6 max-w-xs">
                                   <Input
-                                    label="Alias de la dirección"
+                                    label={<>Alias de la dirección{OPTIONAL_MARK}</>}
                                     id="checkout-new-alias"
                                     placeholder="Ej. Casa, Oficina"
                                     value={newAddressAlias}
@@ -2042,10 +2320,13 @@ export default function CheckoutView() {
                       type="button"
                       variant="primary"
                       size="md"
-                      disabled={!isStep2Valid}
+                      disabled={!isStep2Valid || isValidatingPreflight}
+                      isLoading={isValidatingPreflight}
                       onClick={handleNextFromStep2}
                     >
-                      Continuar al Pago
+                      {isValidatingPreflight
+                        ? "Verificando disponibilidad..."
+                        : "Continuar al Pago"}
                       <ChevronRight className="w-4 h-4 ml-1.5" />
                     </Button>
                   </div>
@@ -2055,86 +2336,85 @@ export default function CheckoutView() {
           )}
 
           {/* ========================================================= */}
-          {/* PASO 3: Pago y Comprobante */}
+          {/* PASO 3: Pago y Comprobante (Con Countdown de Reserva) */}
           {/* ========================================================= */}
           {currentStep === 3 && (
             <div className="bg-surface-card border border-border rounded-card p-6 shadow-subtle space-y-6 animate-in fade-in duration-150">
-              <div className="border-b border-border pb-3">
-                <h2 className="text-base font-bold text-brand-primary">
-                  3. Pago y Comprobante
-                </h2>
-                <p className="text-xs text-brand-secondary mt-0.5">
-                  Selecciona tu modalidad de pago y el tipo de comprobante
-                  electrónico.
-                </p>
+              <div className="border-b border-border pb-3 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-brand-primary">
+                    3. Pago y Comprobante
+                  </h2>
+                  <p className="text-xs text-brand-secondary mt-0.5">
+                    Selecciona tu modalidad de pago y el tipo de comprobante
+                    electrónico.
+                  </p>
+                </div>
+
+                {reservationToken && (
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold shadow-xs">
+                    <Timer className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                    <span>
+                      Reserva activa: {formatTimer(reservationTimeLeft)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <form onSubmit={handleConfirmOrder} className="space-y-6">
                 {/* Selector de Comprobante */}
                 <div className="space-y-3">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-                    Tipo de Comprobante
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
+                    Comprobante de Pago
+                  </span>
+
+                  <label className="flex items-start gap-3 p-3.5 rounded-card border border-border bg-surface-card cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={receiptType !== "nota_venta"}
+                      onChange={(e) =>
+                        handleToggleElectronicReceipt(e.target.checked)
+                      }
+                      className="mt-0.5 w-4 h-4 text-accent border-border rounded"
+                    />
+                    <span className="text-sm font-semibold text-brand-primary">
+                      Solicitar comprobante electrónico (Boleta o Factura)
+                    </span>
                   </label>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {[
-                      {
-                        id: "nota_venta",
-                        title: "Nota de Venta",
-                        desc: "Control interno de pedido",
-                      },
-                      {
-                        id: "boleta",
-                        title: "Boleta de Venta",
-                        desc: "Consumo personal / DNI",
-                      },
-                      {
-                        id: "factura",
-                        title: "Factura Electrónica",
-                        desc: "Para empresas / RUC",
-                      },
-                    ].map((item) => {
-                      const active = receiptType === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setReceiptType(item.id)}
-                          className={
-                            "p-3.5 rounded-card border text-left transition-all flex flex-col justify-between " +
-                            (active
-                              ? "border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary shadow-xs"
-                              : "border-border bg-surface-card hover:border-border-strong")
-                          }
-                        >
-                          <div className="flex items-center justify-between w-full mb-1">
-                            <span className="text-sm font-bold text-brand-primary">
-                              {item.title}
-                            </span>
-                            <div
-                              className={
-                                "w-4 h-4 rounded-full border flex items-center justify-center " +
-                                (active
-                                  ? "border-brand-primary bg-brand-primary text-white"
-                                  : "border-border bg-white")
-                              }
-                            >
-                              {active && <Check className="w-2.5 h-2.5" />}
-                            </div>
-                          </div>
-                          <span className="text-xs text-brand-secondary">
-                            {item.desc}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Nota de Venta */}
-                  {receiptType === "nota_venta" && (
-                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary">
-                      Comprobante interno para control de pedido y seguimiento
-                      de entrega.
+                  {receiptType === "nota_venta" ? (
+                    <div className="p-3 bg-surface-subtle border border-border rounded-card text-xs text-brand-secondary animate-in fade-in duration-150">
+                      Sin comprobante electrónico. Se registrará una nota de
+                      venta interna para el control y seguimiento de tu pedido.
+                    </div>
+                  ) : (
+                    <div
+                      className="flex flex-wrap gap-2 animate-in fade-in duration-150"
+                      role="group"
+                      aria-label="Tipo de comprobante electrónico"
+                    >
+                      {[
+                        { id: "boleta", title: "Boleta de Venta" },
+                        { id: "factura", title: "Factura Electrónica" },
+                      ].map((item) => {
+                        const active = receiptType === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => handleSelectReceiptType(item.id)}
+                            className={
+                              "px-4 h-9 rounded-full border text-xs font-bold transition-colors " +
+                              (active
+                                ? "border-brand-primary bg-brand-primary text-white"
+                                : "border-border bg-surface-card text-brand-secondary hover:border-brand-primary")
+                            }
+                          >
+                            {item.title}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -2205,7 +2485,7 @@ export default function CheckoutView() {
                                 htmlFor="boleta-custom-dni"
                                 className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                               >
-                                DNI del Titular (8 dígitos)
+                                DNI del Titular (8 dígitos){REQUIRED_MARK}
                               </label>
                               {isSearchingBoletaDni && (
                                 <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -2225,6 +2505,13 @@ export default function CheckoutView() {
                                   placeholder="Ingresa 8 dígitos numéricos"
                                   value={boletaDni}
                                   onChange={handleBoletaDniChange}
+                                  onBlur={() => markTouched("boletaDni")}
+                                  className={
+                                    touched.boletaDni &&
+                                    !/^\d{8}$/.test(boletaDni)
+                                      ? INPUT_ERROR_CLASS
+                                      : ""
+                                  }
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                       e.preventDefault();
@@ -2256,6 +2543,13 @@ export default function CheckoutView() {
                               </Button>
                             </div>
 
+                            {touched.boletaDni &&
+                              !/^\d{8}$/.test(boletaDni) && (
+                                <p className="text-[11px] text-rose-600 font-medium mt-1 animate-in fade-in duration-150">
+                                  El DNI debe tener exactamente 8 dígitos.
+                                </p>
+                              )}
+
                             {boletaDniFeedback && (
                               <p
                                 className={
@@ -2275,7 +2569,7 @@ export default function CheckoutView() {
                               htmlFor="boleta-custom-name"
                               className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1"
                             >
-                              Nombres y Apellidos del Titular
+                              Nombres y Apellidos del Titular{REQUIRED_MARK}
                             </label>
                             <Input
                               id="boleta-custom-name"
@@ -2314,7 +2608,7 @@ export default function CheckoutView() {
                             htmlFor="checkout-ruc"
                             className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
                           >
-                            RUC (11 dígitos) *
+                            RUC (11 dígitos, verificado en SUNAT){REQUIRED_MARK}
                           </label>
                           {isSearchingRuc && (
                             <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
@@ -2334,6 +2628,12 @@ export default function CheckoutView() {
                               placeholder="20XXXXXXXXX o 10XXXXXXXXX"
                               value={ruc}
                               onChange={handleRucChange}
+                              onBlur={() => markTouched("ruc")}
+                              className={
+                                touched.ruc && !isValidRucFormat(ruc)
+                                  ? INPUT_ERROR_CLASS
+                                  : ""
+                              }
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
@@ -2362,6 +2662,12 @@ export default function CheckoutView() {
                           </Button>
                         </div>
 
+                        {touched.ruc && !isValidRucFormat(ruc) && (
+                          <p className="text-[11px] text-rose-600 font-medium mt-1 animate-in fade-in duration-150">
+                            El RUC debe tener 11 dígitos y empezar con 10 o 20.
+                          </p>
+                        )}
+
                         {rucFeedback && (
                           <p
                             className={
@@ -2379,7 +2685,7 @@ export default function CheckoutView() {
                       <div className="space-y-3">
                         <div className="w-full col-span-full">
                           <Input
-                            label="Razón Social"
+                            label={<>Razón Social{REQUIRED_MARK}</>}
                             id="checkout-company"
                             placeholder="Se autocompleta al validar el RUC con la lupa"
                             value={companyName}
@@ -2391,7 +2697,7 @@ export default function CheckoutView() {
 
                         <div className="w-full col-span-full">
                           <Input
-                            label="Dirección Fiscal"
+                            label={<>Dirección Fiscal{REQUIRED_MARK}</>}
                             id="checkout-fiscal-address"
                             placeholder="Se autocompleta al validar el RUC con la lupa"
                             value={fiscalAddress}
@@ -2404,14 +2710,14 @@ export default function CheckoutView() {
                   )}
                 </div>
 
-                {/* Tarjetas de Método de Pago */}
+                {/* Métodos de Pago Dinámicos desde store_settings */}
                 <div className="space-y-3 pt-4 border-t border-border">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                     Método de Pago
                   </label>
 
                   <div className="space-y-3">
-                    {/* OPCIÓN 1: Yape / Plin / Transferencia Bancaria */}
+                    {/* Billeteras Digitales y Transferencias Dinámicas */}
                     <div
                       className={
                         "rounded-card border transition-all overflow-hidden " +
@@ -2438,14 +2744,12 @@ export default function CheckoutView() {
                           )}
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <span className="text-sm font-bold text-brand-primary">
-                              Yape / Plin o Transferencia Bancaria Directa
-                            </span>
-                          </div>
+                          <span className="text-sm font-bold text-brand-primary">
+                            Yape / Plin o Transferencia Bancaria Directa
+                          </span>
                           <p className="text-xs text-brand-secondary mt-1">
-                            Escanea nuestro QR o transfiere a nuestras cuentas
-                            corporativas BCP, Interbank o BBVA.
+                            Paga escaneando nuestro QR o mediante transferencia
+                            a nuestras cuentas oficiales autorizadas.
                           </p>
                         </div>
                       </button>
@@ -2459,10 +2763,14 @@ export default function CheckoutView() {
                               </div>
                               <div>
                                 <span className="block text-xs font-bold text-brand-primary">
-                                  Yape / Plin: 987 654 321
+                                  Yape / Plin:{" "}
+                                  {dynamicSettings.paymentMethods?.digital_wallets
+                                    ?.yape_number || "987 654 321"}
                                 </span>
                                 <span className="block text-[11px] text-brand-secondary">
-                                  Titular: ERXIDI CONFECCIONES S.A.C.
+                                  Titular:{" "}
+                                  {dynamicSettings.paymentMethods?.digital_wallets
+                                    ?.holder_name || "ERXIDI Oficial"}
                                 </span>
                               </div>
                               <div className="px-3 py-1 rounded-badge bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold">
@@ -2479,9 +2787,12 @@ export default function CheckoutView() {
                               </div>
 
                               <div className="space-y-2">
-                                {BANK_ACCOUNTS.map((b) => (
+                                {(
+                                  dynamicSettings.paymentMethods?.bank_accounts ||
+                                  []
+                                ).map((b, idx) => (
                                   <div
-                                    key={b.bank}
+                                    key={idx}
                                     className="p-2.5 bg-white border border-border rounded-button text-xs space-y-1"
                                   >
                                     <div className="flex items-center justify-between">
@@ -2491,7 +2802,10 @@ export default function CheckoutView() {
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          handleCopyAccount(b.account, b.bank)
+                                          handleCopyAccount(
+                                            b.account_number,
+                                            b.bank
+                                          )
                                         }
                                         className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
                                       >
@@ -2502,7 +2816,8 @@ export default function CheckoutView() {
                                       </button>
                                     </div>
                                     <p className="font-mono text-[11px] text-brand-primary">
-                                      Cuenta: <strong>{b.account}</strong>
+                                      Cuenta:{" "}
+                                      <strong>{b.account_number}</strong>
                                     </p>
                                     <p className="font-mono text-[10px] text-brand-muted">
                                       CCI: {b.cci}
@@ -2515,7 +2830,7 @@ export default function CheckoutView() {
 
                           <div className="pt-3 border-t border-border">
                             <Input
-                              label="Número de Operación / Voucher (6 a 8 dígitos) *"
+                              label={<>Número de Operación / Voucher (6 a 8 dígitos){REQUIRED_MARK}</>}
                               id="checkout-yape-op"
                               placeholder="Ingresa el N° de operación de tu transferencia o Yape"
                               value={yapeOpNumber}
@@ -2531,7 +2846,7 @@ export default function CheckoutView() {
                       )}
                     </div>
 
-                    {/* OPCIÓN 2: Pasarela Culqi */}
+                    {/* Pasarela Culqi */}
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("culqi_gateway")}
@@ -2561,7 +2876,8 @@ export default function CheckoutView() {
                               Tarjetas de Crédito/Débito o Yape
                             </span>
                             <Badge variant="success" className="text-[10px]">
-                              <ShieldCheck className="w-3 h-3" /> Pago seguro con Culqi
+                              <ShieldCheck className="w-3 h-3" /> Pago seguro
+                              con Culqi
                             </Badge>
                           </div>
                           <CreditCard className="w-4 h-4 text-accent" />
@@ -2573,7 +2889,7 @@ export default function CheckoutView() {
                       </div>
                     </button>
 
-                    {/* OPCIÓN 3: Pago Contra Entrega */}
+                    {/* Pago Contra Entrega */}
                     <button
                       type="button"
                       disabled={!isCashOnDeliveryAllowed}
@@ -2608,17 +2924,14 @@ export default function CheckoutView() {
 
                       <div className="flex-1">
                         <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-brand-primary">
-                              Pago Contra Entrega (Efectivo al recibir)
-                            </span>
-                            {!isCashOnDeliveryAllowed && (
-                              <Badge variant="warning" className="text-[10px]">
-                                Solo cuentas verificadas
-                              </Badge>
-                            )}
-                          </div>
-                          <Banknote className="w-4 h-4 text-accent" />
+                          <span className="text-sm font-bold text-brand-primary">
+                            Pago Contra Entrega (Efectivo al recibir)
+                          </span>
+                          {!isCashOnDeliveryAllowed && (
+                            <Badge variant="warning" className="text-[10px]">
+                              Solo cuentas verificadas
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-brand-secondary mt-1">
                           Paga al repartidor al recibir tu pedido en la puerta
@@ -2665,7 +2978,12 @@ export default function CheckoutView() {
                     type="submit"
                     variant="primary"
                     size="md"
-                    disabled={!isStep3Valid || isSubmitting || isProcessing}
+                    disabled={
+                      !isStep3Valid ||
+                      isSubmitting ||
+                      isProcessing ||
+                      reservationTimeLeft <= 0
+                    }
                     isLoading={isSubmitting || isProcessing}
                     className="bg-accent hover:bg-accent-hover text-white px-8"
                   >

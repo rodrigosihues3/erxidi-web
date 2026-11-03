@@ -1,8 +1,58 @@
 import { supabase } from "../supabase";
 
 /**
- * Servicio transaccional para registrar pedidos, congelar precios (Snapshots)
- * y descontar stock de forma segura en Supabase.
+ * Reserva temporal de inventario previa al paso de pago (TTL 10 min).
+ */
+export async function reserveStock(cartItems, userId = null) {
+  const payload = cartItems.map((item) => ({
+    variant_id: Number(item.variantId),
+    quantity: Number(item.quantity) || 1,
+  }));
+
+  const { data, error } = await supabase.rpc("reserve_checkout_stock", {
+    p_items: payload,
+    p_user_id: userId,
+  });
+
+  if (error) {
+    throw new Error(error.message || "Error al verificar la disponibilidad de inventario.");
+  }
+
+  return data;
+}
+
+/**
+ * Libera una reserva temporal de inventario ante fallos de pre-vuelo o cancelación previa al pago.
+ */
+export async function releaseStock(reservationToken) {
+  if (!reservationToken) return { success: false };
+  try {
+    const { data, error } = await supabase.rpc("release_checkout_stock", {
+      p_reservation_token: reservationToken,
+    });
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    console.error("Error al liberar reserva de stock:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Verificación integral de pre-vuelo (Horarios, Tienda abierta, Flota disponible y Reserva).
+ */
+export async function verifyPreflight({ reservationToken = null, deliveryType, totalItems = 1 }) {
+  const { data, error } = await supabase.rpc("verify_checkout_preflight", {
+    p_reservation_token: reservationToken,
+    p_delivery_type: deliveryType,
+    p_total_items: totalItems,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Servicio transaccional para registrar pedidos y confirmar la reserva de stock.
  */
 export async function createOrder(orderPayload) {
   const items = Array.isArray(orderPayload.items) ? orderPayload.items : [];
@@ -17,7 +67,6 @@ export async function createOrder(orderPayload) {
   const orderNumber = "ERX-" + Date.now().toString().slice(-6);
 
   try {
-    // 1. Verificar disponibilidad real de stock y precios vigentes en base de datos
     const variantIds = items.map((item) => Number(item.variantId));
     const { data: dbVariants, error: variantsCheckError } = await supabase
       .from("product_variants")
@@ -28,9 +77,7 @@ export async function createOrder(orderPayload) {
       throw new Error("No se pudo verificar el inventario: " + variantsCheckError.message);
     }
 
-    const variantMap = new Map(
-      (dbVariants || []).map((v) => [Number(v.id), v])
-    );
+    const variantMap = new Map((dbVariants || []).map((v) => [Number(v.id), v]));
 
     let verifiedSubtotal = 0;
     const verifiedItemsPayload = [];
@@ -46,21 +93,6 @@ export async function createOrder(orderPayload) {
         };
       }
 
-      if (Number(dbVariant.stock) < requestedQty) {
-        return {
-          success: false,
-          error:
-            'Stock insuficiente para "' +
-            (item.name || dbVariant.sku) +
-            '". Disponible: ' +
-            dbVariant.stock +
-            ", solicitado: " +
-            requestedQty +
-            ".",
-        };
-      }
-
-      // Snapshot inmutable del precio unitario al momento de la venta
       const unitPrice = Number(dbVariant.products?.price ?? item.price);
       const itemSubtotal = Number((unitPrice * requestedQty).toFixed(2));
       verifiedSubtotal += itemSubtotal;
@@ -117,7 +149,7 @@ export async function createOrder(orderPayload) {
       status: "received",
     };
 
-    // 2. Inserción de orden principal
+    // 1. Inserción de la orden principal
     const { data: createdOrder, error: orderError } = await supabase
       .from("orders")
       .insert([orderData])
@@ -125,13 +157,10 @@ export async function createOrder(orderPayload) {
       .single();
 
     if (orderError) {
-      return {
-        success: false,
-        error: orderError.message,
-      };
+      return { success: false, error: orderError.message };
     }
 
-    // 3. Inserción de ítems congelados (Snapshot Pattern)
+    // 2. Inserción de ítems congelados (Snapshot Pattern)
     const orderItemsData = verifiedItemsPayload.map((row) => ({
       ...row,
       order_id: createdOrder.id,
@@ -142,7 +171,6 @@ export async function createOrder(orderPayload) {
       .insert(orderItemsData);
 
     if (itemsError) {
-      // Rollback compensatorio para evitar órdenes huérfanas sin ítems
       await supabase.from("orders").delete().eq("id", createdOrder.id);
       return {
         success: false,
@@ -150,7 +178,14 @@ export async function createOrder(orderPayload) {
       };
     }
 
-    // 4. Descuento atómico de stock en product_variants
+    // 3. Confirmar la reserva de stock y descontar inventario físico
+    if (orderPayload.reservationToken) {
+      await supabase
+        .from("stock_reservations")
+        .update({ status: "confirmed" })
+        .eq("reservation_token", orderPayload.reservationToken);
+    }
+
     for (const row of verifiedItemsPayload) {
       const { error: rpcError } = await supabase.rpc("decrement_variant_stock", {
         p_variant_id: row.variant_id,
@@ -158,7 +193,6 @@ export async function createOrder(orderPayload) {
       });
 
       if (rpcError) {
-        // Fallback directo en caso de que aún no se haya ejecutado el script SQL de la función RPC
         const currentVariant = variantMap.get(row.variant_id);
         const nextStock = Math.max(0, Number(currentVariant.stock) - row.quantity);
         await supabase

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Eye, Search, ChevronLeft, ChevronRight, PackageCheck, AlertOctagon, RotateCcw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import Button from "../../../components/ui/Button";
 import Input from "../../../components/ui/Input";
@@ -7,9 +7,24 @@ import Badge from "../../../components/ui/Badge";
 import { Card, CardHeader, CardTitle, CardContent } from "../../../components/ui/Card";
 import OrderStatusBadge from "../components/OrderStatusBadge";
 import { useAdminOrders } from "../hooks/useAdminOrders";
-import { getDeliveryStaff, assignOrderDelivery } from "../services/adminOrders.service";
+import {
+  getDeliveryStaff,
+  assignOrderDelivery,
+  markOrderReadyForDelivery,
+  resolveOrderIncident,
+} from "../services/adminOrders.service";
 
-const statuses = ["all", "received", "pendiente_pago", "en_preparacion", "en_camino", "entregado", "cancelado"];
+const statuses = [
+  "all",
+  "received",
+  "pendiente_pago",
+  "en_preparacion",
+  "por_asignar_repartidor",
+  "en_camino",
+  "incidencia_transporte",
+  "entregado",
+  "cancelado",
+];
 const invoices = ["all", "none", "boleta", "factura"];
 const payments = ["all", "yape_plin", "culqi_gateway", "transferencia", "tarjeta", "contraentrega", "efectivo"];
 
@@ -18,7 +33,9 @@ const labels = {
   received: "Recibido",
   pendiente_pago: "Pendiente de pago",
   en_preparacion: "En preparación",
+  por_asignar_repartidor: "Por asignar repartidor",
   en_camino: "En camino",
+  incidencia_transporte: "Incidencia en reparto",
   entregado: "Entregado",
   cancelado: "Cancelado",
   none: "Sin comprobante",
@@ -52,14 +69,6 @@ function formatConciseDate(dateStr) {
   const hours = String(d.getHours()).padStart(2, "0");
   const minutes = String(d.getMinutes()).padStart(2, "0");
   return `${day}/${month} · ${hours}:${minutes}`;
-}
-
-function extractDistrict(address) {
-  if (!address) return "—";
-  if (address.includes(" - ")) {
-    return address.split(" - ").pop().trim();
-  }
-  return address;
 }
 
 export default function OrdersListView() {
@@ -125,6 +134,35 @@ export default function OrdersListView() {
     }
   }
 
+  async function handleSendToPool(order) {
+    setUpdatingOrderId(order.id);
+    try {
+      const updated = await markOrderReadyForDelivery(order.id);
+      setLocalOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? { ...o, ...updated, status: "por_asignar_repartidor" } : o)),
+      );
+    } catch (err) {
+      window.alert(err.message || "Error al enviar pedido a la bolsa.");
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }
+
+  async function handleRequeueIncident(order) {
+    if (!window.confirm(`¿Reenviar el pedido #${order.order_number} a la bolsa de repartidores?`)) return;
+    setUpdatingOrderId(order.id);
+    try {
+      const updated = await resolveOrderIncident(order.id, "por_asignar_repartidor");
+      setLocalOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? { ...o, ...updated, status: "por_asignar_repartidor" } : o)),
+      );
+    } catch (err) {
+      window.alert(err.message || "Error al reencolar el pedido.");
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }
+
   function updateFilter(setter, value) {
     setter(value);
     setPage(1);
@@ -135,7 +173,7 @@ export default function OrdersListView() {
       <div>
         <p className="text-xs uppercase tracking-wider text-brand-secondary font-bold">Operación</p>
         <h1 className="text-2xl font-black">Pedidos</h1>
-        <p className="text-sm text-brand-secondary mt-1">Consulta, filtra y actualiza el flujo de cada pedido.</p>
+        <p className="text-sm text-brand-secondary mt-1">Consulta, filtra y gestiona el flujo de despacho y preparación.</p>
       </div>
 
       <Card>
@@ -201,7 +239,7 @@ export default function OrdersListView() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[950px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead className="bg-surface-subtle">
                 <tr>
                   <th className="text-left p-4">Pedido / Cliente</th>
@@ -211,6 +249,7 @@ export default function OrdersListView() {
                   <th className="text-left p-4">Repartidor</th>
                   <th className="text-left p-4">Estado</th>
                   <th className="text-right p-4">Total</th>
+                  <th className="p-4 text-center">Acción Rápida</th>
                   <th className="p-4" />
                 </tr>
               </thead>
@@ -219,6 +258,9 @@ export default function OrdersListView() {
                   const type = (order.delivery_type || "").toLowerCase();
                   const isPickup = type === "pickup" || type === "recojo";
                   const isExpress = type === "express";
+                  const isIncident = order.status === "incidencia_transporte";
+                  const isReadyForPool = order.status === "en_preparacion" && !isPickup;
+
                   const customerName =
                     order.customer_name ||
                     [order.profiles?.first_name, order.profiles?.paternal_surname]
@@ -228,22 +270,26 @@ export default function OrdersListView() {
                   const phone = order.customer_phone || order.profiles?.phone || "";
 
                   return (
-                    <tr key={order.id} className="border-t border-border hover:bg-surface-subtle/40">
-                      {/* 1. Pedido y Cliente (Fusión) */}
+                    <tr
+                      key={order.id}
+                      className={`border-t border-border hover:bg-surface-subtle/40 ${isIncident ? "bg-rose-50/70 border-l-4 border-l-rose-500" : ""
+                        }`}
+                    >
                       <td className="p-4">
-                        <p className="font-bold text-brand-primary">#{order.order_number}</p>
+                        <div className="flex items-center gap-1.5">
+                          {isIncident && <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />}
+                          <p className="font-bold text-brand-primary">#{order.order_number}</p>
+                        </div>
                         <p className="text-xs text-brand-secondary mt-0.5">
                           {customerName}
                           {phone ? ` · ${phone}` : ""}
                         </p>
                       </td>
 
-                      {/* 2. Fecha (dd/mm · hh:mm) */}
                       <td className="p-4 text-xs font-mono text-brand-secondary whitespace-nowrap">
                         {formatConciseDate(order.created_at)}
                       </td>
 
-                      {/* 3. Despacho / Zona */}
                       <td className="p-4 text-xs">
                         <div className="space-y-1">
                           {isPickup ? (
@@ -258,12 +304,15 @@ export default function OrdersListView() {
                         </div>
                       </td>
 
-                      {/* 4. Pago */}
                       <td className="p-4 text-xs text-brand-primary whitespace-nowrap">
-                        {formatPaymentMethod(order.payment_method)}
+                        <div>
+                          <span>{formatPaymentMethod(order.payment_method)}</span>
+                          {order.payment_status === "pending_verification" && (
+                            <span className="block text-[10px] text-amber-700 font-bold">Por verificar</span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* 5. Repartidor (Nueva Columna de Asignación Directa) */}
                       <td className="p-4 text-xs">
                         {isPickup ? (
                           <span className="text-xs text-brand-muted italic whitespace-nowrap">
@@ -286,15 +335,52 @@ export default function OrdersListView() {
                         )}
                       </td>
 
-                      {/* 6. Estado y Total */}
                       <td className="p-4 whitespace-nowrap">
-                        <OrderStatusBadge status={order.status} />
+                        {isIncident ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                            <AlertOctagon className="w-3 h-3" /> Incidencia
+                          </span>
+                        ) : order.status === "por_asignar_repartidor" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                            A la espera de motorizado
+                          </span>
+                        ) : (
+                          <OrderStatusBadge status={order.status} />
+                        )}
                       </td>
+
                       <td className="p-4 text-right font-mono font-bold text-sm whitespace-nowrap">
                         {money(order.total_amount)}
                       </td>
 
-                      {/* 7. Acciones */}
+                      <td className="p-4 text-center whitespace-nowrap">
+                        {isReadyForPool && (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => handleSendToPool(order)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shadow-xs transition-colors"
+                            title="Empaque terminado: pasar a bolsa de repartidores"
+                          >
+                            <PackageCheck className="w-3.5 h-3.5" />
+                            <span>A Bolsa</span>
+                          </button>
+                        )}
+                        {isIncident && (
+                          <button
+                            type="button"
+                            disabled={updatingOrderId === order.id}
+                            onClick={() => handleRequeueIncident(order)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-bold shadow-xs transition-colors"
+                            title="Reencolar a la bolsa de repartidores tras coordinar"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Reencolar</span>
+                          </button>
+                        )}
+                        {!isReadyForPool && !isIncident && <span className="text-xs text-brand-muted">—</span>}
+                      </td>
+
                       <td className="p-4 text-right whitespace-nowrap">
                         <Button
                           type="button"

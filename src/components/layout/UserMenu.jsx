@@ -2,11 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, LogOut, Mail, Phone } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { useDeliveryAvailability } from "../../features/delivery/DeliveryAvailabilityContext";
 
 export default function UserMenu() {
   const { user, profile, signOut } = useAuth();
-  const { available, setAvailable, activeRoutes } = useDeliveryAvailability();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
@@ -80,46 +78,7 @@ export default function UserMenu() {
             )}
           </div>
 
-          {/* 2. Estado: disponible / no disponible (NUEVO) */}
-          <div className="border-t border-border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-brand-primary">
-                  Estado
-                </p>
-                <p
-                  className={`text-xs font-semibold ${
-                    available ? "text-emerald-700" : "text-rose-700"
-                  }`}
-                >
-                  {available ? "Disponible" : "No disponible"}
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={available}
-                aria-label="Cambiar disponibilidad"
-                onClick={() => setAvailable((v) => !v)}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                  available ? "bg-emerald-500" : "bg-slate-300"
-                }`}
-              >
-                <span
-                  className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                    available ? "translate-x-5" : "translate-x-0.5"
-                  }`}
-                />
-              </button>
-            </div>
-            {activeRoutes > 0 && !available && (
-              <p className="mt-2 text-[11px] text-brand-secondary">
-                Tienes una ruta en curso.
-              </p>
-            )}
-          </div>
-
-          {/* 3. Cerrar sesión */}
+          {/* 2. Cerrar sesión */}
           <div className="border-t border-border p-2">
             <button
               type="button"
@@ -134,4 +93,4 @@ export default function UserMenu() {
       )}
     </div>
   );
-}   
+}
