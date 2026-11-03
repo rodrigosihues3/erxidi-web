@@ -37,6 +37,9 @@ const ORDER_SELECT = `
   incident_reason, incident_comment,
   profiles:customer_id (
     id, dni, first_name, paternal_surname, maternal_surname, email, phone
+  ),
+  delivery_profile:assigned_delivery_id (
+    id, first_name, paternal_surname, phone, delivery_type
   )
 `;
 
@@ -46,6 +49,7 @@ export async function listOrders({
   status = "all",
   invoiceType = "all",
   paymentMethod = "all",
+  deliveryType = "all",
   search = "",
 } = {}) {
   let query = supabase
@@ -56,12 +60,13 @@ export async function listOrders({
   if (status !== "all") query = query.eq("status", status);
   if (invoiceType !== "all") query = query.eq("invoice_type", invoiceType);
   if (paymentMethod !== "all") query = query.eq("payment_method", paymentMethod);
+  if (deliveryType !== "all") query = query.eq("delivery_type", deliveryType);
 
   const term = search.trim();
   if (term) {
     const safe = term.replace(/[%_,]/g, " ");
     query = query.or(
-      `order_number.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_email.ilike.%${safe}%,customer_phone.ilike.%${safe}%`,
+      `order_number.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_email.ilike.%${safe}%,customer_phone.ilike.%${safe}%,payment_gateway_tx_id.ilike.%${safe}%`,
     );
   }
 
@@ -130,6 +135,26 @@ export async function verifyOrderPayment(orderId) {
 }
 
 /**
+ * Rechaza un voucher no válido o pago fraudulento.
+ */
+export async function rejectOrderPayment(orderId, reasonComment) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      payment_status: "failed",
+      status: "cancelado",
+      incident_comment: reasonComment || "Voucher o transferencia no verificada por administración",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("id, order_number, status, payment_status, updated_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Marca el empaque como listo y traslada la orden a la bolsa de repartidores ('por_asignar_repartidor').
  */
 export async function markOrderReadyForDelivery(orderId) {
@@ -171,7 +196,7 @@ export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_
 export async function getDeliveryStaff() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, first_name, paternal_surname, phone")
+    .select("id, first_name, paternal_surname, phone, delivery_type")
     .eq("role", "delivery");
 
   if (error) throw error;
@@ -202,7 +227,6 @@ const IN_ROUTE_STATUSES = ["en_camino", "cerca", "dispatched", "nearby"];
 export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
   let nextStatus = currentStatus;
   if (!deliveryId) {
-    // Sin conductor, un pedido en ruta vuelve a la bolsa común
     if (IN_ROUTE_STATUSES.includes(currentStatus)) {
       nextStatus = "por_asignar_repartidor";
     }
@@ -215,7 +239,7 @@ export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
     .update({
       assigned_delivery_id: deliveryId || null,
       status: nextStatus,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
     .select()

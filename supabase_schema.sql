@@ -709,7 +709,9 @@ CREATE TABLE IF NOT EXISTS "public"."sizes" (
     "name" character varying(20) NOT NULL,
     "display_order" smallint DEFAULT 0 NOT NULL,
     "is_active" boolean DEFAULT true NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL
+    "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
+    "target_genders" "text"[] DEFAULT '{hombre,mujer}'::"text"[] NOT NULL,
+    CONSTRAINT "sizes_target_genders_check" CHECK (("target_genders" <@ ARRAY['hombre'::"text", 'mujer'::"text", 'nino'::"text", 'nina'::"text"]))
 );
 
 
@@ -754,7 +756,7 @@ CREATE TABLE IF NOT EXISTS "public"."store_settings" (
 ALTER TABLE "public"."store_settings" OWNER TO "postgres";
 
 
-CREATE OR REPLACE VIEW "public"."v_product_variants_available" AS
+CREATE OR REPLACE VIEW "public"."v_product_variants_available" WITH ("security_invoker"='true') AS
  SELECT "id",
     "product_id",
     "size_id",
@@ -1127,9 +1129,11 @@ CREATE POLICY "addresses_insert_own" ON "public"."addresses" FOR INSERT WITH CHE
 
 
 
-CREATE POLICY "addresses_select_policy" ON "public"."addresses" FOR SELECT USING ((("auth"."uid"() = "user_id") OR "public"."is_owner"() OR ("public"."is_delivery"() AND (EXISTS ( SELECT 1
+CREATE POLICY "addresses_select_policy" ON "public"."addresses" FOR SELECT USING ((("auth"."uid"() = "user_id") OR "public"."is_owner"() OR ("public"."is_delivery"() AND ((EXISTS ( SELECT 1
    FROM "public"."orders"
-  WHERE (("orders"."shipping_address_id" = "addresses"."id") AND ("orders"."assigned_delivery_id" = "auth"."uid"())))))));
+  WHERE (("orders"."shipping_address_id" = "addresses"."id") AND ("orders"."assigned_delivery_id" = "auth"."uid"())))) OR (EXISTS ( SELECT 1
+   FROM "public"."orders"
+  WHERE (("orders"."shipping_address_id" = "addresses"."id") AND ("orders"."assigned_delivery_id" IS NULL) AND (("orders"."status")::"text" = ANY ((ARRAY['por_asignar_repartidor'::character varying, 'en_preparacion'::character varying, 'preparando'::character varying])::"text"[])))))))));
 
 
 
@@ -1185,9 +1189,9 @@ CREATE POLICY "order_items_insert_customer" ON "public"."order_items" FOR INSERT
 
 
 
-CREATE POLICY "order_items_select_policy" ON "public"."order_items" FOR SELECT USING ((EXISTS ( SELECT 1
+CREATE POLICY "order_items_select_policy" ON "public"."order_items" FOR SELECT USING (("public"."is_owner"() OR (EXISTS ( SELECT 1
    FROM "public"."orders"
-  WHERE (("orders"."id" = "order_items"."order_id") AND (("orders"."customer_id" = "auth"."uid"()) OR ("orders"."assigned_delivery_id" = "auth"."uid"()) OR "public"."is_owner"())))));
+  WHERE (("orders"."id" = "order_items"."order_id") AND (("orders"."customer_id" = "auth"."uid"()) OR ("orders"."assigned_delivery_id" = "auth"."uid"()) OR ("public"."is_delivery"() AND ("orders"."assigned_delivery_id" IS NULL))))))));
 
 
 
@@ -1198,19 +1202,11 @@ CREATE POLICY "orders_insert_customer" ON "public"."orders" FOR INSERT WITH CHEC
 
 
 
-CREATE POLICY "orders_select_policy" ON "public"."orders" FOR SELECT USING ((("auth"."uid"() = "customer_id") OR ("auth"."uid"() = "assigned_delivery_id") OR "public"."is_owner"()));
+CREATE POLICY "orders_select_policy" ON "public"."orders" FOR SELECT TO "authenticated", "anon" USING (("public"."is_owner"() OR ("auth"."uid"() = "customer_id") OR ("auth"."uid"() = "assigned_delivery_id") OR ("public"."is_delivery"() AND ("assigned_delivery_id" IS NULL) AND (("status")::"text" = ANY ((ARRAY['por_asignar_repartidor'::character varying, 'en_preparacion'::character varying, 'preparando'::character varying])::"text"[])))));
 
 
 
-CREATE POLICY "orders_update_policy" ON "public"."orders" FOR UPDATE TO "authenticated" USING ((((( SELECT "profiles"."role"
-   FROM "public"."profiles"
-  WHERE ("profiles"."id" = "auth"."uid"())))::"text" = 'admin'::"text") OR (((( SELECT "profiles"."role"
-   FROM "public"."profiles"
-  WHERE ("profiles"."id" = "auth"."uid"())))::"text" = 'delivery'::"text") AND (("assigned_delivery_id" IS NULL) OR ("assigned_delivery_id" = "auth"."uid"()))))) WITH CHECK ((((( SELECT "profiles"."role"
-   FROM "public"."profiles"
-  WHERE ("profiles"."id" = "auth"."uid"())))::"text" = 'admin'::"text") OR (((( SELECT "profiles"."role"
-   FROM "public"."profiles"
-  WHERE ("profiles"."id" = "auth"."uid"())))::"text" = 'delivery'::"text") AND (("assigned_delivery_id" = "auth"."uid"()) OR ("assigned_delivery_id" IS NULL)))));
+CREATE POLICY "orders_update_policy" ON "public"."orders" FOR UPDATE TO "authenticated" USING (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" IS NULL) OR ("assigned_delivery_id" = "auth"."uid"()))))) WITH CHECK (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" = "auth"."uid"()) OR ("assigned_delivery_id" IS NULL)))));
 
 
 

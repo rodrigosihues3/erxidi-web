@@ -27,7 +27,6 @@ import ProductsListView from "./features/admin/views/ProductsListView";
 import ProductFormView from "./features/admin/views/ProductFormView";
 import CategoriesView from "./features/admin/views/CategoriesView";
 import DeliveryUsersView from "./features/admin/views/DeliveryUsersView";
-import CoverageSettingsView from "./features/admin/views/CoverageSettingsView";
 import SettingsView from "./features/admin/views/SettingsView";
 
 // Home & Catálogo
@@ -236,7 +235,7 @@ export default function App() {
                 />
                 <Route
                   path="/admin/cobertura"
-                  element={<CoverageSettingsView />}
+                  element={<Navigate to="/admin/ajustes" replace />}
                 />
                 <Route
                   path="/admin/ajustes"
