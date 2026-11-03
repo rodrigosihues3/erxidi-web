@@ -173,14 +173,31 @@ export async function createDeliveryUser(payload) {
  * Eliminación segura con desvinculación foránea
  */
 export async function deleteDeliveryStaff(staffId) {
-  // A. Desvincular de pedidos activos no completados para evitar conflictos de integridad
-  await supabase
+  const now = new Date().toISOString();
+
+  // A. Pedidos en ruta: vuelven a la bolsa para que otro repartidor los tome
+  const { error: routeError } = await supabase
     .from("orders")
-    .update({ assigned_delivery_id: null })
+    .update({
+      assigned_delivery_id: null,
+      status: "por_asignar_repartidor",
+      updated_at: now,
+    })
+    .eq("assigned_delivery_id", staffId)
+    .in("status", ["en_camino", "dispatched", "cerca", "nearby"]);
+
+  if (routeError) throw routeError;
+
+  // B. Resto de pedidos no entregados: solo se desvinculan
+  const { error: unlinkError } = await supabase
+    .from("orders")
+    .update({ assigned_delivery_id: null, updated_at: now })
     .eq("assigned_delivery_id", staffId)
     .neq("status", "entregado");
 
-  // B. Eliminar el perfil en la tabla profiles
+  if (unlinkError) throw unlinkError;
+
+  // C. Eliminar el perfil en la tabla profiles
   const { error } = await supabase
     .from("profiles")
     .delete()

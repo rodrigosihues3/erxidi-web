@@ -3,8 +3,11 @@ import { supabase } from "../../../services/supabase";
 export const ORDER_STATUS = {
   RECEIVED: "received",
   PREPARING: "en_preparacion",
+  POOL: "por_asignar_repartidor",
   DISPATCHED: "en_camino",
+  NEARBY: "cerca",
   DELIVERED: "entregado",
+  INCIDENT: "incidencia_transporte",
   CANCELLED: "cancelado",
 };
 
@@ -23,6 +26,8 @@ export const ORDER_STATUS_LABELS = {
   entregado: "Entregado",
   cancelled: "Cancelado",
   cancelado: "Cancelado",
+  por_asignar_repartidor: "Por asignar repartidor",
+  incidencia_transporte: "Incidencia de transporte",
 };
 
 const ORDER_SELECT = `
@@ -104,6 +109,66 @@ export async function updateOrderStatus(orderId, status) {
   return data;
 }
 
+const STATUS_ALIASES = {
+  preparing: "en_preparacion",
+  dispatched: "en_camino",
+  nearby: "cerca",
+  delivered: "entregado",
+  cancelled: "cancelado",
+};
+
+export const normalizeOrderStatus = (status) =>
+  STATUS_ALIASES[status] ?? status;
+
+const EARLY_STATUSES = ["received", "pending", "pendiente_pago", "pagado"];
+const isPickupOrder = (order) =>
+  ["pickup", "recojo"].includes(order?.delivery_type);
+
+// Siguientes estados que la dueña puede aplicar desde el panel
+export function getNextStatuses(order) {
+  const status = normalizeOrderStatus(order?.status);
+  const { PREPARING, POOL, DISPATCHED, NEARBY, DELIVERED, INCIDENT, CANCELLED } =
+    ORDER_STATUS;
+
+  if (EARLY_STATUSES.includes(status)) return [PREPARING, CANCELLED];
+  if (status === PREPARING) {
+    if (isPickupOrder(order)) return [DELIVERED, CANCELLED];
+    // Con repartidor asignado a mano, él lo inicia desde su panel
+    return order?.assigned_delivery_id ? [CANCELLED] : [POOL, CANCELLED];
+  }
+  if ([POOL, DISPATCHED, NEARBY].includes(status)) return [CANCELLED];
+  if (status === INCIDENT) return [POOL, CANCELLED];
+  return [];
+}
+
+// Cambia el estado validando la transición. La condición .eq("status", ...)
+// evita pisar un cambio que el repartidor hizo mientras la dueña editaba.
+export async function changeOrderStatus(order, nextStatus) {
+  if (!getNextStatuses(order).includes(nextStatus)) {
+    throw new Error("Ese cambio de estado no está permitido desde el estado actual.");
+  }
+
+  const patch = { status: nextStatus, updated_at: new Date().toISOString() };
+  // Al volver a la bolsa el pedido queda sin repartidor
+  if (nextStatus === ORDER_STATUS.POOL) patch.assigned_delivery_id = null;
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update(patch)
+    .eq("id", order.id)
+    .eq("status", order.status)
+    .select("id, order_number, status, assigned_delivery_id, updated_at")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) {
+    throw new Error(
+      "El pedido cambió mientras lo editabas. Actualiza la vista e inténtalo de nuevo.",
+    );
+  }
+  return data;
+}
+
 /**
  * Obtiene la lista de usuarios con rol de repartidor
  */
@@ -140,23 +205,40 @@ export async function updateDeliveryStaff(id, payload) {
 }
 
 /**
- * Asigna un repartidor a una orden y actualiza su estado si está en 'received'
+ * Asigna (o quita) un repartidor a mano. Con repartidor, el pedido entra directo
+ * a "Mis asignados"; al quitarlo de un pedido en ruta, vuelve a la bolsa.
  */
 export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
-  const nextStatus = currentStatus === "received" ? "en_preparacion" : currentStatus;
-  
+  const { PREPARING, POOL, INCIDENT, DISPATCHED, NEARBY } = ORDER_STATUS;
+  const status = normalizeOrderStatus(currentStatus);
+  let nextStatus = currentStatus;
+
+  if (deliveryId) {
+    if ([...EARLY_STATUSES, POOL, INCIDENT].includes(status)) {
+      nextStatus = PREPARING;
+    }
+  } else if ([DISPATCHED, NEARBY].includes(status)) {
+    nextStatus = POOL;
+  }
+
   const { data, error } = await supabase
     .from("orders")
     .update({
       assigned_delivery_id: deliveryId || null,
       status: nextStatus,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
+    .eq("status", currentStatus)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) {
+    throw new Error(
+      "El pedido cambió mientras lo editabas. Actualiza la vista e inténtalo de nuevo.",
+    );
+  }
   return data;
 }
 

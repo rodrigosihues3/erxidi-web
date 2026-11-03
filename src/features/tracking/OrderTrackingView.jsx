@@ -39,6 +39,12 @@ const TRACKING_STEPS = [
     icon: PackageCheck,
   },
   {
+    id: "por_asignar_repartidor",
+    title: "Esperando repartidor",
+    detail: "Tu pedido está listo y estamos asignando un repartidor.",
+    icon: Clock3,
+  },
+  {
     id: "dispatched",
     title: "En Camino",
     detail: "El pedido ha sido despachado con el courier.",
@@ -65,12 +71,14 @@ const STATUS_INDEX = {
   pagado: 0,
   preparing: 1,
   en_preparacion: 1,
-  dispatched: 2,
-  en_camino: 2,
-  nearby: 3,
-  cerca: 3,
-  delivered: 4,
-  entregado: 4,
+  por_asignar_repartidor: 2,
+  incidencia_transporte: 2,
+  dispatched: 3,
+  en_camino: 3,
+  nearby: 4,
+  cerca: 4,
+  delivered: 5,
+  entregado: 5,
 };
 
 const digitsOnly = (value) => String(value || "").replace(/\D/g, "");
@@ -262,6 +270,10 @@ export default function OrderTrackingView() {
       case "preparing":
       case "en_preparacion":
         return { label: "En Preparación", variant: "neutral" };
+      case "por_asignar_repartidor":
+        return { label: "Esperando repartidor", variant: "warning" };
+      case "incidencia_transporte":
+        return { label: "Incidencia en la entrega", variant: "warning" };
       default:
         return { label: "Pedido en Proceso", variant: "neutral" };
     }
@@ -453,12 +465,23 @@ export default function OrderTrackingView() {
         </p>
       </header>
 
-      {/* Línea de Tiempo de 5 Estados */}
+      {/* Aviso de incidencia en la entrega */}
+      {order.status === "incidencia_transporte" && (
+        <div className="flex items-start gap-2 rounded-card border border-status-warning-border bg-status-warning-bg p-4 text-xs text-status-warning-text">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            Tuvimos un inconveniente con tu entrega. Nos pondremos en contacto
+            contigo para coordinar una nueva entrega.
+          </span>
+        </div>
+      )}
+
+      {/* Línea de Tiempo de 6 Estados */}
       <section
         aria-label="Progreso del pedido"
         className="rounded-card border border-border bg-surface-card p-5 shadow-subtle sm:p-6"
       >
-        <ol className="space-y-6 md:grid md:grid-cols-5 md:gap-3 md:space-y-0">
+        <ol className="space-y-6 md:grid md:grid-cols-6 md:gap-3 md:space-y-0">
           {TRACKING_STEPS.map((step, index) => {
             const StepIcon = step.icon;
             const isCompleted = index < currentStep;
