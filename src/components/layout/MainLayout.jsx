@@ -20,10 +20,12 @@ export default function MainLayout() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface-app text-brand-primary">
-      <Navbar
-        onOpenSizeMatcher={() => setIsSizeMatcherOpen(true)}
-        onOpenCartDrawer={() => setIsCartDrawerOpen(true)}
-      />
+      {!isDelivery && (
+        <Navbar
+          onOpenSizeMatcher={() => setIsSizeMatcherOpen(true)}
+          onOpenCartDrawer={() => setIsCartDrawerOpen(true)}
+        />
+      )}
 
       <main className="flex-1 flex flex-col">
         <Outlet />
