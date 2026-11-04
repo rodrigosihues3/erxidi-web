@@ -1,3 +1,4 @@
+
 import { supabase } from "../../../services/supabase";
 
 export const ORDER_STATUS = {
@@ -71,14 +72,27 @@ export async function listOrders({
     .select(ORDER_SELECT, { count: "exact" })
     .order("created_at", { ascending: false });
 
-  if (status !== "all") query = query.eq("status", status);
-  if (invoiceType !== "all") query = query.eq("invoice_type", invoiceType);
-  if (paymentMethod !== "all") query = query.eq("payment_method", paymentMethod);
-  if (deliveryType !== "all") query = query.eq("delivery_type", deliveryType);
+  if (status !== "all") {
+    query = query.eq("status", status);
+  }
+
+  if (invoiceType !== "all") {
+    query = query.eq("invoice_type", invoiceType);
+  }
+
+  if (paymentMethod !== "all") {
+    query = query.eq("payment_method", paymentMethod);
+  }
+
+  if (deliveryType !== "all") {
+    query = query.eq("delivery_type", deliveryType);
+  }
 
   const term = search.trim();
+
   if (term) {
     const safe = term.replace(/[%_,]/g, " ");
+
     query = query.or(
       `order_number.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_email.ilike.%${safe}%,customer_phone.ilike.%${safe}%,payment_gateway_tx_id.ilike.%${safe}%`,
     );
@@ -86,51 +100,69 @@ export async function listOrders({
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
+
   const { data, error, count } = await query.range(from, to);
 
   if (error) throw error;
-  return { data: data ?? [], count: count ?? 0 };
+
+  return {
+    data: data ?? [],
+    count: count ?? 0,
+  };
 }
 
 export async function getOrderDetail(orderId) {
-  const [{ data: order, error: orderError }, { data: items, error: itemsError }] =
-    await Promise.all([
-      supabase.from("orders").select(ORDER_SELECT).eq("id", orderId).single(),
-      supabase
-        .from("order_items")
-        .select(`
-          id, order_id, variant_id, quantity, unit_price, subtotal,
-          product_variants:variant_id (
-            id, color, color_hex, stock, sku, size_id,
-            sizes:size_id (id, name, display_order),
-            products:product_id (id, name, slug, price, main_image_url)
-          )
-        `)
-        .eq("order_id", orderId)
-        .order("id", { ascending: true }),
-    ]);
+  const [
+    { data: order, error: orderError },
+    { data: items, error: itemsError },
+  ] = await Promise.all([
+    supabase
+      .from("orders")
+      .select(ORDER_SELECT)
+      .eq("id", orderId)
+      .single(),
+
+    supabase
+      .from("order_items")
+      .select(`
+        id, order_id, variant_id, quantity, unit_price, subtotal,
+        product_variants:variant_id (
+          id, color, color_hex, stock, sku, size_id,
+          sizes:size_id (id, name, display_order),
+          products:product_id (id, name, slug, price, main_image_url)
+        )
+      `)
+      .eq("order_id", orderId)
+      .order("id", { ascending: true }),
+  ]);
 
   if (orderError) throw orderError;
   if (itemsError) throw itemsError;
 
-  return { ...order, items: items ?? [] };
+  return {
+    ...order,
+    items: items ?? [],
+  };
 }
 
 export async function updateOrderStatus(orderId, status) {
   const { data, error } = await supabase
     .from("orders")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", orderId)
     .select("id, order_number, status, updated_at")
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
 /**
- * Aprueba un pago manual verificado (Yape, Plin o Transferencia)
- * y traslada la orden automáticamente a 'en_preparacion'.
+ * Aprueba un pago manual verificado.
  */
 export async function verifyOrderPayment(orderId) {
   const { data, error } = await supabase
@@ -145,11 +177,12 @@ export async function verifyOrderPayment(orderId) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
 /**
- * Rechaza un voucher no válido o pago fraudulento.
+ * Rechaza un voucher no válido.
  */
 export async function rejectOrderPayment(orderId, reasonComment) {
   const { data, error } = await supabase
@@ -157,7 +190,9 @@ export async function rejectOrderPayment(orderId, reasonComment) {
     .update({
       payment_status: "failed",
       status: "cancelado",
-      incident_comment: reasonComment || "Voucher o transferencia no verificada por administración",
+      incident_comment:
+        reasonComment ||
+        "Voucher o transferencia no verificada por administración",
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
@@ -165,11 +200,12 @@ export async function rejectOrderPayment(orderId, reasonComment) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
 /**
- * Marca el empaque como listo y traslada la orden a la bolsa de repartidores ('por_asignar_repartidor').
+ * Marca el pedido como listo para despacho.
  */
 export async function markOrderReadyForDelivery(orderId) {
   const { data, error } = await supabase
@@ -183,13 +219,17 @@ export async function markOrderReadyForDelivery(orderId) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
 /**
- * Resuelve una incidencia de transporte (reencolar a la bolsa o devolver a preparación).
+ * Resuelve una incidencia de transporte.
  */
-export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_repartidor") {
+export async function resolveOrderIncident(
+  orderId,
+  targetStatus = "por_asignar_repartidor",
+) {
   const { data, error } = await supabase
     .from("orders")
     .update({
@@ -204,6 +244,7 @@ export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
@@ -214,6 +255,7 @@ export async function getDeliveryStaff() {
     .eq("role", "delivery");
 
   if (error) throw error;
+
   return data || [];
 }
 
@@ -233,18 +275,32 @@ export async function updateDeliveryStaff(id, payload) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
-const IN_ROUTE_STATUSES = ["en_camino", "cerca", "dispatched", "nearby"];
+const IN_ROUTE_STATUSES = [
+  "en_camino",
+  "cerca",
+  "dispatched",
+  "nearby",
+];
 
-export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
+export async function assignOrderDelivery(
+  orderId,
+  deliveryId,
+  currentStatus,
+) {
   let nextStatus = currentStatus;
+
   if (!deliveryId) {
     if (IN_ROUTE_STATUSES.includes(currentStatus)) {
       nextStatus = "por_asignar_repartidor";
     }
-  } else if (currentStatus === "received" || currentStatus === "por_asignar_repartidor") {
+  } else if (
+    currentStatus === "received" ||
+    currentStatus === "por_asignar_repartidor"
+  ) {
     nextStatus = "en_camino";
   }
 
@@ -260,9 +316,13 @@ export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
+/**
+ * Obtiene pedidos del dashboard.
+ */
 export async function getDashboardOrders(filterRange = "30days") {
   let query = supabase
     .from("orders")
@@ -273,17 +333,27 @@ export async function getDashboardOrders(filterRange = "30days") {
     .order("created_at", { ascending: false });
 
   let since = null;
+
   if (filterRange === "today" || filterRange === "1") {
-    since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    since = new Date(
+      new Date().setHours(0, 0, 0, 0),
+    ).toISOString();
   } else if (filterRange === "7days" || filterRange === "7") {
-    since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    since = new Date(
+      Date.now() - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
   } else if (filterRange === "30days" || filterRange === "30") {
-    since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    since = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
   } else if (filterRange === "all") {
     since = null;
   } else if (filterRange instanceof Date) {
     since = filterRange.toISOString();
-  } else if (typeof filterRange === "string" && (filterRange.includes("T") || filterRange.includes("-"))) {
+  } else if (
+    typeof filterRange === "string" &&
+    (filterRange.includes("T") || filterRange.includes("-"))
+  ) {
     since = new Date(filterRange).toISOString();
   }
 
@@ -292,10 +362,15 @@ export async function getDashboardOrders(filterRange = "30days") {
   }
 
   const { data, error } = await query;
+
   if (error) throw error;
+
   return data ?? [];
 }
 
+/**
+ * Obtiene los pedidos que están pendientes de despacho.
+ */
 export async function getImmediateDispatchOrders() {
   const { data, error } = await supabase
     .from("orders")
@@ -304,13 +379,21 @@ export async function getImmediateDispatchOrders() {
       payment_status, created_at, customer_name, customer_email,
       customer_phone, delivery_address, scheduled_time_slot
     `)
-    .in("status", ["received", "en_preparacion", "por_asignar_repartidor"])
+    .in("status", [
+      "received",
+      "en_preparacion",
+      "por_asignar_repartidor",
+    ])
     .order("created_at", { ascending: false });
 
   if (error) throw error;
+
   return data ?? [];
 }
 
+/**
+ * Calcula las ventas del dashboard.
+ */
 export function calculateDashboardSales(orders = []) {
   return orders
     .filter(
@@ -319,9 +402,15 @@ export function calculateDashboardSales(orders = []) {
         order.status !== "cancelled" &&
         order.payment_status !== "failed",
     )
-    .reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+    .reduce(
+      (sum, order) => sum + Number(order.total_amount || 0),
+      0,
+    );
 }
 
+/**
+ * Obtiene el total de ventas pagadas.
+ */
 export async function getDashboardTotalSales(sinceDate) {
   let query = supabase
     .from("orders")
@@ -330,15 +419,27 @@ export async function getDashboardTotalSales(sinceDate) {
     .not("status", "in", '("cancelado","cancelled")');
 
   if (sinceDate) {
-    const iso = sinceDate instanceof Date ? sinceDate.toISOString() : sinceDate;
+    const iso =
+      sinceDate instanceof Date
+        ? sinceDate.toISOString()
+        : sinceDate;
+
     query = query.gte("created_at", iso);
   }
 
   const { data, error } = await query;
+
   if (error) throw error;
-  return (data || []).reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+
+  return (data || []).reduce(
+    (sum, order) => sum + Number(order.total_amount || 0),
+    0,
+  );
 }
 
+/**
+ * Obtiene los artículos de los pedidos para el dashboard.
+ */
 export async function getOrderItemsForDashboard(orderIds) {
   if (!orderIds.length) return [];
 
@@ -354,5 +455,97 @@ export async function getOrderItemsForDashboard(orderIds) {
     .in("order_id", orderIds);
 
   if (error) throw error;
+
   return data ?? [];
+}
+
+/**
+ * Obtiene la información necesaria para el Dashboard analítico.
+ * Utiliza las relaciones existentes en Supabase.
+ */
+export async function getDashboardAnalytics({
+  startDate,
+  endDate,
+} = {}) {
+  const pageSize = 1000;
+  let allOrders = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        customer_id,
+        customer_name,
+        customer_email,
+        total_amount,
+        subtotal,
+        delivery_cost,
+        status,
+        payment_status,
+        created_at,
+        profiles:customer_id (
+          id,
+          first_name,
+          paternal_surname,
+          maternal_surname,
+          email
+        ),
+        order_items (
+          id,
+          quantity,
+          unit_price,
+          subtotal,
+          product_variants:variant_id (
+            id,
+            color,
+            sku,
+            products:product_id (
+              id,
+              name,
+              main_image_url,
+              category_id,
+              categories:category_id (
+                id,
+                name
+              )
+            )
+          )
+        )
+      `)
+      .order("created_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (startDate) {
+      query = query.gte("created_at", startDate);
+    }
+
+    if (endDate) {
+      query = query.lte("created_at", endDate);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error(
+        "Error al obtener analítica del dashboard:",
+        error,
+      );
+      throw error;
+    }
+
+    const page = data || [];
+
+    allOrders = allOrders.concat(page);
+
+    if (page.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return allOrders;
 }
