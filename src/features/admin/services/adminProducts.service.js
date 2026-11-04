@@ -33,8 +33,9 @@ export async function getProduct(id) {
       id, category_id, material_id, brand_id, name, slug, description, price,
       main_image_url, gallery_urls, has_size_guide, is_featured,
       is_active, target_gender, created_at, updated_at,
-      product_variants (id, size_id, color, color_hex, stock, sku, is_active,
+      product_variants (id, size_id, color, color_hex, stock, sku, image_url, is_active,
         sizes:size_id (id, name, display_order)),
+      product_color_images (id, product_id, color, image_url, is_cover, display_order),
       size_guides (id, size_id, measurements,
         sizes:size_id (id, name, display_order))
     `)
@@ -47,10 +48,26 @@ export async function getProduct(id) {
 
 export async function getProductDependencies() {
   const [categories, materials, sizes, brands] = await Promise.all([
-    supabase.from("categories").select("id, name, parent_id").eq("is_active", true).order("display_order"),
-    supabase.from("materials").select("id, name").eq("is_active", true).order("name"),
-    supabase.from("sizes").select("id, name, display_order").eq("is_active", true).order("display_order"),
-    supabase.from("brands").select("id, name").eq("is_active", true).order("display_order"),
+    supabase
+      .from("categories")
+      .select("id, name, parent_id")
+      .eq("is_active", true)
+      .order("display_order"),
+    supabase
+      .from("materials")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name"),
+    supabase
+      .from("sizes")
+      .select("id, name, display_order, target_genders")
+      .eq("is_active", true)
+      .order("display_order"),
+    supabase
+      .from("brands")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("display_order"),
   ]);
 
   for (const result of [categories, materials, sizes, brands]) {
@@ -72,11 +89,13 @@ export async function uploadProductImage(file) {
     .replace(/-+/g, "-");
   const path = `public/${Date.now()}-${crypto.randomUUID()}.${extension || "jpg"}`;
 
-  const { error } = await supabase.storage.from("products").upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type,
-  });
+  const { error } = await supabase.storage
+    .from("products")
+    .upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type,
+    });
 
   if (error) throw error;
 
@@ -85,7 +104,7 @@ export async function uploadProductImage(file) {
 }
 
 export async function createProduct(payload) {
-  const { variants = [], ...product } = payload;
+  const { variants = [], color_images = [], ...product } = payload;
   const { data, error } = await supabase
     .from("products")
     .insert(product)
@@ -94,12 +113,46 @@ export async function createProduct(payload) {
 
   if (error) throw error;
 
-  if (variants.length) {
-    const cleanInserts = variants.map(({ id: _unusedId, ...variant }) => ({
-      ...variant,
-      product_id: data.id,
-      is_active: true,
+  // Mapa de cover image por color para asignar a variantes
+  const coverByColor = new Map();
+  for (const ci of color_images) {
+    if (ci.is_cover && ci.image_url) {
+      coverByColor.set(ci.color.trim().toLowerCase(), ci.image_url);
+    }
+  }
+
+  // Persistir product_color_images
+  if (color_images.length > 0) {
+    const cleanColorImages = color_images.map((img, index) => ({
+      product_id: Number(data.id),
+      color: img.color.trim(),
+      image_url: img.image_url,
+      is_cover: Boolean(img.is_cover),
+      display_order: img.display_order ?? index,
     }));
+
+    const { error: colorImagesError } = await supabase
+      .from("product_color_images")
+      .insert(cleanColorImages);
+
+    if (colorImagesError) {
+      console.error("Error insertando product_color_images:", colorImagesError);
+    }
+  }
+
+  // Persistir variantes con imagen sincronizada
+  if (variants.length) {
+    const cleanInserts = variants.map(({ id: _unusedId, ...variant }) => {
+      const colorKey = String(variant.color || "").trim().toLowerCase();
+      const variantImage =
+        coverByColor.get(colorKey) || variant.image_url || null;
+      return {
+        ...variant,
+        product_id: data.id,
+        image_url: variantImage,
+        is_active: true,
+      };
+    });
 
     const { error: variantsError } = await supabase
       .from("product_variants")
@@ -115,7 +168,7 @@ export async function createProduct(payload) {
 }
 
 export async function updateProduct(id, payload) {
-  const { variants = [], ...product } = payload;
+  const { variants = [], color_images = [], ...product } = payload;
   const now = new Date().toISOString();
 
   // 1. Actualizar datos base del producto
@@ -129,10 +182,48 @@ export async function updateProduct(id, payload) {
 
   if (productError) throw productError;
 
-  // 2. Obtener todas las variantes históricas del producto (activas e inactivas)
+  // 2. Persistir product_color_images: eliminar obsoletos e insertar actualizados
+  if (Array.isArray(color_images)) {
+    const { error: deleteImagesError } = await supabase
+      .from("product_color_images")
+      .delete()
+      .eq("product_id", id);
+
+    if (deleteImagesError) {
+      console.error("Error limpiando product_color_images:", deleteImagesError);
+    }
+
+    if (color_images.length > 0) {
+      const cleanColorImages = color_images.map((img, index) => ({
+        product_id: Number(id),
+        color: img.color.trim(),
+        image_url: img.image_url,
+        is_cover: Boolean(img.is_cover),
+        display_order: img.display_order ?? index,
+      }));
+
+      const { error: insertImagesError } = await supabase
+        .from("product_color_images")
+        .insert(cleanColorImages);
+
+      if (insertImagesError) {
+        console.error("Error insertando product_color_images:", insertImagesError);
+      }
+    }
+  }
+
+  // Mapa de cover image por color para sincronizar variantes
+  const coverByColor = new Map();
+  for (const ci of color_images) {
+    if (ci.is_cover && ci.image_url) {
+      coverByColor.set(ci.color.trim().toLowerCase(), ci.image_url);
+    }
+  }
+
+  // 3. Obtener todas las variantes históricas del producto
   const { data: existingVariants, error: fetchError } = await supabase
     .from("product_variants")
-    .select("id, product_id, size_id, color, sku, is_active")
+    .select("id, product_id, size_id, color, sku, image_url, is_active")
     .eq("product_id", id);
 
   if (fetchError) throw fetchError;
@@ -147,24 +238,36 @@ export async function updateProduct(id, payload) {
     existingById.set(String(existing.id), existing);
     existingByComposite.set(
       makeCompositeKey(existing.size_id, existing.color),
-      existing
+      existing,
     );
   }
 
   const retainedIds = new Set();
 
-  // 3. Reconciliar variantes (Actualizar por ID o por clave compuesta; insertar solo si es genuinamente nueva)
+  // 4. Reconciliar variantes con imagen sincronizada por color
   for (const variant of variants) {
     const { id: variantId, ...variantData } = variant;
-    const compositeKey = makeCompositeKey(variantData.size_id, variantData.color);
+    const compositeKey = makeCompositeKey(
+      variantData.size_id,
+      variantData.color,
+    );
 
     const matchedExisting =
       (variantId && existingById.get(String(variantId))) ||
       existingByComposite.get(compositeKey);
 
+    const colorKey = String(variantData.color || "").trim().toLowerCase();
+    const resolvedImageUrl = coverByColor.has(colorKey)
+      ? coverByColor.get(colorKey)
+      : variantData.image_url !== undefined
+        ? variantData.image_url
+        : matchedExisting?.image_url || null;
+
     if (matchedExisting) {
       if (String(matchedExisting.product_id) !== String(id)) {
-        throw new Error("Inconsistencia de integridad: la variante no pertenece a este producto.");
+        throw new Error(
+          "Inconsistencia de integridad: la variante no pertenece a este producto.",
+        );
       }
 
       const { error: updateError } = await supabase
@@ -175,6 +278,7 @@ export async function updateProduct(id, payload) {
           color_hex: variantData.color_hex || "#000000",
           stock: Math.max(0, Number(variantData.stock) || 0),
           sku: variantData.sku.trim(),
+          image_url: resolvedImageUrl,
           is_active: true,
           updated_at: now,
         })
@@ -194,6 +298,7 @@ export async function updateProduct(id, payload) {
           color_hex: variantData.color_hex || "#000000",
           stock: Math.max(0, Number(variantData.stock) || 0),
           sku: variantData.sku.trim(),
+          image_url: resolvedImageUrl,
           is_active: true,
         })
         .select("id")
@@ -205,9 +310,12 @@ export async function updateProduct(id, payload) {
     }
   }
 
-  // 4. Borrado lógico en lote para variantes retiradas (preserva FK con order_items y anula stock)
+  // 5. Borrado lógico en lote para variantes retiradas
   const idsToDeactivate = (existingVariants || [])
-    .filter((variant) => !retainedIds.has(String(variant.id)) && variant.is_active !== false)
+    .filter(
+      (variant) =>
+        !retainedIds.has(String(variant.id)) && variant.is_active !== false,
+    )
     .map((variant) => variant.id);
 
   if (idsToDeactivate.length > 0) {

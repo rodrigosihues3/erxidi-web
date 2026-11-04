@@ -6,6 +6,7 @@ import {
   List,
   RotateCw,
   RotateCcw,
+  Eraser,
   ClipboardList,
   Eye,
   ChevronLeft,
@@ -66,6 +67,13 @@ const PAYMENT_OPTIONS = [
   { value: "transferencia", label: "Transferencia" },
 ];
 
+const DATE_OPTIONS = [
+  { value: "all", label: "Todos" },
+  { value: "today", label: "Hoy" },
+  { value: "week", label: "Esta semana" },
+  { value: "month", label: "Este mes" },
+];
+
 const PAYMENT_LABELS = {
   yape_plin: "Yape / Plin",
   culqi_gateway: "Culqi (Online)",
@@ -97,6 +105,35 @@ function formatConciseDate(dateStr) {
   return `${day}/${month} · ${hours}:${minutes}`;
 }
 
+function matchesDateFilter(order, dateFilter) {
+  if (!dateFilter || dateFilter === "all") return true;
+  const refDate = new Date(order.created_at);
+  if (Number.isNaN(refDate.getTime())) return true;
+
+  const now = new Date();
+  if (dateFilter === "today") {
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    return refDate >= startOfToday;
+  }
+  if (dateFilter === "week") {
+    const startOfWeek = new Date(now);
+    const day = startOfWeek.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    startOfWeek.setDate(startOfWeek.getDate() - diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+    return refDate >= startOfWeek;
+  }
+  if (dateFilter === "month") {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    return refDate >= startOfMonth;
+  }
+  return true;
+}
+
 export default function OrdersListView() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
@@ -104,6 +141,7 @@ export default function OrdersListView() {
   const [status, setStatus] = useState("all");
   const [deliveryType, setDeliveryType] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
   const [viewMode, setViewMode] = useState("kanban"); // 'kanban' | 'grid' | 'table'
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -118,10 +156,10 @@ export default function OrdersListView() {
     order: null,
   });
 
-  const pageSize = viewMode === "kanban" ? 50 : 12;
+  const pageSize = viewMode === "kanban" ? 100 : 12;
   const filters = useMemo(
     () => ({
-      page,
+      page: viewMode === "kanban" ? 1 : page,
       pageSize,
       status,
       deliveryType,
@@ -129,7 +167,16 @@ export default function OrdersListView() {
       search,
       refreshTick,
     }),
-    [page, pageSize, status, deliveryType, paymentMethod, search, refreshTick],
+    [
+      viewMode,
+      page,
+      pageSize,
+      status,
+      deliveryType,
+      paymentMethod,
+      search,
+      refreshTick,
+    ],
   );
 
   const { data, count, loading, error } = useAdminOrders(filters);
@@ -139,11 +186,17 @@ export default function OrdersListView() {
     search.trim() !== "" ||
     status !== "all" ||
     deliveryType !== "all" ||
-    paymentMethod !== "all";
+    paymentMethod !== "all" ||
+    dateFilter !== "all";
 
   useEffect(() => {
     setLocalOrders(data);
   }, [data]);
+
+  const displayedOrders = useMemo(() => {
+    if (viewMode === "kanban") return localOrders;
+    return localOrders.filter((o) => matchesDateFilter(o, dateFilter));
+  }, [localOrders, viewMode, dateFilter]);
 
   useEffect(() => {
     let active = true;
@@ -201,6 +254,7 @@ export default function OrdersListView() {
     setStatus("all");
     setDeliveryType("all");
     setPaymentMethod("all");
+    setDateFilter("all");
     setPage(1);
   }
 
@@ -212,13 +266,14 @@ export default function OrdersListView() {
     setTimeout(() => setCopiedTxId(null), 2000);
   }
 
-  async function handleStartPreparing(order) {
-    setUpdatingOrderId(order.id);
+  async function handleStartPreparing(orderOrId) {
+    const orderId = typeof orderOrId === "object" ? orderOrId.id : orderOrId;
+    setUpdatingOrderId(orderId);
     try {
-      const updated = await updateOrderStatus(order.id, "en_preparacion");
+      const updated = await updateOrderStatus(orderId, "en_preparacion");
       setLocalOrders((prev) =>
         prev.map((o) =>
-          o.id === order.id ? { ...o, ...updated, status: "en_preparacion" } : o,
+          o.id === orderId ? { ...o, ...updated, status: "en_preparacion" } : o,
         ),
       );
     } catch (err) {
@@ -396,15 +451,18 @@ export default function OrdersListView() {
   }
 
   function renderQuickAction(order) {
+    const isCashOnDelivery =
+      order.payment_method === "contraentrega" ||
+      order.payment_method === "efectivo";
     const isPendingVerification =
-      order.payment_status === "pending_verification";
+      order.payment_status === "pending_verification" && !isCashOnDelivery;
     const isReceivedOrPaid =
       (order.status === "received" ||
         order.status === "recibido" ||
         order.status === "pagado" ||
         order.status === "pending" ||
         order.status === "pendiente_pago") &&
-      order.payment_status !== "pending_verification" &&
+      (!isPendingVerification || isCashOnDelivery) &&
       order.status !== "cancelado" &&
       order.status !== "cancelled";
     const isEnPreparacion =
@@ -440,7 +498,7 @@ export default function OrdersListView() {
         <Button
           size="sm"
           disabled={isUpdating}
-          onClick={() => handleStartPreparing(order)}
+          onClick={() => handleStartPreparing(order.id)}
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
         >
           <Play className="w-3.5 h-3.5 mr-1" />
@@ -491,26 +549,14 @@ export default function OrdersListView() {
 
   return (
     <div className="space-y-4">
-      {/* BARRA DE HERRAMIENTAS COMPACTA */}
-      <div className="bg-surface-card border border-border rounded-card p-3 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-xs">
-        {/* Izquierda: Buscador */}
-        <div className="relative w-full lg:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => updateFilter(setSearch, e.target.value)}
-            placeholder="Buscar pedido, cliente, #op..."
-            className="w-full h-9 pl-9 pr-3 border border-border rounded-button text-xs bg-surface-card text-brand-primary outline-none focus:ring-2 focus:ring-accent/20"
-          />
-        </div>
-
-        {/* Centro: Selectores de píldora compactos */}
+      {/* BARRA DE HERRAMIENTAS COMPACTA EN 1 FILA HORIZONTAL */}
+      <div className="bg-surface-card border border-border rounded-card p-3 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 shadow-xs">
+        {/* Izquierda: Filtros Facetados */}
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={status}
             onChange={(e) => updateFilter(setStatus, e.target.value)}
-            className="w-36 h-9 px-2.5 text-xs bg-surface-card border border-border rounded-full text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
           >
             {STATUS_OPTIONS.map((item) => (
               <option key={item.value} value={item.value}>
@@ -522,7 +568,7 @@ export default function OrdersListView() {
           <select
             value={deliveryType}
             onChange={(e) => updateFilter(setDeliveryType, e.target.value)}
-            className="w-36 h-9 px-2.5 text-xs bg-surface-card border border-border rounded-full text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
           >
             {DELIVERY_OPTIONS.map((item) => (
               <option key={item.value} value={item.value}>
@@ -534,9 +580,21 @@ export default function OrdersListView() {
           <select
             value={paymentMethod}
             onChange={(e) => updateFilter(setPaymentMethod, e.target.value)}
-            className="w-36 h-9 px-2.5 text-xs bg-surface-card border border-border rounded-full text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
           >
             {PAYMENT_OPTIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={dateFilter}
+            onChange={(e) => updateFilter(setDateFilter, e.target.value)}
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+          >
+            {DATE_OPTIONS.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
               </option>
@@ -547,15 +605,29 @@ export default function OrdersListView() {
             <button
               type="button"
               onClick={clearFilters}
-              className="text-xs text-rose-600 hover:underline flex items-center gap-1 font-semibold ml-1"
+              title="Limpiar filtros"
+              className="h-9 px-2.5 rounded-button border border-rose-200 bg-rose-50 text-xs text-rose-600 hover:bg-rose-100 flex items-center gap-1 font-semibold transition-colors"
             >
-              <RotateCcw className="w-3.5 h-3.5" /> Limpiar
+              <Eraser className="w-3.5 h-3.5" />
+              <span>Limpiar</span>
             </button>
           )}
         </div>
 
-        {/* Derecha: Selector Triple de Vistas y Refresco */}
-        <div className="flex items-center gap-2 self-end lg:self-auto">
+        {/* Centro: Buscador */}
+        <div className="relative max-w-md w-full xl:mx-auto">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => updateFilter(setSearch, e.target.value)}
+            placeholder="Buscar pedido, cliente, teléfono o #operación..."
+            className="max-w-md w-full h-9 text-xs pl-3 pr-8 rounded-button border border-border bg-white text-brand-primary outline-none focus:ring-2 focus:ring-accent/20"
+          />
+          <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted pointer-events-none" />
+        </div>
+
+        {/* Derecha: Vistas y Recarga */}
+        <div className="flex items-center gap-2 self-end xl:self-auto shrink-0">
           <div className="inline-flex items-center gap-1 bg-surface-subtle p-1 rounded-button border border-border">
             <button
               type="button"
@@ -603,7 +675,11 @@ export default function OrdersListView() {
             title="Refrescar pedidos"
             className="h-9 px-2.5 text-xs flex items-center gap-1"
           >
-            <RotateCw className="w-3.5 h-3.5 text-brand-secondary" />
+            <RotateCw
+              className={`w-3.5 h-3.5 text-brand-secondary ${
+                loading ? "animate-spin" : ""
+              }`}
+            />
           </Button>
         </div>
       </div>
@@ -613,19 +689,17 @@ export default function OrdersListView() {
         <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-card">
           {error.message}
         </div>
-      ) : loading ? (
+      ) : loading && localOrders.length === 0 ? (
         <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
           Cargando pedidos...
-        </div>
-      ) : localOrders.length === 0 ? (
-        <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
-          No encontramos pedidos con los filtros aplicados.
         </div>
       ) : viewMode === "kanban" ? (
         <OrderKanbanView
           orders={localOrders}
           recentOrderIds={recentOrderIds}
+          dateFilter={dateFilter}
           onVerifyPayment={(order) => setPaymentModal({ isOpen: true, order })}
+          onSendToPreparation={handleStartPreparing}
           onSendToPool={handleSendToPool}
           onRequeueIncident={handleRequeueIncident}
           onNavigateDetail={(orderNumber) =>
@@ -634,10 +708,14 @@ export default function OrdersListView() {
           updatingOrderId={updatingOrderId}
           deliveryStaff={deliveryStaff}
         />
+      ) : displayedOrders.length === 0 ? (
+        <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
+          No encontramos pedidos con los filtros aplicados.
+        </div>
       ) : viewMode === "grid" ? (
         /* VISTA EN TARJETAS */
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {localOrders.map((order) => {
+          {displayedOrders.map((order) => {
             const customerName =
               order.customer_name ||
               [order.profiles?.first_name, order.profiles?.paternal_surname]
@@ -655,7 +733,7 @@ export default function OrdersListView() {
                   isIncident ? "border-l-4 border-l-rose-500 bg-rose-50/20" : ""
                 } ${
                   isRecent
-                    ? "ring-2 ring-emerald-400 bg-emerald-50/40 animate-pulse"
+                    ? "ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] animate-pulse"
                     : ""
                 }`}
               >
@@ -784,7 +862,7 @@ export default function OrdersListView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {localOrders.map((order) => {
+                {displayedOrders.map((order) => {
                   const isIncident = order.status === "incidencia_transporte";
                   const isRecent = recentOrderIds.includes(order.id);
                   const customerName =
@@ -872,31 +950,35 @@ export default function OrdersListView() {
         </div>
       )}
 
-      {/* PAGINACIÓN */}
-      <div className="bg-surface-card border border-border rounded-card p-3 flex items-center justify-between">
-        <p className="text-xs text-brand-secondary">{count} pedido(s)</p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-xs font-semibold text-brand-primary">
-            Página {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+      {/* PAGINACIÓN (Solo en Grid y Tabla) */}
+      {viewMode !== "kanban" && (
+        <div className="bg-surface-card border border-border rounded-card p-3 flex items-center justify-between">
+          <p className="text-xs text-brand-secondary">
+            {displayedOrders.length} pedido(s)
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-xs font-semibold text-brand-primary">
+              Página {page} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* MODAL DE VALIDACIÓN DE PAGO */}
       <OrderPaymentModal

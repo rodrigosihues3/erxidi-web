@@ -585,6 +585,36 @@ ALTER TABLE ONLY "public"."orders" REPLICA IDENTITY FULL;
 ALTER TABLE "public"."orders" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."product_color_images" (
+    "id" bigint NOT NULL,
+    "product_id" bigint NOT NULL,
+    "color" "text" NOT NULL,
+    "image_url" "text" NOT NULL,
+    "is_cover" boolean DEFAULT false,
+    "display_order" integer DEFAULT 0,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."product_color_images" OWNER TO "postgres";
+
+
+CREATE SEQUENCE IF NOT EXISTS "public"."product_color_images_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE "public"."product_color_images_id_seq" OWNER TO "postgres";
+
+
+ALTER SEQUENCE "public"."product_color_images_id_seq" OWNED BY "public"."product_color_images"."id";
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."product_variants" (
     "id" bigint NOT NULL,
     "product_id" bigint NOT NULL,
@@ -596,6 +626,7 @@ CREATE TABLE IF NOT EXISTS "public"."product_variants" (
     "is_active" boolean DEFAULT true NOT NULL,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
+    "image_url" "text",
     CONSTRAINT "product_variants_color_hex_check" CHECK ((("color_hex")::"text" ~ '^#[0-9A-Fa-f]{6}$'::"text")),
     CONSTRAINT "product_variants_stock_check" CHECK (("stock" >= 0))
 );
@@ -774,6 +805,10 @@ CREATE OR REPLACE VIEW "public"."v_product_variants_available" WITH ("security_i
 ALTER VIEW "public"."v_product_variants_available" OWNER TO "postgres";
 
 
+ALTER TABLE ONLY "public"."product_color_images" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."product_color_images_id_seq"'::"regclass");
+
+
+
 ALTER TABLE ONLY "public"."addresses"
     ADD CONSTRAINT "addresses_pkey" PRIMARY KEY ("id");
 
@@ -851,6 +886,11 @@ ALTER TABLE ONLY "public"."orders"
 
 ALTER TABLE ONLY "public"."orders"
     ADD CONSTRAINT "orders_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."product_color_images"
+    ADD CONSTRAINT "product_color_images_pkey" PRIMARY KEY ("id");
 
 
 
@@ -932,6 +972,10 @@ CREATE INDEX "idx_orders_status" ON "public"."orders" USING "btree" ("status");
 
 
 
+CREATE INDEX "idx_prod_color_images_lookup" ON "public"."product_color_images" USING "btree" ("product_id", "color");
+
+
+
 CREATE INDEX "idx_products_brand_id" ON "public"."products" USING "btree" ("brand_id");
 
 
@@ -981,6 +1025,11 @@ ALTER TABLE ONLY "public"."orders"
 
 ALTER TABLE ONLY "public"."orders"
     ADD CONSTRAINT "orders_shipping_address_id_fkey" FOREIGN KEY ("shipping_address_id") REFERENCES "public"."addresses"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."product_color_images"
+    ADD CONSTRAINT "product_color_images_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE CASCADE;
 
 
 
@@ -1098,6 +1147,10 @@ CREATE POLICY "Permitir crear ordenes a invitados y usuarios" ON "public"."order
 
 
 
+CREATE POLICY "Permitir gestion completa a administradores" ON "public"."product_color_images" USING (true) WITH CHECK (true);
+
+
+
 CREATE POLICY "Permitir insercion cache identidades" ON "public"."identity_cache" FOR INSERT TO "authenticated", "anon" WITH CHECK (true);
 
 
@@ -1107,6 +1160,10 @@ CREATE POLICY "Permitir insertar items de orden" ON "public"."order_items" FOR I
 
 
 CREATE POLICY "Permitir lectura cache identidades" ON "public"."identity_cache" FOR SELECT TO "authenticated", "anon" USING (true);
+
+
+
+CREATE POLICY "Permitir lectura publica de fotos por color" ON "public"."product_color_images" FOR SELECT USING (true);
 
 
 
@@ -1208,6 +1265,9 @@ CREATE POLICY "orders_select_policy" ON "public"."orders" FOR SELECT TO "authent
 
 CREATE POLICY "orders_update_policy" ON "public"."orders" FOR UPDATE TO "authenticated" USING (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" IS NULL) OR ("assigned_delivery_id" = "auth"."uid"()))))) WITH CHECK (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" = "auth"."uid"()) OR ("assigned_delivery_id" IS NULL)))));
 
+
+
+ALTER TABLE "public"."product_color_images" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."product_variants" ENABLE ROW LEVEL SECURITY;
@@ -1580,6 +1640,18 @@ GRANT ALL ON SEQUENCE "public"."order_items_id_seq" TO "service_role";
 GRANT ALL ON TABLE "public"."orders" TO "anon";
 GRANT ALL ON TABLE "public"."orders" TO "authenticated";
 GRANT ALL ON TABLE "public"."orders" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."product_color_images" TO "anon";
+GRANT ALL ON TABLE "public"."product_color_images" TO "authenticated";
+GRANT ALL ON TABLE "public"."product_color_images" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."product_color_images_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."product_color_images_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."product_color_images_id_seq" TO "service_role";
 
 
 
