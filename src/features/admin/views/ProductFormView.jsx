@@ -53,6 +53,7 @@ export default function ProductFormView() {
   const navigate = useNavigate();
   const editing = Boolean(id);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const [form, setForm] = useState(initial);
   const [variants, setVariants] = useState([]);
@@ -83,6 +84,14 @@ export default function ProductFormView() {
       setToastMessage((curr) => (curr === msg ? "" : curr));
     }, 4000);
   }
+
+  // Textarea con Altura Dinámica Auto-Expandible
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.max(90, textareaRef.current.scrollHeight)}px`;
+    }
+  }, [form.description]);
 
   useEffect(() => {
     let active = true;
@@ -950,7 +959,7 @@ export default function ProductFormView() {
             />
           </div>
 
-          {/* Descripción con Asistencia IA de Redacción y Estructura */}
+          {/* Descripción con Asistencia IA y Textarea Auto-Expandible */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -980,12 +989,12 @@ export default function ProductFormView() {
               </div>
             </div>
             <textarea
-              required
+              ref={textareaRef}
               rows={3}
               value={form.description}
               onChange={(e) => update("description", e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-button text-xs leading-relaxed resize-y min-h-[75px] text-brand-primary focus:outline-none focus:border-brand-primary"
-              placeholder="Detalles sobre suavidad, confección y calce..."
+              className="w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed overflow-hidden resize-none transition-all focus:border-brand-primary focus:outline-none"
+              placeholder="Detalles de confección, suavidad y calce..."
             />
           </div>
 
@@ -1004,10 +1013,11 @@ export default function ProductFormView() {
         </div>
       </div>
 
-      {/* Modal de Estudio Fotográfico IA (2 Etapas) */}
+      {/* Modal de Estudio Fotográfico IA (2 Etapas con Imagen 3) */}
       <AiPhotoStudioModal
         isOpen={isStudioOpen}
         file={studioFile}
+        productName={form.name}
         colorName={activeColor}
         onClose={() => {
           setIsStudioOpen(false);

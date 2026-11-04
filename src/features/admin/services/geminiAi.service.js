@@ -1,5 +1,21 @@
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+const IMAGEN_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`;
+const GEMINI_TEXT_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+/**
+ * Convierte un File a Base64 puro (sin prefijo data URL)
+ */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export async function enhanceDescriptionWithAi({
   rawText,
@@ -55,7 +71,7 @@ ${rawText?.trim() || "Prenda cómoda de alta calidad confeccionada en algodón p
     },
   };
 
-  const response = await fetch(API_URL, {
+  const response = await fetch(GEMINI_TEXT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -82,165 +98,154 @@ ${rawText?.trim() || "Prenda cómoda de alta calidad confeccionada en algodón p
 }
 
 /**
- * Pipeline Real de Estudio Fotográfico:
- * Segmenta la prenda por muestreo perimetral de fondo, remueve superficies cotidianas y
- * encuadra la silueta sobre lienzo blanco 4:5 (#FFFFFF) con sombra de contacto difusa.
+ * Pipeline de Estudio Fotográfico IA:
+ * 1. Analiza prenda original con Gemini 2.5 Flash.
+ * 2. Genera nueva toma de catálogo con Imagen 3 en relación 4:5.
+ * 3. Respaldo transparente en Canvas 4:5 con fondo blanco y sombra si la API falla.
  */
 export async function processStudioPhoto({
   imageFile,
   perspective = "frontal",
+  productName = "",
+  colorName = "",
 }) {
-  return new Promise((resolve, reject) => {
+  if (!GEMINI_API_KEY) {
+    throw new Error("VITE_GEMINI_API_KEY no está configurada.");
+  }
+
+  try {
+    const base64Image = await fileToBase64(imageFile);
+
+    // 1. Análisis visual de la prenda con Gemini Vision
+    const visionPayload = {
+      contents: [
+        {
+          parts: [
+            {
+              text: "Describe con precisión la prenda de esta foto: color exacto, tipo de corte (bóxer, trusa, top, etc.), pretina elástica y textura de tela. Responde en 1 sola oración concisa en inglés.",
+            },
+            {
+              inline_data: {
+                mime_type: imageFile.type || "image/jpeg",
+                data: base64Image,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const visionRes = await fetch(GEMINI_TEXT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(visionPayload),
+    });
+
+    let visualDescription = `${colorName || "colored"} underwear garment, premium cotton`;
+    if (visionRes.ok) {
+      const visionData = await visionRes.json();
+      visualDescription =
+        visionData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+        visualDescription;
+    }
+
+    // 2. Mapeo de perspectiva
+    const perspectivePrompts = {
+      frontal: "clean straight front view, flat lay or invisible mannequin",
+      "3/4 Der.": "dynamic three-quarters right angle perspective view",
+      "3/4 Izq.": "dynamic three-quarters left angle perspective view",
+      espalda: "back view showing rear waistband and seamless construction",
+    };
+    const angleText = perspectivePrompts[perspective] || "studio front view";
+
+    // 3. Solicitud a Imagen 3
+    const prompt = `Professional commercial e-commerce product photograph of a ${visualDescription}, ${angleText}, isolated on pure solid white background (#FFFFFF), soft subtle contact drop shadow underneath, crisp studio softbox lighting, centered composition, high-end catalog presentation, 8k resolution, photorealistic.`;
+
+    const imagenPayload = {
+      instances: [{ prompt }],
+      parameters: {
+        sampleCount: 1,
+        aspectRatio: "4:5",
+        outputOptions: { mimeType: "image/jpeg" },
+      },
+    };
+
+    const imagenRes = await fetch(IMAGEN_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(imagenPayload),
+    });
+
+    if (imagenRes.ok) {
+      const imagenData = await imagenRes.json();
+      const b64Result = imagenData.predictions?.[0]?.bytesBase64Encoded;
+      if (b64Result) {
+        const byteCharacters = atob(b64Result);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "image/jpeg" });
+        const cleanFile = new File(
+          [blob],
+          `estudio-ia-${perspective}-${Date.now()}.jpg`,
+          { type: "image/jpeg" },
+        );
+        const previewUrl = URL.createObjectURL(blob);
+        return { file: cleanFile, previewUrl };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "Fallo en pipeline Imagen 3, recurriendo a aislamiento local:",
+      err,
+    );
+  }
+
+  // Respaldo seguro en Canvas 4:5
+  return fallbackCanvasStudio(imageFile, perspective);
+}
+
+function fallbackCanvasStudio(imageFile, perspective) {
+  return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onerror = () =>
-      reject(new Error("No se pudo leer el archivo de imagen."));
     reader.onload = (e) => {
       const img = new Image();
-      img.onerror = () => reject(new Error("No se pudo decodificar la imagen."));
       img.onload = () => {
-        try {
-          // 1. Canvas de análisis y aislamiento
-          const analysisCanvas = document.createElement("canvas");
-          const aWidth = Math.min(img.width, 1000);
-          const aHeight = Math.round(img.height * (aWidth / img.width));
-          analysisCanvas.width = aWidth;
-          analysisCanvas.height = aHeight;
-          const aCtx = analysisCanvas.getContext("2d", {
-            willReadFrequently: true,
-          });
-          aCtx.drawImage(img, 0, 0, aWidth, aHeight);
+        const canvas = document.createElement("canvas");
+        canvas.width = 800;
+        canvas.height = 1000;
+        const ctx = canvas.getContext("2d");
 
-          const imgData = aCtx.getImageData(0, 0, aWidth, aHeight);
-          const data = imgData.data;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // Muestreo perimetral del color de fondo (esquinas exteriores)
-          const cornerIndices = [
-            0,
-            (aWidth - 1) * 4,
-            (aHeight - 1) * aWidth * 4,
-            ((aHeight - 1) * aWidth + (aWidth - 1)) * 4,
-          ];
+        ctx.save();
+        ctx.filter = "blur(14px)";
+        ctx.fillStyle = "rgba(15, 23, 42, 0.12)";
+        ctx.beginPath();
+        ctx.ellipse(400, 830, 240, 26, 0, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
 
-          let bgR = 0,
-            bgG = 0,
-            bgB = 0;
-          cornerIndices.forEach((idx) => {
-            bgR += data[idx];
-            bgG += data[idx + 1];
-            bgB += data[idx + 2];
-          });
-          bgR = Math.round(bgR / cornerIndices.length);
-          bgG = Math.round(bgG / cornerIndices.length);
-          bgB = Math.round(bgB / cornerIndices.length);
+        const scale = Math.min(680 / img.width, 780 / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const x = (canvas.width - w) / 2;
+        const y = (canvas.height - h) / 2 - 20;
 
-          // Umbral de tolerancia de color euclidiano para segmentar el fondo
-          const threshold = 55;
-          let minX = aWidth,
-            minY = aHeight,
-            maxX = 0,
-            maxY = 0;
-          let hasForeground = false;
+        ctx.drawImage(img, x, y, w, h);
 
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-
-            const dist = Math.sqrt(
-              (r - bgR) * (r - bgR) +
-                (g - bgG) * (g - bgG) +
-                (b - bgB) * (b - bgB),
-            );
-
-            // Si está dentro del rango del color del fondo, hacerlo transparente
-            if (dist < threshold) {
-              data[i + 3] = 0; // Canal Alpha a 0
-            } else {
-              // Píxel perteneciente a la prenda
-              const pixelIndex = i / 4;
-              const px = pixelIndex % aWidth;
-              const py = Math.floor(pixelIndex / aWidth);
-
-              if (px < minX) minX = px;
-              if (px > maxX) maxX = px;
-              if (py < minY) minY = py;
-              if (py > maxY) maxY = py;
-              hasForeground = true;
-            }
-          }
-
-          aCtx.putImageData(imgData, 0, 0);
-
-          // 2. Lienzo final de Estudio Fotográfico en Proporción Estándar 4:5
-          const studioCanvas = document.createElement("canvas");
-          studioCanvas.width = 800;
-          studioCanvas.height = 1000;
-          const sCtx = studioCanvas.getContext("2d");
-
-          // Fondo blanco puro de catálogo
-          sCtx.fillStyle = "#FFFFFF";
-          sCtx.fillRect(0, 0, studioCanvas.width, studioCanvas.height);
-
-          // Sombra de contacto difusa inferior
-          sCtx.save();
-          sCtx.filter = "blur(14px)";
-          sCtx.fillStyle = "rgba(15, 23, 42, 0.14)";
-          sCtx.beginPath();
-          sCtx.ellipse(400, 830, 230, 26, 0, 0, 2 * Math.PI);
-          sCtx.fill();
-          sCtx.restore();
-
-          // Encuadre y escalado proporcionado de la prenda aislada
-          if (hasForeground && maxX > minX && maxY > minY) {
-            const cropW = maxX - minX;
-            const cropH = maxY - minY;
-            const maxAllowedW = 660;
-            const maxAllowedH = 760;
-            const scale = Math.min(maxAllowedW / cropW, maxAllowedH / cropH);
-
-            const destW = cropW * scale;
-            const destH = cropH * scale;
-            const destX = (studioCanvas.width - destW) / 2;
-            const destY = (studioCanvas.height - destH) / 2 - 20;
-
-            sCtx.drawImage(
-              analysisCanvas,
-              minX,
-              minY,
-              cropW,
-              cropH,
-              destX,
-              destY,
-              destW,
-              destH,
-            );
-          } else {
-            // Respaldo proporcionado con encuadre limpio
-            const scale = Math.min(680 / aWidth, 780 / aHeight);
-            const destW = aWidth * scale;
-            const destH = aHeight * scale;
-            const destX = (studioCanvas.width - destW) / 2;
-            const destY = (studioCanvas.height - destH) / 2 - 20;
-            sCtx.drawImage(analysisCanvas, destX, destY, destW, destH);
-          }
-
-          // Generación de archivo y URL
-          studioCanvas.toBlob((blob) => {
-            if (!blob) {
-              reject(new Error("Error al exportar blob de estudio fotográfico."));
-              return;
-            }
-            const cleanFile = new File(
-              [blob],
-              `erxidi-estudio-${perspective}-${Date.now()}.png`,
-              { type: "image/png" },
-            );
-            const previewUrl = URL.createObjectURL(blob);
-            resolve({ file: cleanFile, previewUrl });
-          }, "image/png");
-        } catch (err) {
-          reject(err);
-        }
+        canvas.toBlob((blob) => {
+          const cleanFile = new File(
+            [blob],
+            `estudio-${perspective}-${Date.now()}.png`,
+            { type: "image/png" },
+          );
+          const previewUrl = URL.createObjectURL(blob);
+          resolve({ file: cleanFile, previewUrl });
+        }, "image/png");
       };
       img.src = e.target.result;
     };

@@ -14,8 +14,8 @@ import { processStudioPhoto } from "../services/geminiAi.service";
 
 const PERSPECTIVES = [
   { id: "frontal", label: "Frontal", icon: Shirt },
-  { id: "tres-cuartos-der", label: "3/4 Der.", icon: RotateCw },
-  { id: "tres-cuartos-izq", label: "3/4 Izq.", icon: RotateCcw },
+  { id: "3/4 Der.", label: "3/4 Der.", icon: RotateCw },
+  { id: "3/4 Izq.", label: "3/4 Izq.", icon: RotateCcw },
   { id: "espalda", label: "Espalda", icon: Layers },
 ];
 
@@ -28,6 +28,7 @@ const PROCESSING_STEPS = [
 export default function AiPhotoStudioModal({
   isOpen,
   file,
+  productName = "",
   colorName = "",
   onClose,
   onApprove,
@@ -80,6 +81,8 @@ export default function AiPhotoStudioModal({
             const res = await processStudioPhoto({
               imageFile: file,
               perspective,
+              productName,
+              colorName,
             });
             resolve(res);
           } catch (err) {
@@ -265,7 +268,7 @@ export default function AiPhotoStudioModal({
             </div>
 
             {/* Columna Derecha: Controles y Versiones */}
-            <div className="md:col-span-6 space-y-4">
+            <div className="md:col-span-6 flex flex-col h-full space-y-4">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
                   Perspectiva de la prenda
@@ -305,15 +308,16 @@ export default function AiPhotoStudioModal({
                 </Button>
               </div>
 
-              {/* Cuadrícula de Versiones de Estudio */}
+              {/* Contenedor de Versiones de Estudio con Scroll Holgado */}
               {studioVersions.length > 0 && (
-                <div className="space-y-1.5 pt-1">
+                <div className="space-y-1.5 pt-1 flex-1 min-h-[260px] max-h-[380px] overflow-y-auto pr-1">
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     Versiones de Estudio ({studioVersions.length})
                   </label>
-                  <div className="grid grid-cols-2 gap-2.5 max-h-[190px] overflow-y-auto p-1">
+                  <div className="grid grid-cols-2 gap-3">
                     {studioVersions.map((item) => {
-                      const isSelected = activeStudioVersion?.id === item.id;
+                      const isSelected =
+                        activeStudioVersion?.id === item.id;
                       return (
                         <div
                           key={item.id}
@@ -324,11 +328,13 @@ export default function AiPhotoStudioModal({
                               : "border border-border hover:border-brand-primary/60 opacity-80 hover:opacity-100"
                           }`}
                         >
-                          <img
-                            src={item.previewUrl}
-                            alt={item.label}
-                            className="w-full h-full object-contain p-1"
-                          />
+                          <div className="flex-1 w-full bg-slate-50 flex items-center justify-center overflow-hidden p-1">
+                            <img
+                              src={item.previewUrl}
+                              alt={item.label}
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
                           <span className="text-[10px] font-bold text-center py-1 bg-surface-subtle text-brand-primary border-t border-border truncate px-1">
                             {item.label}
                           </span>
@@ -365,7 +371,9 @@ export default function AiPhotoStudioModal({
                 type="button"
                 className="bg-brand-primary text-white font-bold px-5 py-2 text-xs"
                 onClick={handleApproveStudio}
-                disabled={!activeStudioVersion || isProcessing || approving}
+                disabled={
+                  !activeStudioVersion || isProcessing || approving
+                }
                 isLoading={approving}
               >
                 Aprobar y guardar en catálogo
