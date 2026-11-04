@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Search,
+  Columns3,
   LayoutGrid,
   List,
-  RefreshCw,
+  RotateCw,
+  RotateCcw,
+  ClipboardList,
   Eye,
   ChevronLeft,
   ChevronRight,
@@ -13,15 +16,19 @@ import {
   ArrowRight,
   Play,
   PackageCheck,
-  RotateCcw,
   AlertOctagon,
+  Calendar,
+  Zap,
+  Store,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../../../services/supabase";
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
 import { Card } from "../../../components/ui/Card";
 import OrderStatusBadge from "../components/OrderStatusBadge";
 import OrderPaymentModal from "../components/OrderPaymentModal";
+import OrderKanbanView from "../components/OrderKanbanView";
 import { useAdminOrders } from "../hooks/useAdminOrders";
 import {
   getDeliveryStaff,
@@ -31,25 +38,28 @@ import {
 } from "../services/adminOrders.service";
 
 const STATUS_OPTIONS = [
-  { value: "all", label: "Todos los estados" },
-  { value: "received", label: "Recibido" },
+  { value: "all", label: "Estado" },
+  { value: "recibido", label: "Recibido" },
+  { value: "pendiente_pago", label: "Pendiente de Pago" },
   { value: "en_preparacion", label: "En Preparación" },
-  { value: "por_asignar_repartidor", label: "Por Asignar Repartidor" },
+  { value: "por_asignar_repartidor", label: "En Bolsa" },
   { value: "en_camino", label: "En Camino" },
+  { value: "cerca", label: "Cerca" },
+  { value: "en_destino", label: "En Destino" },
   { value: "entregado", label: "Entregado" },
   { value: "cancelado", label: "Cancelado" },
   { value: "incidencia_transporte", label: "Incidencia" },
 ];
 
 const DELIVERY_OPTIONS = [
-  { value: "all", label: "Todo despacho" },
+  { value: "all", label: "Despacho" },
   { value: "express", label: "Express" },
   { value: "scheduled", label: "Programado" },
   { value: "pickup", label: "Recojo" },
 ];
 
 const PAYMENT_OPTIONS = [
-  { value: "all", label: "Todo método" },
+  { value: "all", label: "Pago" },
   { value: "yape_plin", label: "Yape / Plin" },
   { value: "culqi_gateway", label: "Culqi" },
   { value: "contraentrega", label: "Contraentrega" },
@@ -94,11 +104,12 @@ export default function OrdersListView() {
   const [status, setStatus] = useState("all");
   const [deliveryType, setDeliveryType] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState("all");
-  const [viewMode, setViewMode] = useState("grid");
+  const [viewMode, setViewMode] = useState("kanban"); // 'kanban' | 'grid' | 'table'
   const [refreshTick, setRefreshTick] = useState(0);
 
   const [deliveryStaff, setDeliveryStaff] = useState([]);
   const [localOrders, setLocalOrders] = useState([]);
+  const [recentOrderIds, setRecentOrderIds] = useState([]);
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
   const [copiedTxId, setCopiedTxId] = useState(null);
 
@@ -107,7 +118,7 @@ export default function OrdersListView() {
     order: null,
   });
 
-  const pageSize = 12;
+  const pageSize = viewMode === "kanban" ? 50 : 12;
   const filters = useMemo(
     () => ({
       page,
@@ -123,6 +134,12 @@ export default function OrdersListView() {
 
   const { data, count, loading, error } = useAdminOrders(filters);
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    status !== "all" ||
+    deliveryType !== "all" ||
+    paymentMethod !== "all";
 
   useEffect(() => {
     setLocalOrders(data);
@@ -141,6 +158,51 @@ export default function OrdersListView() {
       active = false;
     };
   }, []);
+
+  // Detección de Nuevos Pedidos (WebSocket)
+  useEffect(() => {
+    const timers = new Map();
+
+    const channel = supabase
+      .channel("admin-orders-realtime-pulse")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "orders" },
+        (payload) => {
+          const newId = payload.new?.id;
+          if (!newId) return;
+
+          setRecentOrderIds((prev) =>
+            prev.includes(newId) ? prev : [...prev, newId],
+          );
+          setRefreshTick((t) => t + 1);
+
+          if (timers.has(newId)) {
+            clearTimeout(timers.get(newId));
+          }
+          const timerId = setTimeout(() => {
+            setRecentOrderIds((prev) => prev.filter((id) => id !== newId));
+            timers.delete(newId);
+          }, 20000);
+          timers.set(newId, timerId);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      timers.forEach((timerId) => clearTimeout(timerId));
+      timers.clear();
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  function clearFilters() {
+    setSearch("");
+    setStatus("all");
+    setDeliveryType("all");
+    setPaymentMethod("all");
+    setPage(1);
+  }
 
   function handleCopyTx(txId, e) {
     e?.stopPropagation?.();
@@ -222,9 +284,9 @@ export default function OrdersListView() {
       return (
         <Badge
           variant="neutral"
-          className="bg-slate-100 text-slate-800 border-slate-200"
+          className="inline-flex items-center bg-slate-100 text-slate-800 border-slate-200"
         >
-          🏪 Recojo
+          <Store className="w-3 h-3 mr-1" /> Recojo
         </Badge>
       );
     }
@@ -232,18 +294,18 @@ export default function OrdersListView() {
       return (
         <Badge
           variant="warning"
-          className="bg-amber-50 text-amber-800 border-amber-200"
+          className="inline-flex items-center bg-amber-50 text-amber-800 border-amber-200"
         >
-          ⚡ Express
+          <Zap className="w-3 h-3 mr-1" /> Express
         </Badge>
       );
     }
     return (
       <Badge
         variant="neutral"
-        className="bg-sky-50 text-sky-800 border-sky-200"
+        className="inline-flex items-center bg-sky-50 text-sky-800 border-sky-200"
       >
-        📅 Programado
+        <Calendar className="w-3 h-3 mr-1" /> Programado
       </Badge>
     );
   }
@@ -274,33 +336,9 @@ export default function OrdersListView() {
       : order.delivery_profile
         ? `${order.delivery_profile.first_name} ${order.delivery_profile.paternal_surname || ""}`.trim()
         : "Repartidor";
-    const driverType =
-      staff?.delivery_type ||
-      order.delivery_profile?.delivery_type ||
-      "scheduled";
-    const isExpressDriver = driverType === "express";
 
     return (
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs font-bold text-brand-primary">
-          {driverName}
-        </span>
-        {isExpressDriver ? (
-          <Badge
-            variant="warning"
-            className="text-[10px] px-1 py-0 bg-amber-50 text-amber-800 border-amber-200"
-          >
-            ⚡ Express
-          </Badge>
-        ) : (
-          <Badge
-            variant="neutral"
-            className="text-[10px] px-1 py-0 bg-sky-50 text-sky-800 border-sky-200"
-          >
-            📅 Prog
-          </Badge>
-        )}
-      </div>
+      <span className="text-xs font-bold text-brand-primary">{driverName}</span>
     );
   }
 
@@ -362,16 +400,24 @@ export default function OrdersListView() {
       order.payment_status === "pending_verification";
     const isReceivedOrPaid =
       (order.status === "received" ||
+        order.status === "recibido" ||
         order.status === "pagado" ||
-        order.status === "pending") &&
+        order.status === "pending" ||
+        order.status === "pendiente_pago") &&
       order.payment_status !== "pending_verification" &&
       order.status !== "cancelado" &&
       order.status !== "cancelled";
-    const isEnPreparacion = order.status === "en_preparacion";
+    const isEnPreparacion =
+      order.status === "en_preparacion" || order.status === "preparing";
     const isPickup =
       (order.delivery_type || "").toLowerCase() === "pickup" ||
       (order.delivery_type || "").toLowerCase() === "recojo";
     const isIncident = order.status === "incidencia_transporte";
+    const isCompletedOrCancelled =
+      order.status === "entregado" ||
+      order.status === "delivered" ||
+      order.status === "cancelado" ||
+      order.status === "cancelled";
     const isUpdating = updatingOrderId === order.id;
 
     if (isPendingVerification) {
@@ -434,7 +480,13 @@ export default function OrdersListView() {
       );
     }
 
-    return <span className="text-xs text-brand-muted">—</span>;
+    if (isCompletedOrCancelled) {
+      return (
+        <span className="text-[11px] text-brand-muted">Pedido completado</span>
+      );
+    }
+
+    return <span className="text-[11px] text-brand-muted">En curso</span>;
   }
 
   return (
@@ -442,23 +494,23 @@ export default function OrdersListView() {
       {/* BARRA DE HERRAMIENTAS COMPACTA */}
       <div className="bg-surface-card border border-border rounded-card p-3 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-xs">
         {/* Izquierda: Buscador */}
-        <div className="relative flex-1 min-w-[220px] max-w-lg">
+        <div className="relative w-full lg:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted" />
           <input
             type="text"
             value={search}
             onChange={(e) => updateFilter(setSearch, e.target.value)}
-            placeholder="Buscar pedido, cliente, teléfono o #operación..."
+            placeholder="Buscar pedido, cliente, #op..."
             className="w-full h-9 pl-9 pr-3 border border-border rounded-button text-xs bg-surface-card text-brand-primary outline-none focus:ring-2 focus:ring-accent/20"
           />
         </div>
 
-        {/* Centro: Selectores Compactos */}
+        {/* Centro: Selectores de píldora compactos */}
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={status}
             onChange={(e) => updateFilter(setStatus, e.target.value)}
-            className="h-9 px-2.5 text-xs bg-surface-card border border-border rounded-button text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+            className="w-36 h-9 px-2.5 text-xs bg-surface-card border border-border rounded-full text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
           >
             {STATUS_OPTIONS.map((item) => (
               <option key={item.value} value={item.value}>
@@ -470,7 +522,7 @@ export default function OrdersListView() {
           <select
             value={deliveryType}
             onChange={(e) => updateFilter(setDeliveryType, e.target.value)}
-            className="h-9 px-2.5 text-xs bg-surface-card border border-border rounded-button text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+            className="w-36 h-9 px-2.5 text-xs bg-surface-card border border-border rounded-full text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
           >
             {DELIVERY_OPTIONS.map((item) => (
               <option key={item.value} value={item.value}>
@@ -482,7 +534,7 @@ export default function OrdersListView() {
           <select
             value={paymentMethod}
             onChange={(e) => updateFilter(setPaymentMethod, e.target.value)}
-            className="h-9 px-2.5 text-xs bg-surface-card border border-border rounded-button text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+            className="w-36 h-9 px-2.5 text-xs bg-surface-card border border-border rounded-full text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
           >
             {PAYMENT_OPTIONS.map((item) => (
               <option key={item.value} value={item.value}>
@@ -490,18 +542,40 @@ export default function OrdersListView() {
               </option>
             ))}
           </select>
+
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs text-rose-600 hover:underline flex items-center gap-1 font-semibold ml-1"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Limpiar
+            </button>
+          )}
         </div>
 
-        {/* Derecha: Alternador de Vistas y Refresco */}
+        {/* Derecha: Selector Triple de Vistas y Refresco */}
         <div className="flex items-center gap-2 self-end lg:self-auto">
           <div className="inline-flex items-center gap-1 bg-surface-subtle p-1 rounded-button border border-border">
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              title="Vista tablero Kanban"
+              className={`p-1.5 rounded-button transition-colors ${
+                viewMode === "kanban"
+                  ? "bg-brand-primary text-white shadow-xs"
+                  : "text-brand-muted hover:text-brand-primary"
+              }`}
+            >
+              <Columns3 className="w-4 h-4" />
+            </button>
             <button
               type="button"
               onClick={() => setViewMode("grid")}
               title="Vista cuadrícula"
               className={`p-1.5 rounded-button transition-colors ${
                 viewMode === "grid"
-                  ? "bg-white text-brand-primary shadow-xs"
+                  ? "bg-brand-primary text-white shadow-xs"
                   : "text-brand-muted hover:text-brand-primary"
               }`}
             >
@@ -513,7 +587,7 @@ export default function OrdersListView() {
               title="Vista tabla"
               className={`p-1.5 rounded-button transition-colors ${
                 viewMode === "table"
-                  ? "bg-white text-brand-primary shadow-xs"
+                  ? "bg-brand-primary text-white shadow-xs"
                   : "text-brand-muted hover:text-brand-primary"
               }`}
             >
@@ -529,7 +603,7 @@ export default function OrdersListView() {
             title="Refrescar pedidos"
             className="h-9 px-2.5 text-xs flex items-center gap-1"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-brand-secondary" />
+            <RotateCw className="w-3.5 h-3.5 text-brand-secondary" />
           </Button>
         </div>
       </div>
@@ -547,6 +621,19 @@ export default function OrdersListView() {
         <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
           No encontramos pedidos con los filtros aplicados.
         </div>
+      ) : viewMode === "kanban" ? (
+        <OrderKanbanView
+          orders={localOrders}
+          recentOrderIds={recentOrderIds}
+          onVerifyPayment={(order) => setPaymentModal({ isOpen: true, order })}
+          onSendToPool={handleSendToPool}
+          onRequeueIncident={handleRequeueIncident}
+          onNavigateDetail={(orderNumber) =>
+            navigate(`/admin/pedidos/${orderNumber}`)
+          }
+          updatingOrderId={updatingOrderId}
+          deliveryStaff={deliveryStaff}
+        />
       ) : viewMode === "grid" ? (
         /* VISTA EN TARJETAS */
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -559,12 +646,17 @@ export default function OrdersListView() {
               "Cliente";
             const phone = order.customer_phone || order.profiles?.phone || "";
             const isIncident = order.status === "incidencia_transporte";
+            const isRecent = recentOrderIds.includes(order.id);
 
             return (
               <Card
                 key={order.id}
                 className={`p-4 flex flex-col justify-between border border-border bg-surface-card hover:border-brand-primary/40 transition-colors ${
                   isIncident ? "border-l-4 border-l-rose-500 bg-rose-50/20" : ""
+                } ${
+                  isRecent
+                    ? "ring-2 ring-emerald-400 bg-emerald-50/40 animate-pulse"
+                    : ""
                 }`}
               >
                 {/* Header Card */}
@@ -574,7 +666,7 @@ export default function OrdersListView() {
                       {isIncident && (
                         <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
                       )}
-                      <span className="font-bold font-mono text-base text-brand-primary truncate">
+                      <span className="font-bold font-mono text-base text-accent truncate">
                         #{order.order_number}
                       </span>
                     </div>
@@ -586,10 +678,11 @@ export default function OrdersListView() {
                         onClick={() =>
                           navigate(`/admin/pedidos/${order.order_number}`)
                         }
-                        title="Ver detalle del pedido"
-                        className="p-1.5 rounded-button text-brand-muted hover:text-brand-primary hover:bg-surface-subtle transition-colors"
+                        title="Ver detalle completo"
+                        className="p-1 text-brand-muted hover:text-brand-primary rounded"
                       >
-                        <Eye className="w-4 h-4" />
+                        <ClipboardList className="w-3.5 h-3.5 inline" />
+                        <ArrowRight className="w-2.5 h-2.5 -ml-0.5 inline" />
                       </button>
                     </div>
                   </div>
@@ -693,6 +786,7 @@ export default function OrdersListView() {
               <tbody className="divide-y divide-border">
                 {localOrders.map((order) => {
                   const isIncident = order.status === "incidencia_transporte";
+                  const isRecent = recentOrderIds.includes(order.id);
                   const customerName =
                     order.customer_name ||
                     [
@@ -712,14 +806,14 @@ export default function OrdersListView() {
                         isIncident
                           ? "bg-rose-50/70 border-l-4 border-l-rose-500"
                           : ""
-                      }`}
+                      } ${isRecent ? "bg-emerald-50/40 animate-pulse" : ""}`}
                     >
                       <td className="p-4">
                         <div className="flex items-center gap-1.5">
                           {isIncident && (
                             <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
                           )}
-                          <p className="font-bold font-mono text-brand-primary">
+                          <p className="font-bold font-mono text-accent">
                             #{order.order_number}
                           </p>
                         </div>

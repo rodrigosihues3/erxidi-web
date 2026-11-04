@@ -5,12 +5,15 @@ export const ORDER_STATUS = {
   PREPARING: "en_preparacion",
   READY_FOR_DELIVERY: "por_asignar_repartidor",
   DISPATCHED: "en_camino",
+  NEARBY: "cerca",
+  ARRIVED: "en_destino",
   DELIVERED: "entregado",
   CANCELLED: "cancelado",
   INCIDENT: "incidencia_transporte",
 };
 
 export const ORDER_STATUS_LABELS = {
+  recibido: "Recibido",
   received: "Recibido",
   pending: "Pendiente",
   pendiente_pago: "Pendiente de pago",
@@ -18,10 +21,13 @@ export const ORDER_STATUS_LABELS = {
   preparing: "En preparación",
   en_preparacion: "En preparación",
   por_asignar_repartidor: "Por asignar repartidor",
+  asignado: "Asignado",
   dispatched: "En camino",
   en_camino: "En camino",
   nearby: "Cerca",
   cerca: "Cerca",
+  en_destino: "En destino",
+  arrived: "En destino",
   incidencia_transporte: "Incidencia en reparto",
   delivered: "Entregado",
   entregado: "Entregado",
@@ -40,6 +46,14 @@ const ORDER_SELECT = `
   ),
   delivery_profile:assigned_delivery_id (
     id, first_name, paternal_surname, phone, delivery_type
+  ),
+  order_items (
+    id, quantity, unit_price, subtotal,
+    product_variants:variant_id (
+      id, color, sku,
+      sizes:size_id ( name ),
+      products:product_id ( name )
+    )
   )
 `;
 
