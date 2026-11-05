@@ -3,6 +3,7 @@ import {
     Building2,
     CreditCard,
     Clock,
+    MapPin,
     Save,
     Search,
     Plus,
@@ -19,6 +20,7 @@ import {
     updateStoreSetting,
     queryRucDecolecta,
 } from "../services/adminSettings.service";
+import CoverageSettingsView from "./CoverageSettingsView";
 
 const DAYS_MAP = [
     { key: "1", label: "Lunes" },
@@ -31,7 +33,7 @@ const DAYS_MAP = [
 ];
 
 export default function SettingsView() {
-    const [activeTab, setActiveTab] = useState("identity"); // 'identity' | 'payments' | 'hours'
+    const [activeTab, setActiveTab] = useState("identity"); // 'identity' | 'payments' | 'hours' | 'coverage'
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [searchingRuc, setSearchingRuc] = useState(false);
@@ -205,7 +207,7 @@ export default function SettingsView() {
             )}
 
             {/* Selector de Pestañas */}
-            <div className="flex border-b border-border space-x-2">
+            <div className="flex flex-wrap border-b border-border gap-2">
                 <button
                     type="button"
                     onClick={() => setActiveTab("identity")}
@@ -240,6 +242,19 @@ export default function SettingsView() {
                 >
                     <Clock className="w-4 h-4" />
                     Horarios y Operatividad
+                </button>
+
+                <button
+                    type="button"
+                    onClick={() => setActiveTab("coverage")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${
+                        activeTab === "coverage"
+                            ? "border-brand-primary text-brand-primary"
+                            : "border-transparent text-brand-secondary hover:text-brand-primary"
+                    }`}
+                >
+                    <MapPin className="w-4 h-4" />
+                    Zona de Cobertura y Tarifas
                 </button>
             </div>
 
@@ -581,6 +596,9 @@ export default function SettingsView() {
                     </Card>
                 </form>
             )}
+
+            {/* PESTAÑA 4: ZONA DE COBERTURA Y TARIFAS */}
+            {activeTab === "coverage" && <CoverageSettingsView />}
         </div>
     );
 }

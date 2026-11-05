@@ -7,32 +7,16 @@ import {
   updateDeliveryStaff,
 } from "../services/adminDelivery.service";
 
-export function parseStaffModality(paternalSurname) {
-  if (!paternalSurname) return { surname: "", modality: "scheduled" };
-  if (paternalSurname.includes("[Express]")) {
-    return {
-      surname: paternalSurname.replace("[Express]", "").trim(),
-      modality: "express",
-    };
-  }
-  if (paternalSurname.includes("[Programado]")) {
-    return {
-      surname: paternalSurname.replace("[Programado]", "").trim(),
-      modality: "scheduled",
-    };
-  }
+export function parseStaffModality(paternalSurname, deliveryType) {
+  const cleanSurname = (paternalSurname || "").replace(/\[.*?\]/g, "").trim();
   return {
-    surname: paternalSurname.trim(),
-    modality: "scheduled",
+    surname: cleanSurname,
+    modality: deliveryType || "scheduled",
   };
 }
 
-export function formatPaternalSurnameWithModality(cleanSurname, modality) {
-  const clean = (cleanSurname || "")
-    .replace(/\[(Express|Programado)\]/gi, "")
-    .trim();
-  const tag = modality === "express" ? "[Express]" : "[Programado]";
-  return `${clean} ${tag}`.trim();
+export function formatPaternalSurnameWithModality(cleanSurname) {
+  return (cleanSurname || "").replace(/\[.*?\]/g, "").trim();
 }
 
 export function DeliveryStaffModal({ staffToEdit, onClose, onSaved }) {
@@ -40,16 +24,17 @@ export function DeliveryStaffModal({ staffToEdit, onClose, onSaved }) {
 
   const initialForm = useMemo(() => {
     if (staffToEdit) {
-      const parsed = parseStaffModality(staffToEdit.paternal_surname);
       return {
         first_name: staffToEdit.first_name || "",
-        paternal_surname: parsed.surname,
+        paternal_surname: (staffToEdit.paternal_surname || "")
+          .replace(/\[.*?\]/g, "")
+          .trim(),
         maternal_surname: staffToEdit.maternal_surname || "",
         dni: staffToEdit.dni || "",
         phone: staffToEdit.phone || "",
         email: staffToEdit.email || "",
         password: "",
-        modality: parsed.modality || "scheduled",
+        modality: staffToEdit.delivery_type || "scheduled",
       };
     }
     return {
@@ -121,29 +106,21 @@ export function DeliveryStaffModal({ staffToEdit, onClose, onSaved }) {
     try {
       setLoading(true);
 
-      const finalPaternalSurname = formatPaternalSurnameWithModality(
-        form.paternal_surname,
-        form.modality,
-      );
+      const payload = {
+        first_name: form.first_name.trim(),
+        paternal_surname: form.paternal_surname.replace(/\[.*?\]/g, "").trim(),
+        maternal_surname: form.maternal_surname.trim() || null,
+        dni: form.dni.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim(),
+        password: form.password,
+        delivery_type: form.modality, // 'express' | 'scheduled'
+      };
 
       if (isEditing) {
-        await updateDeliveryStaff(staffToEdit.id, {
-          first_name: form.first_name.trim(),
-          paternal_surname: finalPaternalSurname,
-          maternal_surname: form.maternal_surname.trim() || null,
-          phone: form.phone.trim() || null,
-          dni: form.dni.trim() || null,
-        });
+        await updateDeliveryStaff(staffToEdit.id, payload);
       } else {
-        await createDeliveryStaff({
-          first_name: form.first_name.trim(),
-          paternal_surname: finalPaternalSurname,
-          maternal_surname: form.maternal_surname.trim() || null,
-          dni: form.dni.trim() || null,
-          email: form.email.trim(),
-          password: form.password,
-          phone: form.phone.trim() || null,
-        });
+        await createDeliveryStaff(payload);
       }
 
       onSaved();
@@ -163,7 +140,7 @@ export function DeliveryStaffModal({ staffToEdit, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg bg-white rounded-card shadow-xl border border-border">
+      <div className="w-full max-w-lg bg-surface-card rounded-card shadow-xl border border-border">
         {/* HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
@@ -240,7 +217,7 @@ export function DeliveryStaffModal({ staffToEdit, onClose, onSaved }) {
                   value={form.modality}
                   onChange={handleChange}
                   required
-                  className="w-full h-10 px-3 border border-border rounded-button text-sm bg-white outline-none focus:ring-2 focus:ring-accent/20"
+                  className="w-full h-10 px-3 border border-border rounded-button text-sm bg-surface-card text-brand-primary outline-none focus:ring-2 focus:ring-accent/20"
                 >
                   <option value="scheduled">Ruta Programada</option>
                   <option value="express">Express (Mismo día)</option>
@@ -341,7 +318,7 @@ function Field({
         className={`w-full h-10 px-3 border border-border rounded-button text-sm outline-none focus:ring-2 focus:ring-accent/20 ${
           disabled
             ? "bg-surface-subtle text-brand-muted cursor-not-allowed"
-            : "bg-white text-brand-primary"
+            : "bg-surface-card text-brand-primary"
         }`}
       />
 

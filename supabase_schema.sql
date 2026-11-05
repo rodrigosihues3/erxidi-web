@@ -137,17 +137,14 @@ DECLARE
     v_physical_stock INT;
     v_active_reserved INT;
     v_available_stock INT;
-    v_now TIMESTAMPTZ := (NOW() AT TIME ZONE 'America/Lima');
+    v_now TIMESTAMPTZ := NOW();
 BEGIN
-    -- Validar array no vacío
     IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
         RETURN jsonb_build_object('success', false, 'error_code', 'EMPTY_CART', 'message', 'El carrito no contiene prendas.');
     END IF;
 
-    -- Iterar y bloquear variantes para prevenir condiciones de carrera
     FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(variant_id BIGINT, quantity INT)
     LOOP
-        -- Bloqueo pesimista de fila
         SELECT stock INTO v_physical_stock
         FROM public.product_variants
         WHERE id = v_item.variant_id AND is_active = TRUE
@@ -157,20 +154,19 @@ BEGIN
             RETURN jsonb_build_object(
                 'success', false, 
                 'error_code', 'VARIANT_NOT_FOUND', 
-                'message', format('La variante con ID %s ya no se encuentra activa en el catálogo.', v_item.variant_id)
+                'message', format('La variante con ID %s no existe o está inactiva.', v_item.variant_id)
             );
         END IF;
 
-        -- Sumar reservas vigentes no expiradas
+        -- Sumar reservas vigentes usando variant_id estandarizado
         SELECT COALESCE(SUM(quantity), 0) INTO v_active_reserved
         FROM public.stock_reservations
-        WHERE product_variant_id = v_item.variant_id
+        WHERE variant_id = v_item.variant_id
           AND status = 'reserved'
           AND expires_at > v_now;
 
         v_available_stock := v_physical_stock - v_active_reserved;
 
-        -- Validar disponibilidad física real
         IF v_available_stock < v_item.quantity THEN
             RETURN jsonb_build_object(
                 'success', false, 
@@ -181,11 +177,11 @@ BEGIN
             );
         END IF;
 
-        -- Registrar reserva temporal
+        -- Insertar reserva temporal
         INSERT INTO public.stock_reservations (
             reservation_token,
             user_id,
-            product_variant_id,
+            variant_id,
             quantity,
             status,
             created_at,
@@ -245,13 +241,14 @@ $$;
 ALTER FUNCTION "public"."rls_auto_enable"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer) RETURNS "jsonb"
+CREATE OR REPLACE FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid" DEFAULT NULL::"uuid", "p_delivery_type" "text" DEFAULT 'scheduled'::"text", "p_total_items" integer DEFAULT 1, "p_scheduled_time_slot" "text" DEFAULT NULL::"text") RETURNS "jsonb"
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
-    v_now TIMESTAMPTZ := (NOW() AT TIME ZONE 'America/Lima');
-    v_current_dow TEXT := EXTRACT(DOW FROM v_now)::TEXT;
-    v_current_time TIME := v_now::TIME;
+    v_now TIMESTAMPTZ := NOW();
+    v_now_lima TIMESTAMPTZ := (NOW() AT TIME ZONE 'America/Lima');
+    v_current_dow TEXT := EXTRACT(DOW FROM v_now_lima)::TEXT;
+    v_current_time TIME := v_now_lima::TIME;
     v_emergency JSONB;
     v_hours JSONB;
     v_day_schedule JSONB;
@@ -260,116 +257,7 @@ DECLARE
     v_reservation_count INT;
     v_active_drivers INT;
 BEGIN
-    -- A. Validar vigencia de la reserva de stock
-    SELECT COUNT(*) INTO v_reservation_count
-    FROM public.stock_reservations
-    WHERE reservation_token = p_reservation_token
-      AND status = 'reserved'
-      AND expires_at > v_now;
-
-    IF v_reservation_count = 0 THEN
-        RETURN jsonb_build_object(
-            'success', false, 
-            'error_code', 'RESERVATION_EXPIRED', 
-            'message', 'El tiempo de reserva de tus prendas (10 minutos) ha expirado. Por favor, actualiza tu compra.'
-        );
-    END IF;
-
-    -- B. Validar banderas de emergencia
-    SELECT value INTO v_emergency FROM public.store_settings WHERE key = 'emergency_flags';
-    IF (v_emergency->>'close_store_today')::BOOLEAN = TRUE THEN
-        RETURN jsonb_build_object(
-            'success', false, 
-            'error_code', 'STORE_CLOSED_EMERGENCY', 
-            'message', 'La tienda ha suspendido temporalmente la recepción de pedidos por hoy.'
-        );
-    END IF;
-
-    -- C. Validaciones específicas para Delivery Express
-    IF p_delivery_type = 'express' THEN
-        -- Validar suspensión de express
-        IF (v_emergency->>'pause_express_only')::BOOLEAN = TRUE THEN
-            RETURN jsonb_build_object(
-                'success', false, 
-                'error_code', 'EXPRESS_PAUSED', 
-                'message', 'El servicio de delivery Express se encuentra pausado temporalmente.'
-            );
-        END IF;
-
-        -- Validar límite físico de prendas por viaje en mochila
-        IF p_total_items > 30 THEN
-            RETURN jsonb_build_object(
-                'success', false, 
-                'error_code', 'MAX_CAPACITY_EXCEEDED', 
-                'message', 'El pedido excede la capacidad máxima de una unidad motorizada (máximo 30 prendas).'
-            );
-        END IF;
-
-        -- Validar matriz horaria semanal
-        SELECT value INTO v_hours FROM public.store_settings WHERE key = 'business_hours';
-        v_day_schedule := v_hours->v_current_dow;
-
-        IF v_day_schedule IS NULL OR (v_day_schedule->>'enabled')::BOOLEAN = FALSE THEN
-            RETURN jsonb_build_object(
-                'success', false, 
-                'error_code', 'NON_WORKING_DAY', 
-                'message', 'Hoy no es día laborable para despachos Express.'
-            );
-        END IF;
-
-        v_open := (v_day_schedule->>'open')::TIME;
-        v_cutoff := (v_day_schedule->>'express_cutoff')::TIME;
-
-        IF v_current_time < v_open OR v_current_time > v_cutoff THEN
-            RETURN jsonb_build_object(
-                'success', false, 
-                'error_code', 'EXPRESS_OUT_OF_HOURS', 
-                'message', format('El servicio Express atiende de %s hasta las %s. Fuera de ese rango solo se admite envío programado.', v_open, v_cutoff)
-            );
-        END IF;
-
-        -- Validar existencia de flota disponible
-        SELECT COUNT(*) INTO v_active_drivers
-        FROM public.delivery_staff
-        WHERE is_active = TRUE AND operational_status != 'paused';
-
-        IF v_active_drivers = 0 THEN
-            RETURN jsonb_build_object(
-                'success', false, 
-                'error_code', 'NO_DRIVERS_AVAILABLE', 
-                'message', 'No hay repartidores disponibles en este momento para atención Express.'
-            );
-        END IF;
-    END IF;
-
-    -- Pre-flight exitoso
-    RETURN jsonb_build_object(
-        'success', true, 
-        'message', 'Pre-flight check aprobado con éxito.'
-    );
-END;
-$$;
-
-
-ALTER FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer) OWNER TO "postgres";
-
-
-CREATE OR REPLACE FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer DEFAULT 1, "p_scheduled_time_slot" character varying DEFAULT NULL::character varying) RETURNS "jsonb"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    AS $$
-DECLARE
-    v_now TIMESTAMPTZ := (NOW() AT TIME ZONE 'America/Lima');
-    v_current_dow TEXT := EXTRACT(DOW FROM v_now)::TEXT;
-    v_current_time TIME := v_now::TIME;
-    v_emergency JSONB;
-    v_hours JSONB;
-    v_day_schedule JSONB;
-    v_open TIME;
-    v_cutoff TIME;
-    v_reservation_count INT;
-    v_active_drivers INT;
-BEGIN
-    -- A. Validar vigencia de la reserva de stock si se proporciona token
+    -- A. Validar vigencia de la reserva si se envió token
     IF p_reservation_token IS NOT NULL THEN
         SELECT COUNT(*) INTO v_reservation_count
         FROM public.stock_reservations
@@ -386,7 +274,7 @@ BEGIN
         END IF;
     END IF;
 
-    -- B. Validar banderas de emergencia globales
+    -- B. Validar estado general de emergencia
     SELECT value INTO v_emergency FROM public.store_settings WHERE key = 'emergency_flags';
     IF v_emergency IS NOT NULL AND (v_emergency->>'close_store_today')::BOOLEAN = TRUE THEN
         RETURN jsonb_build_object(
@@ -396,9 +284,8 @@ BEGIN
         );
     END IF;
 
-    -- C. Validaciones exclusivas de Entrega Express
+    -- C. Validaciones exclusivas de Envío Express
     IF p_delivery_type = 'express' THEN
-        -- 1. Pausa de express por emergencia
         IF v_emergency IS NOT NULL AND (v_emergency->>'pause_express_only')::BOOLEAN = TRUE THEN
             RETURN jsonb_build_object(
                 'success', false, 
@@ -407,7 +294,6 @@ BEGIN
             );
         END IF;
 
-        -- 2. Límite de capacidad por viaje (30 prendas)
         IF p_total_items > 30 THEN
             RETURN jsonb_build_object(
                 'success', false, 
@@ -416,7 +302,6 @@ BEGIN
             );
         END IF;
 
-        -- 3. Horario laboral y hora de corte (express_cutoff)
         SELECT value INTO v_hours FROM public.store_settings WHERE key = 'business_hours';
         IF v_hours IS NOT NULL THEN
             v_day_schedule := v_hours->v_current_dow;
@@ -441,21 +326,22 @@ BEGIN
             END IF;
         END IF;
 
-        -- 4. Repartidores registrados en la plataforma (en profiles)
+        -- Validar repartidores activos en profiles
         SELECT COUNT(*) INTO v_active_drivers
         FROM public.profiles
-        WHERE role = 'delivery';
+        WHERE role = 'delivery'
+          AND is_active = TRUE
+          AND is_on_duty = TRUE;
 
         IF v_active_drivers = 0 THEN
             RETURN jsonb_build_object(
                 'success', false, 
                 'error_code', 'NO_DRIVERS_AVAILABLE', 
-                'message', 'No hay repartidores registrados en este momento para atención Express.'
+                'message', 'No hay repartidores en turno disponibles para despacho Express.'
             );
         END IF;
     END IF;
 
-    -- Pre-flight exitoso
     RETURN jsonb_build_object(
         'success', true, 
         'message', 'Pre-flight check aprobado con éxito.'
@@ -464,7 +350,7 @@ END;
 $$;
 
 
-ALTER FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer, "p_scheduled_time_slot" character varying) OWNER TO "postgres";
+ALTER FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") OWNER TO "postgres";
 
 SET default_tablespace = '';
 
@@ -528,22 +414,6 @@ ALTER TABLE "public"."brands" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDEN
     CACHE 1
 );
 
-
-
-CREATE TABLE IF NOT EXISTS "public"."business_settings" (
-    "id" smallint DEFAULT 1 NOT NULL,
-    "is_express_enabled" boolean DEFAULT true NOT NULL,
-    "pickup_address" "text" NOT NULL,
-    "pickup_start_time" time without time zone DEFAULT '09:00:00'::time without time zone NOT NULL,
-    "pickup_cutoff_time" time without time zone DEFAULT '18:00:00'::time without time zone NOT NULL,
-    "contact_phone" character varying(20) NOT NULL,
-    "yape_phone" character varying(20) NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
-    CONSTRAINT "business_settings_id_check" CHECK (("id" = 1))
-);
-
-
-ALTER TABLE "public"."business_settings" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."categories" (
@@ -703,9 +573,9 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     CONSTRAINT "orders_check" CHECK (("total_amount" = ("subtotal" + "delivery_cost"))),
     CONSTRAINT "orders_delivery_cost_check" CHECK (("delivery_cost" >= (0)::numeric)),
     CONSTRAINT "orders_delivery_type_check" CHECK ((("delivery_type")::"text" = ANY ((ARRAY['express'::character varying, 'programado'::character varying, 'scheduled'::character varying, 'recojo'::character varying, 'pickup'::character varying])::"text"[]))),
-    CONSTRAINT "orders_invoice_type_check" CHECK ((("invoice_type")::"text" = ANY ((ARRAY['none'::character varying, 'boleta'::character varying, 'factura'::character varying])::"text"[]))),
+    CONSTRAINT "orders_invoice_type_check" CHECK (((("invoice_type")::"text" = ANY ((ARRAY['none'::character varying, 'boleta'::character varying, 'factura'::character varying, 'sin_comprobante'::character varying, ''::character varying])::"text"[])) OR ("invoice_type" IS NULL))),
     CONSTRAINT "orders_payment_method_check" CHECK ((("payment_method")::"text" = ANY ((ARRAY['yape_plin'::character varying, 'culqi_gateway'::character varying, 'transferencia'::character varying, 'tarjeta'::character varying, 'contraentrega'::character varying, 'efectivo'::character varying])::"text"[]))),
-    CONSTRAINT "orders_status_check" CHECK ((("status")::"text" = ANY ((ARRAY['received'::character varying, 'recibido'::character varying, 'pending'::character varying, 'pendiente'::character varying, 'pendiente_pago'::character varying, 'pagado'::character varying, 'paid'::character varying, 'preparing'::character varying, 'en_preparacion'::character varying, 'por_asignar_repartidor'::character varying, 'dispatched'::character varying, 'en_camino'::character varying, 'nearby'::character varying, 'cerca'::character varying, 'incidencia_transporte'::character varying, 'delivered'::character varying, 'entregado'::character varying, 'cancelled'::character varying, 'cancelado'::character varying])::"text"[]))),
+    CONSTRAINT "orders_status_check" CHECK ((("status")::"text" = ANY ((ARRAY['recibido'::character varying, 'received'::character varying, 'pendiente_pago'::character varying, 'pending'::character varying, 'en_preparacion'::character varying, 'preparing'::character varying, 'por_asignar_repartidor'::character varying, 'asignado'::character varying, 'en_camino'::character varying, 'dispatched'::character varying, 'cerca'::character varying, 'nearby'::character varying, 'en_destino'::character varying, 'arrived'::character varying, 'entregado'::character varying, 'delivered'::character varying, 'cancelado'::character varying, 'cancelled'::character varying, 'incidencia_transporte'::character varying])::"text"[]))),
     CONSTRAINT "orders_subtotal_check" CHECK (("subtotal" > (0)::numeric))
 );
 
@@ -713,6 +583,36 @@ ALTER TABLE ONLY "public"."orders" REPLICA IDENTITY FULL;
 
 
 ALTER TABLE "public"."orders" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."product_color_images" (
+    "id" bigint NOT NULL,
+    "product_id" bigint NOT NULL,
+    "color" "text" NOT NULL,
+    "image_url" "text" NOT NULL,
+    "is_cover" boolean DEFAULT false,
+    "display_order" integer DEFAULT 0,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."product_color_images" OWNER TO "postgres";
+
+
+CREATE SEQUENCE IF NOT EXISTS "public"."product_color_images_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE "public"."product_color_images_id_seq" OWNER TO "postgres";
+
+
+ALTER SEQUENCE "public"."product_color_images_id_seq" OWNED BY "public"."product_color_images"."id";
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."product_variants" (
@@ -726,6 +626,7 @@ CREATE TABLE IF NOT EXISTS "public"."product_variants" (
     "is_active" boolean DEFAULT true NOT NULL,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
+    "image_url" "text",
     CONSTRAINT "product_variants_color_hex_check" CHECK ((("color_hex")::"text" ~ '^#[0-9A-Fa-f]{6}$'::"text")),
     CONSTRAINT "product_variants_stock_check" CHECK (("stock" >= 0))
 );
@@ -796,6 +697,10 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "body_measurements" "jsonb" DEFAULT '{}'::"jsonb",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "is_on_duty" boolean DEFAULT true NOT NULL,
+    "operational_status" character varying(20) DEFAULT 'available'::character varying,
+    "delivery_type" character varying(20) DEFAULT 'express'::character varying,
     CONSTRAINT "profiles_dni_check" CHECK ((("dni")::"text" ~ '^[0-9]{8}$'::"text")),
     CONSTRAINT "profiles_fit_preference_check" CHECK ((("fit_preference")::"text" = ANY ((ARRAY['tight'::character varying, 'regular'::character varying, 'loose'::character varying])::"text"[]))),
     CONSTRAINT "profiles_height_cm_check" CHECK ((("height_cm" >= 100) AND ("height_cm" <= 250))),
@@ -835,7 +740,9 @@ CREATE TABLE IF NOT EXISTS "public"."sizes" (
     "name" character varying(20) NOT NULL,
     "display_order" smallint DEFAULT 0 NOT NULL,
     "is_active" boolean DEFAULT true NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL
+    "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
+    "target_genders" "text"[] DEFAULT '{hombre,mujer}'::"text"[] NOT NULL,
+    CONSTRAINT "sizes_target_genders_check" CHECK (("target_genders" <@ ARRAY['hombre'::"text", 'mujer'::"text", 'nino'::"text", 'nina'::"text"]))
 );
 
 
@@ -880,6 +787,28 @@ CREATE TABLE IF NOT EXISTS "public"."store_settings" (
 ALTER TABLE "public"."store_settings" OWNER TO "postgres";
 
 
+CREATE OR REPLACE VIEW "public"."v_product_variants_available" WITH ("security_invoker"='true') AS
+ SELECT "id",
+    "product_id",
+    "size_id",
+    "color",
+    "color_hex",
+    "sku",
+    "is_active",
+    "stock" AS "physical_stock",
+    (GREATEST((0)::bigint, ("stock" - COALESCE(( SELECT "sum"("sr"."quantity") AS "sum"
+           FROM "public"."stock_reservations" "sr"
+          WHERE (("sr"."variant_id" = "pv"."id") AND (("sr"."status")::"text" = 'reserved'::"text") AND ("sr"."expires_at" > "now"()))), (0)::bigint))))::integer AS "available_stock"
+   FROM "public"."product_variants" "pv";
+
+
+ALTER VIEW "public"."v_product_variants_available" OWNER TO "postgres";
+
+
+ALTER TABLE ONLY "public"."product_color_images" ALTER COLUMN "id" SET DEFAULT "nextval"('"public"."product_color_images_id_seq"'::"regclass");
+
+
+
 ALTER TABLE ONLY "public"."addresses"
     ADD CONSTRAINT "addresses_pkey" PRIMARY KEY ("id");
 
@@ -897,11 +826,6 @@ ALTER TABLE ONLY "public"."brands"
 
 ALTER TABLE ONLY "public"."brands"
     ADD CONSTRAINT "brands_slug_key" UNIQUE ("slug");
-
-
-
-ALTER TABLE ONLY "public"."business_settings"
-    ADD CONSTRAINT "business_settings_pkey" PRIMARY KEY ("id");
 
 
 
@@ -962,6 +886,11 @@ ALTER TABLE ONLY "public"."orders"
 
 ALTER TABLE ONLY "public"."orders"
     ADD CONSTRAINT "orders_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."product_color_images"
+    ADD CONSTRAINT "product_color_images_pkey" PRIMARY KEY ("id");
 
 
 
@@ -1043,6 +972,10 @@ CREATE INDEX "idx_orders_status" ON "public"."orders" USING "btree" ("status");
 
 
 
+CREATE INDEX "idx_prod_color_images_lookup" ON "public"."product_color_images" USING "btree" ("product_id", "color");
+
+
+
 CREATE INDEX "idx_products_brand_id" ON "public"."products" USING "btree" ("brand_id");
 
 
@@ -1092,6 +1025,11 @@ ALTER TABLE ONLY "public"."orders"
 
 ALTER TABLE ONLY "public"."orders"
     ADD CONSTRAINT "orders_shipping_address_id_fkey" FOREIGN KEY ("shipping_address_id") REFERENCES "public"."addresses"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."product_color_images"
+    ADD CONSTRAINT "product_color_images_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE CASCADE;
 
 
 
@@ -1209,6 +1147,10 @@ CREATE POLICY "Permitir crear ordenes a invitados y usuarios" ON "public"."order
 
 
 
+CREATE POLICY "Permitir gestion completa a administradores" ON "public"."product_color_images" USING (true) WITH CHECK (true);
+
+
+
 CREATE POLICY "Permitir insercion cache identidades" ON "public"."identity_cache" FOR INSERT TO "authenticated", "anon" WITH CHECK (true);
 
 
@@ -1218,6 +1160,10 @@ CREATE POLICY "Permitir insertar items de orden" ON "public"."order_items" FOR I
 
 
 CREATE POLICY "Permitir lectura cache identidades" ON "public"."identity_cache" FOR SELECT TO "authenticated", "anon" USING (true);
+
+
+
+CREATE POLICY "Permitir lectura publica de fotos por color" ON "public"."product_color_images" FOR SELECT USING (true);
 
 
 
@@ -1240,9 +1186,11 @@ CREATE POLICY "addresses_insert_own" ON "public"."addresses" FOR INSERT WITH CHE
 
 
 
-CREATE POLICY "addresses_select_policy" ON "public"."addresses" FOR SELECT USING ((("auth"."uid"() = "user_id") OR "public"."is_owner"() OR ("public"."is_delivery"() AND (EXISTS ( SELECT 1
+CREATE POLICY "addresses_select_policy" ON "public"."addresses" FOR SELECT USING ((("auth"."uid"() = "user_id") OR "public"."is_owner"() OR ("public"."is_delivery"() AND ((EXISTS ( SELECT 1
    FROM "public"."orders"
-  WHERE (("orders"."shipping_address_id" = "addresses"."id") AND ("orders"."assigned_delivery_id" = "auth"."uid"())))))));
+  WHERE (("orders"."shipping_address_id" = "addresses"."id") AND ("orders"."assigned_delivery_id" = "auth"."uid"())))) OR (EXISTS ( SELECT 1
+   FROM "public"."orders"
+  WHERE (("orders"."shipping_address_id" = "addresses"."id") AND ("orders"."assigned_delivery_id" IS NULL) AND (("orders"."status")::"text" = ANY ((ARRAY['por_asignar_repartidor'::character varying, 'en_preparacion'::character varying, 'preparando'::character varying])::"text"[])))))))));
 
 
 
@@ -1251,17 +1199,6 @@ CREATE POLICY "addresses_update_own" ON "public"."addresses" FOR UPDATE USING ((
 
 
 ALTER TABLE "public"."brands" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."business_settings" ENABLE ROW LEVEL SECURITY;
-
-
-CREATE POLICY "business_settings_select_public" ON "public"."business_settings" FOR SELECT USING (true);
-
-
-
-CREATE POLICY "business_settings_update_owner" ON "public"."business_settings" FOR UPDATE USING ("public"."is_owner"());
-
 
 
 ALTER TABLE "public"."categories" ENABLE ROW LEVEL SECURITY;
@@ -1309,9 +1246,9 @@ CREATE POLICY "order_items_insert_customer" ON "public"."order_items" FOR INSERT
 
 
 
-CREATE POLICY "order_items_select_policy" ON "public"."order_items" FOR SELECT USING ((EXISTS ( SELECT 1
+CREATE POLICY "order_items_select_policy" ON "public"."order_items" FOR SELECT USING (("public"."is_owner"() OR (EXISTS ( SELECT 1
    FROM "public"."orders"
-  WHERE (("orders"."id" = "order_items"."order_id") AND (("orders"."customer_id" = "auth"."uid"()) OR ("orders"."assigned_delivery_id" = "auth"."uid"()) OR "public"."is_owner"())))));
+  WHERE (("orders"."id" = "order_items"."order_id") AND (("orders"."customer_id" = "auth"."uid"()) OR ("orders"."assigned_delivery_id" = "auth"."uid"()) OR ("public"."is_delivery"() AND ("orders"."assigned_delivery_id" IS NULL))))))));
 
 
 
@@ -1322,12 +1259,15 @@ CREATE POLICY "orders_insert_customer" ON "public"."orders" FOR INSERT WITH CHEC
 
 
 
-CREATE POLICY "orders_select_policy" ON "public"."orders" FOR SELECT USING ((("auth"."uid"() = "customer_id") OR ("auth"."uid"() = "assigned_delivery_id") OR "public"."is_owner"()));
+CREATE POLICY "orders_select_policy" ON "public"."orders" FOR SELECT TO "authenticated", "anon" USING (("public"."is_owner"() OR ("auth"."uid"() = "customer_id") OR ("auth"."uid"() = "assigned_delivery_id") OR ("public"."is_delivery"() AND ("assigned_delivery_id" IS NULL) AND (("status")::"text" = ANY ((ARRAY['por_asignar_repartidor'::character varying, 'en_preparacion'::character varying, 'preparando'::character varying])::"text"[])))));
 
 
 
-CREATE POLICY "orders_update_policy" ON "public"."orders" FOR UPDATE USING (("public"."is_owner"() OR ("public"."is_delivery"() AND ("auth"."uid"() = "assigned_delivery_id"))));
+CREATE POLICY "orders_update_policy" ON "public"."orders" FOR UPDATE TO "authenticated" USING (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" IS NULL) OR ("assigned_delivery_id" = "auth"."uid"()))))) WITH CHECK (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" = "auth"."uid"()) OR ("assigned_delivery_id" IS NULL)))));
 
+
+
+ALTER TABLE "public"."product_color_images" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."product_variants" ENABLE ROW LEVEL SECURITY;
@@ -1592,15 +1532,9 @@ GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer) TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer, "p_scheduled_time_slot" character varying) TO "anon";
-GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer, "p_scheduled_time_slot" character varying) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" character varying, "p_total_items" integer, "p_scheduled_time_slot" character varying) TO "service_role";
+GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "service_role";
 
 
 
@@ -1640,12 +1574,6 @@ GRANT ALL ON TABLE "public"."brands" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."brands_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."brands_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."brands_id_seq" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."business_settings" TO "anon";
-GRANT ALL ON TABLE "public"."business_settings" TO "authenticated";
-GRANT ALL ON TABLE "public"."business_settings" TO "service_role";
 
 
 
@@ -1715,6 +1643,18 @@ GRANT ALL ON TABLE "public"."orders" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."product_color_images" TO "anon";
+GRANT ALL ON TABLE "public"."product_color_images" TO "authenticated";
+GRANT ALL ON TABLE "public"."product_color_images" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."product_color_images_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."product_color_images_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."product_color_images_id_seq" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."product_variants" TO "anon";
 GRANT ALL ON TABLE "public"."product_variants" TO "authenticated";
 GRANT ALL ON TABLE "public"."product_variants" TO "service_role";
@@ -1778,6 +1718,12 @@ GRANT ALL ON TABLE "public"."stock_reservations" TO "service_role";
 GRANT ALL ON TABLE "public"."store_settings" TO "anon";
 GRANT ALL ON TABLE "public"."store_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."store_settings" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."v_product_variants_available" TO "anon";
+GRANT ALL ON TABLE "public"."v_product_variants_available" TO "authenticated";
+GRANT ALL ON TABLE "public"."v_product_variants_available" TO "service_role";
 
 
 

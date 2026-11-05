@@ -418,9 +418,24 @@ export default function ProductDetailView({
             </div>
 
             {currentProduct?.description && (
-              <p className="text-sm text-brand-secondary leading-relaxed border-t border-border pt-4">
-                {currentProduct.description}
-              </p>
+              <div className="space-y-3 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-border pt-4">
+                {currentProduct.description.split("\n").map((line, idx) => {
+                  const trimmed = line.trim();
+                  if (!trimmed) return null;
+
+                  if (trimmed.startsWith("•") || trimmed.startsWith("*")) {
+                    const itemText = trimmed.replace(/^[•*]\s*/, "");
+                    return (
+                      <div key={idx} className="flex items-start gap-2 pl-1">
+                        <span className="text-accent font-black text-sm leading-none">•</span>
+                        <span className="flex-1">{itemText}</span>
+                      </div>
+                    );
+                  }
+
+                  return <p key={idx}>{trimmed}</p>;
+                })}
+              </div>
             )}
 
             {/* Selector de Variantes */}

@@ -13,10 +13,8 @@ import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
 import iconUrl from "leaflet/dist/images/marker-icon.png";
 import shadowUrl from "leaflet/dist/images/marker-shadow.png";
 import {
-  MapPin,
   Save,
   RotateCcw,
-  Store,
   Info,
   Check,
   AlertCircle,
@@ -27,7 +25,13 @@ import {
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
 import Input from "../../../components/ui/Input";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../../components/ui/Card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "../../../components/ui/Card";
 import {
   getStoreDeliverySettings,
   saveStoreDeliverySettings,
@@ -113,7 +117,11 @@ export default function CoverageSettingsView() {
     getStoreDeliverySettings()
       .then((data) => {
         if (!isMounted) return;
-        if (data.polygon && Array.isArray(data.polygon) && data.polygon.length >= 3) {
+        if (
+          data.polygon &&
+          Array.isArray(data.polygon) &&
+          data.polygon.length >= 3
+        ) {
           setPolygon(data.polygon);
         }
         if (data.storeLocation) {
@@ -163,7 +171,8 @@ export default function CoverageSettingsView() {
           ...storeLocation,
           lat: Number(foundLat.toFixed(6)),
           lng: Number(foundLng.toFixed(6)),
-          address: data[0].display_name?.split(",")?.slice(0, 3)?.join(",") || q,
+          address:
+            data[0].display_name?.split(",")?.slice(0, 3)?.join(",") || q,
         };
         setStoreLocation(newLoc);
         setFlyToTarget({ lat: foundLat, lng: foundLng });
@@ -297,11 +306,9 @@ export default function CoverageSettingsView() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-brand-primary">
-            Zona de Cobertura y Taller
-          </h1>
-          <p className="text-xs text-brand-secondary mt-0.5">
-            Define el polígono geográfico para envíos a domicilio y la ubicación del taller de recojo.
+          <p className="text-xs text-brand-secondary">
+            Define el polígono geográfico para envíos a domicilio y la ubicación
+            del taller de recojo.
           </p>
         </div>
 
@@ -338,8 +345,8 @@ export default function CoverageSettingsView() {
             statusMessage.type === "success"
               ? "bg-emerald-50 border-emerald-200 text-emerald-900"
               : statusMessage.type === "error"
-              ? "bg-rose-50 border-rose-200 text-rose-900"
-              : "bg-blue-50 border-blue-200 text-blue-900"
+                ? "bg-rose-50 border-rose-200 text-rose-900"
+                : "bg-blue-50 border-blue-200 text-blue-900"
           }`}
         >
           {statusMessage.type === "success" ? (
@@ -356,7 +363,10 @@ export default function CoverageSettingsView() {
       {/* Buscador de dirección para el taller */}
       <Card>
         <CardContent className="p-4">
-          <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-2.5 items-end">
+          <form
+            onSubmit={handleSearchSubmit}
+            className="flex flex-col sm:flex-row gap-2.5 items-end"
+          >
             <div className="flex-1 w-full">
               <Input
                 label="Escribe la dirección del taller para centrar el pin"
@@ -379,7 +389,8 @@ export default function CoverageSettingsView() {
             </Button>
           </form>
           <p className="mt-1.5 text-[11px] text-brand-muted">
-            Se consulta OpenStreetMap / Nominatim y el pin del taller se moverá automáticamente a las coordenadas encontradas.
+            Se consulta OpenStreetMap / Nominatim y el pin del taller se moverá
+            automáticamente a las coordenadas encontradas.
           </p>
         </CardContent>
       </Card>
@@ -427,7 +438,9 @@ export default function CoverageSettingsView() {
                     <br />
                     Lat: {coord[0].toFixed(5)}, Lng: {coord[1].toFixed(5)}
                     <br />
-                    <span className="text-gray-500">Arrastra para modificar el límite.</span>
+                    <span className="text-gray-500">
+                      Arrastra para modificar el límite.
+                    </span>
                   </div>
                 </Popup>
               </Marker>
@@ -444,12 +457,17 @@ export default function CoverageSettingsView() {
             >
               <Popup>
                 <div className="text-xs font-sans space-y-1">
-                  <strong>{storeLocation.name || "Taller ERXIDI Central"}</strong>
+                  <strong>
+                    {storeLocation.name || "Taller ERXIDI Central"}
+                  </strong>
                   <br />
-                  <span>{storeLocation.address || "Punto de Partida y Recojo"}</span>
+                  <span>
+                    {storeLocation.address || "Punto de Partida y Recojo"}
+                  </span>
                   <br />
                   <span className="text-gray-500 font-mono text-[10px]">
-                    [{storeLocation.lat.toFixed(5)}, {storeLocation.lng.toFixed(5)}]
+                    [{storeLocation.lat.toFixed(5)},{" "}
+                    {storeLocation.lng.toFixed(5)}]
                   </span>
                 </div>
               </Popup>
@@ -473,7 +491,10 @@ export default function CoverageSettingsView() {
             </span>
             <div className="flex flex-wrap gap-2 text-[11px] text-brand-secondary">
               {polygon.map((p, i) => (
-                <span key={i} className="bg-surface-card border border-border px-1.5 py-0.5 rounded">
+                <span
+                  key={i}
+                  className="bg-surface-card border border-border px-1.5 py-0.5 rounded"
+                >
                   P{i + 1}: [{p[0]}, {p[1]}]
                 </span>
               ))}
@@ -497,7 +518,8 @@ export default function CoverageSettingsView() {
             </Badge>
           </div>
           <CardDescription className="text-xs text-brand-secondary">
-            Define el costo de despacho en función de los kilómetros entre el Taller ERXIDI y la dirección de entrega del cliente.
+            Define el costo de despacho en función de los kilómetros entre el
+            Taller ERXIDI y la dirección de entrega del cliente.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-5">
@@ -550,13 +572,17 @@ export default function CoverageSettingsView() {
           </div>
           <div className="mt-4 p-3 bg-surface-subtle border border-border rounded-button text-xs text-brand-secondary">
             <p>
-              <strong>Fórmula aplicada:</strong> Si distancia &le; {pricing.baseKm} km &rarr;{" "}
+              <strong>Fórmula aplicada:</strong> Si distancia &le;{" "}
+              {pricing.baseKm} km &rarr;{" "}
               <span className="font-mono text-brand-primary font-bold">
                 S/ {pricing.baseFee.toFixed(2)}
-              </span>. Si distancia &gt; {pricing.baseKm} km &rarr;{" "}
+              </span>
+              . Si distancia &gt; {pricing.baseKm} km &rarr;{" "}
               <span className="font-mono text-brand-primary font-bold">
-                S/ {pricing.baseFee.toFixed(2)} + (distancia - {pricing.baseKm}) &times; S/ {pricing.pricePerExtraKm.toFixed(2)}
-              </span>.
+                S/ {pricing.baseFee.toFixed(2)} + (distancia - {pricing.baseKm})
+                &times; S/ {pricing.pricePerExtraKm.toFixed(2)}
+              </span>
+              .
             </p>
           </div>
         </CardContent>

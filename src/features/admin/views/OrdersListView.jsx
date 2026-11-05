@@ -1,47 +1,78 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye, Search, ChevronLeft, ChevronRight, PackageCheck, AlertOctagon, RotateCcw } from "lucide-react";
+import {
+  Search,
+  Columns3,
+  LayoutGrid,
+  List,
+  RotateCw,
+  RotateCcw,
+  Eraser,
+  ClipboardList,
+  Eye,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Check,
+  CheckCircle2,
+  ArrowRight,
+  Play,
+  PackageCheck,
+  AlertOctagon,
+  Calendar,
+  Zap,
+  Store,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../../../services/supabase";
 import Button from "../../../components/ui/Button";
-import Input from "../../../components/ui/Input";
 import Badge from "../../../components/ui/Badge";
-import { Card, CardHeader, CardTitle, CardContent } from "../../../components/ui/Card";
+import { Card } from "../../../components/ui/Card";
 import OrderStatusBadge from "../components/OrderStatusBadge";
+import OrderPaymentModal from "../components/OrderPaymentModal";
+import OrderKanbanView from "../components/OrderKanbanView";
 import { useAdminOrders } from "../hooks/useAdminOrders";
 import {
   getDeliveryStaff,
-  assignOrderDelivery,
   markOrderReadyForDelivery,
   resolveOrderIncident,
+  updateOrderStatus,
 } from "../services/adminOrders.service";
 
-const statuses = [
-  "all",
-  "received",
-  "pendiente_pago",
-  "en_preparacion",
-  "por_asignar_repartidor",
-  "en_camino",
-  "incidencia_transporte",
-  "entregado",
-  "cancelado",
+const STATUS_OPTIONS = [
+  { value: "all", label: "Estado" },
+  { value: "recibido", label: "Recibido" },
+  { value: "pendiente_pago", label: "Pendiente de Pago" },
+  { value: "en_preparacion", label: "En Preparación" },
+  { value: "por_asignar_repartidor", label: "En Bolsa" },
+  { value: "en_camino", label: "En Camino" },
+  { value: "cerca", label: "Cerca" },
+  { value: "en_destino", label: "En Destino" },
+  { value: "entregado", label: "Entregado" },
+  { value: "cancelado", label: "Cancelado" },
+  { value: "incidencia_transporte", label: "Incidencia" },
 ];
-const invoices = ["all", "none", "boleta", "factura"];
-const payments = ["all", "yape_plin", "culqi_gateway", "transferencia", "tarjeta", "contraentrega", "efectivo"];
 
-const labels = {
-  all: "Todos",
-  received: "Recibido",
-  pendiente_pago: "Pendiente de pago",
-  en_preparacion: "En preparación",
-  por_asignar_repartidor: "Por asignar repartidor",
-  en_camino: "En camino",
-  incidencia_transporte: "Incidencia en reparto",
-  entregado: "Entregado",
-  cancelado: "Cancelado",
-  none: "Sin comprobante",
-  boleta: "Boleta",
-  factura: "Factura",
-};
+const DELIVERY_OPTIONS = [
+  { value: "all", label: "Despacho" },
+  { value: "express", label: "Express" },
+  { value: "scheduled", label: "Programado" },
+  { value: "pickup", label: "Recojo" },
+];
+
+const PAYMENT_OPTIONS = [
+  { value: "all", label: "Pago" },
+  { value: "yape_plin", label: "Yape / Plin" },
+  { value: "culqi_gateway", label: "Culqi" },
+  { value: "contraentrega", label: "Contraentrega" },
+  { value: "transferencia", label: "Transferencia" },
+];
+
+const DATE_OPTIONS = [
+  { value: "all", label: "Todos" },
+  { value: "today", label: "Hoy" },
+  { value: "week", label: "Esta semana" },
+  { value: "month", label: "Este mes" },
+];
 
 const PAYMENT_LABELS = {
   yape_plin: "Yape / Plin",
@@ -53,7 +84,10 @@ const PAYMENT_LABELS = {
 };
 
 function money(value) {
-  return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(Number(value || 0));
+  return new Intl.NumberFormat("es-PE", {
+    style: "currency",
+    currency: "PEN",
+  }).format(Number(value || 0));
 }
 
 function formatPaymentMethod(method) {
@@ -71,28 +105,98 @@ function formatConciseDate(dateStr) {
   return `${day}/${month} · ${hours}:${minutes}`;
 }
 
+function matchesDateFilter(order, dateFilter) {
+  if (!dateFilter || dateFilter === "all") return true;
+  const refDate = new Date(order.created_at);
+  if (Number.isNaN(refDate.getTime())) return true;
+
+  const now = new Date();
+  if (dateFilter === "today") {
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    return refDate >= startOfToday;
+  }
+  if (dateFilter === "week") {
+    const startOfWeek = new Date(now);
+    const day = startOfWeek.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    startOfWeek.setDate(startOfWeek.getDate() - diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+    return refDate >= startOfWeek;
+  }
+  if (dateFilter === "month") {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    return refDate >= startOfMonth;
+  }
+  return true;
+}
+
 export default function OrdersListView() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [invoiceType, setInvoiceType] = useState("all");
+  const [deliveryType, setDeliveryType] = useState("all");
   const [paymentMethod, setPaymentMethod] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [viewMode, setViewMode] = useState("kanban"); // 'kanban' | 'grid' | 'table'
+  const [refreshTick, setRefreshTick] = useState(0);
+
   const [deliveryStaff, setDeliveryStaff] = useState([]);
   const [localOrders, setLocalOrders] = useState([]);
+  const [recentOrderIds, setRecentOrderIds] = useState([]);
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
+  const [copiedTxId, setCopiedTxId] = useState(null);
 
-  const pageSize = 10;
+  const [paymentModal, setPaymentModal] = useState({
+    isOpen: false,
+    order: null,
+  });
+
+  const pageSize = viewMode === "kanban" ? 100 : 12;
   const filters = useMemo(
-    () => ({ page, pageSize, status, invoiceType, paymentMethod, search }),
-    [page, status, invoiceType, paymentMethod, search],
+    () => ({
+      page: viewMode === "kanban" ? 1 : page,
+      pageSize,
+      status,
+      deliveryType,
+      paymentMethod,
+      search,
+      refreshTick,
+    }),
+    [
+      viewMode,
+      page,
+      pageSize,
+      status,
+      deliveryType,
+      paymentMethod,
+      search,
+      refreshTick,
+    ],
   );
+
   const { data, count, loading, error } = useAdminOrders(filters);
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    status !== "all" ||
+    deliveryType !== "all" ||
+    paymentMethod !== "all" ||
+    dateFilter !== "all";
 
   useEffect(() => {
     setLocalOrders(data);
   }, [data]);
+
+  const displayedOrders = useMemo(() => {
+    if (viewMode === "kanban") return localOrders;
+    return localOrders.filter((o) => matchesDateFilter(o, dateFilter));
+  }, [localOrders, viewMode, dateFilter]);
 
   useEffect(() => {
     let active = true;
@@ -108,27 +212,72 @@ export default function OrdersListView() {
     };
   }, []);
 
-  async function handleAssignDelivery(order, deliveryId) {
-    setUpdatingOrderId(order.id);
+  // Detección de Nuevos Pedidos (WebSocket)
+  useEffect(() => {
+    const timers = new Map();
+
+    const channel = supabase
+      .channel("admin-orders-realtime-pulse")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "orders" },
+        (payload) => {
+          const newId = payload.new?.id;
+          if (!newId) return;
+
+          setRecentOrderIds((prev) =>
+            prev.includes(newId) ? prev : [...prev, newId],
+          );
+          setRefreshTick((t) => t + 1);
+
+          if (timers.has(newId)) {
+            clearTimeout(timers.get(newId));
+          }
+          const timerId = setTimeout(() => {
+            setRecentOrderIds((prev) => prev.filter((id) => id !== newId));
+            timers.delete(newId);
+          }, 20000);
+          timers.set(newId, timerId);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      timers.forEach((timerId) => clearTimeout(timerId));
+      timers.clear();
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  function clearFilters() {
+    setSearch("");
+    setStatus("all");
+    setDeliveryType("all");
+    setPaymentMethod("all");
+    setDateFilter("all");
+    setPage(1);
+  }
+
+  function handleCopyTx(txId, e) {
+    e?.stopPropagation?.();
+    if (!txId) return;
+    navigator.clipboard.writeText(txId);
+    setCopiedTxId(txId);
+    setTimeout(() => setCopiedTxId(null), 2000);
+  }
+
+  async function handleStartPreparing(orderOrId) {
+    const orderId = typeof orderOrId === "object" ? orderOrId.id : orderOrId;
+    setUpdatingOrderId(orderId);
     try {
-      const updated = await assignOrderDelivery(order.id, deliveryId, order.status);
-      const nextStatus =
-        updated?.status ||
-        (order.status === "received" ? "en_preparacion" : order.status);
+      const updated = await updateOrderStatus(orderId, "en_preparacion");
       setLocalOrders((prev) =>
         prev.map((o) =>
-          o.id === order.id
-            ? {
-              ...o,
-              ...updated,
-              assigned_delivery_id: deliveryId || null,
-              status: nextStatus,
-            }
-            : o,
+          o.id === orderId ? { ...o, ...updated, status: "en_preparacion" } : o,
         ),
       );
     } catch (err) {
-      window.alert(err.message || "Error al asignar repartidor.");
+      window.alert(err.message || "Error al iniciar preparación.");
     } finally {
       setUpdatingOrderId(null);
     }
@@ -139,7 +288,11 @@ export default function OrdersListView() {
     try {
       const updated = await markOrderReadyForDelivery(order.id);
       setLocalOrders((prev) =>
-        prev.map((o) => (o.id === order.id ? { ...o, ...updated, status: "por_asignar_repartidor" } : o)),
+        prev.map((o) =>
+          o.id === order.id
+            ? { ...o, ...updated, status: "por_asignar_repartidor" }
+            : o,
+        ),
       );
     } catch (err) {
       window.alert(err.message || "Error al enviar pedido a la bolsa.");
@@ -149,12 +302,24 @@ export default function OrdersListView() {
   }
 
   async function handleRequeueIncident(order) {
-    if (!window.confirm(`¿Reenviar el pedido #${order.order_number} a la bolsa de repartidores?`)) return;
+    if (
+      !window.confirm(
+        `¿Reenviar el pedido #${order.order_number} a la bolsa de repartidores?`,
+      )
+    )
+      return;
     setUpdatingOrderId(order.id);
     try {
-      const updated = await resolveOrderIncident(order.id, "por_asignar_repartidor");
+      const updated = await resolveOrderIncident(
+        order.id,
+        "por_asignar_repartidor",
+      );
       setLocalOrders((prev) =>
-        prev.map((o) => (o.id === order.id ? { ...o, ...updated, status: "por_asignar_repartidor" } : o)),
+        prev.map((o) =>
+          o.id === order.id
+            ? { ...o, ...updated, status: "por_asignar_repartidor" }
+            : o,
+        ),
       );
     } catch (err) {
       window.alert(err.message || "Error al reencolar el pedido.");
@@ -168,117 +333,567 @@ export default function OrdersListView() {
     setPage(1);
   }
 
+  function renderDeliveryBadge(type) {
+    const t = (type || "").toLowerCase();
+    if (t === "pickup" || t === "recojo") {
+      return (
+        <Badge
+          variant="neutral"
+          className="inline-flex items-center bg-slate-100 text-slate-800 border-slate-200"
+        >
+          <Store className="w-3 h-3 mr-1" /> Recojo
+        </Badge>
+      );
+    }
+    if (t === "express") {
+      return (
+        <Badge
+          variant="warning"
+          className="inline-flex items-center bg-amber-50 text-amber-800 border-amber-200"
+        >
+          <Zap className="w-3 h-3 mr-1" /> Express
+        </Badge>
+      );
+    }
+    return (
+      <Badge
+        variant="neutral"
+        className="inline-flex items-center bg-sky-50 text-sky-800 border-sky-200"
+      >
+        <Calendar className="w-3 h-3 mr-1" /> Programado
+      </Badge>
+    );
+  }
+
+  function renderDriverInfo(order) {
+    const type = (order.delivery_type || "").toLowerCase();
+    const isPickup = type === "pickup" || type === "recojo";
+    if (isPickup) {
+      return (
+        <span className="text-xs text-brand-muted italic">
+          No aplica (Tienda)
+        </span>
+      );
+    }
+    if (!order.assigned_delivery_id) {
+      return (
+        <span className="text-xs text-amber-700 font-medium">
+          Bolsa (Sin asignar)
+        </span>
+      );
+    }
+
+    const staff = deliveryStaff.find(
+      (s) => s.id === order.assigned_delivery_id,
+    );
+    const driverName = staff
+      ? `${staff.first_name} ${staff.paternal_surname || ""}`.trim()
+      : order.delivery_profile
+        ? `${order.delivery_profile.first_name} ${order.delivery_profile.paternal_surname || ""}`.trim()
+        : "Repartidor";
+
+    return (
+      <span className="text-xs font-bold text-brand-primary">{driverName}</span>
+    );
+  }
+
+  function renderPaymentInfo(order) {
+    const isPending = order.payment_status === "pending_verification";
+    const isPaid = order.payment_status === "paid";
+    const txId = order.payment_gateway_tx_id;
+
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Badge
+            variant="neutral"
+            className="text-[10px] px-1.5 py-0 font-medium bg-surface-subtle text-brand-secondary border-border"
+          >
+            {formatPaymentMethod(order.payment_method)}
+          </Badge>
+          {isPending && (
+            <span className="text-[10px] font-bold text-amber-700">
+              Por verificar
+            </span>
+          )}
+        </div>
+
+        {txId && (
+          <div>
+            {isPending ? (
+              <button
+                type="button"
+                onClick={(e) => handleCopyTx(txId, e)}
+                title="Clic para copiar N° Operación"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors"
+              >
+                <span>#Op: {txId}</span>
+                {copiedTxId === txId ? (
+                  <Check className="w-3 h-3 text-emerald-600" />
+                ) : (
+                  <Copy className="w-3 h-3 text-amber-600" />
+                )}
+              </button>
+            ) : isPaid ? (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <Check className="w-3 h-3 text-emerald-600" />
+                <span>#Op: {txId}</span>
+              </span>
+            ) : (
+              <span className="text-[11px] font-mono text-brand-muted">
+                #Op: {txId}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderQuickAction(order) {
+    const isCashOnDelivery =
+      order.payment_method === "contraentrega" ||
+      order.payment_method === "efectivo";
+    const isPendingVerification =
+      order.payment_status === "pending_verification" && !isCashOnDelivery;
+    const isReceivedOrPaid =
+      (order.status === "received" ||
+        order.status === "recibido" ||
+        order.status === "pagado" ||
+        order.status === "pending" ||
+        order.status === "pendiente_pago") &&
+      (!isPendingVerification || isCashOnDelivery) &&
+      order.status !== "cancelado" &&
+      order.status !== "cancelled";
+    const isEnPreparacion =
+      order.status === "en_preparacion" || order.status === "preparing";
+    const isPickup =
+      (order.delivery_type || "").toLowerCase() === "pickup" ||
+      (order.delivery_type || "").toLowerCase() === "recojo";
+    const isIncident = order.status === "incidencia_transporte";
+    const isCompletedOrCancelled =
+      order.status === "entregado" ||
+      order.status === "delivered" ||
+      order.status === "cancelado" ||
+      order.status === "cancelled";
+    const isUpdating = updatingOrderId === order.id;
+
+    if (isPendingVerification) {
+      return (
+        <Button
+          size="sm"
+          disabled={isUpdating}
+          onClick={() => setPaymentModal({ isOpen: true, order })}
+          className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+          <span>Validar Pago</span>
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    if (isReceivedOrPaid) {
+      return (
+        <Button
+          size="sm"
+          disabled={isUpdating}
+          onClick={() => handleStartPreparing(order.id)}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
+        >
+          <Play className="w-3.5 h-3.5 mr-1" />
+          <span>A Preparación</span>
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    if (isEnPreparacion && !isPickup) {
+      return (
+        <Button
+          size="sm"
+          disabled={isUpdating}
+          onClick={() => handleSendToPool(order)}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+        >
+          <PackageCheck className="w-3.5 h-3.5 mr-1" />
+          <span>A Bolsa</span>
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    if (isIncident) {
+      return (
+        <Button
+          size="sm"
+          disabled={isUpdating}
+          onClick={() => handleRequeueIncident(order)}
+          className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs"
+        >
+          <RotateCcw className="w-3.5 h-3.5 mr-1" />
+          <span>Reencolar</span>
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    if (isCompletedOrCancelled) {
+      return (
+        <span className="text-[11px] text-brand-muted">Pedido completado</span>
+      );
+    }
+
+    return <span className="text-[11px] text-brand-muted">En curso</span>;
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-wider text-brand-secondary font-bold">Operación</p>
-        <h1 className="text-2xl font-black">Pedidos</h1>
-        <p className="text-sm text-brand-secondary mt-1">Consulta, filtra y gestiona el flujo de despacho y preparación.</p>
+    <div className="space-y-4">
+      {/* BARRA DE HERRAMIENTAS COMPACTA EN 1 FILA HORIZONTAL */}
+      <div className="bg-surface-card border border-border rounded-card p-3 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 shadow-xs">
+        {/* Izquierda: Filtros Facetados */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={status}
+            onChange={(e) => updateFilter(setStatus, e.target.value)}
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+          >
+            {STATUS_OPTIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={deliveryType}
+            onChange={(e) => updateFilter(setDeliveryType, e.target.value)}
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+          >
+            {DELIVERY_OPTIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={paymentMethod}
+            onChange={(e) => updateFilter(setPaymentMethod, e.target.value)}
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+          >
+            {PAYMENT_OPTIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={dateFilter}
+            onChange={(e) => updateFilter(setDateFilter, e.target.value)}
+            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
+          >
+            {DATE_OPTIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              title="Limpiar filtros"
+              className="h-9 px-2.5 rounded-button border border-rose-200 bg-rose-50 text-xs text-rose-600 hover:bg-rose-100 flex items-center gap-1 font-semibold transition-colors"
+            >
+              <Eraser className="w-3.5 h-3.5" />
+              <span>Limpiar</span>
+            </button>
+          )}
+        </div>
+
+        {/* Centro: Buscador */}
+        <div className="relative max-w-md w-full xl:mx-auto">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => updateFilter(setSearch, e.target.value)}
+            placeholder="Buscar pedido, cliente, teléfono o #operación..."
+            className="max-w-md w-full h-9 text-xs pl-3 pr-8 rounded-button border border-border bg-white text-brand-primary outline-none focus:ring-2 focus:ring-accent/20"
+          />
+          <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted pointer-events-none" />
+        </div>
+
+        {/* Derecha: Vistas y Recarga */}
+        <div className="flex items-center gap-2 self-end xl:self-auto shrink-0">
+          <div className="inline-flex items-center gap-1 bg-surface-subtle p-1 rounded-button border border-border">
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              title="Vista tablero Kanban"
+              className={`p-1.5 rounded-button transition-colors ${
+                viewMode === "kanban"
+                  ? "bg-brand-primary text-white shadow-xs"
+                  : "text-brand-muted hover:text-brand-primary"
+              }`}
+            >
+              <Columns3 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              title="Vista cuadrícula"
+              className={`p-1.5 rounded-button transition-colors ${
+                viewMode === "grid"
+                  ? "bg-brand-primary text-white shadow-xs"
+                  : "text-brand-muted hover:text-brand-primary"
+              }`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              title="Vista tabla"
+              className={`p-1.5 rounded-button transition-colors ${
+                viewMode === "table"
+                  ? "bg-brand-primary text-white shadow-xs"
+                  : "text-brand-muted hover:text-brand-primary"
+              }`}
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setRefreshTick((t) => t + 1)}
+            title="Refrescar pedidos"
+            className="h-9 px-2.5 text-xs flex items-center gap-1"
+          >
+            <RotateCw
+              className={`w-3.5 h-3.5 text-brand-secondary ${
+                loading ? "animate-spin" : ""
+              }`}
+            />
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader><CardTitle>Filtros</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-8 h-4 w-4 text-brand-muted" />
-              <Input
-                label="Buscar"
-                value={search}
-                onChange={(e) => updateFilter(setSearch, e.target.value)}
-                placeholder="Pedido, nombre, email o teléfono"
-                className="pl-9"
-              />
-            </div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-              Estado
-              <select
-                value={status}
-                onChange={(e) => updateFilter(setStatus, e.target.value)}
-                className="mt-1.5 w-full h-10 px-3 border border-border rounded-button bg-white text-sm"
-              >
-                {statuses.map((item) => <option key={item} value={item}>{labels[item]}</option>)}
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-              Comprobante
-              <select
-                value={invoiceType}
-                onChange={(e) => updateFilter(setInvoiceType, e.target.value)}
-                className="mt-1.5 w-full h-10 px-3 border border-border rounded-button bg-white text-sm"
-              >
-                {invoices.map((item) => <option key={item} value={item}>{labels[item]}</option>)}
-              </select>
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-wider text-brand-secondary">
-              Pago
-              <select
-                value={paymentMethod}
-                onChange={(e) => updateFilter(setPaymentMethod, e.target.value)}
-                className="mt-1.5 w-full h-10 px-3 border border-border rounded-button bg-white text-sm"
-              >
-                {payments.map((item) => (
-                  <option key={item} value={item}>
-                    {item === "all" ? "Todos" : formatPaymentMethod(item)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </CardContent>
-      </Card>
+      {/* ERROR / LOADING / EMPTY / CONTENT */}
+      {error ? (
+        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-card">
+          {error.message}
+        </div>
+      ) : loading && localOrders.length === 0 ? (
+        <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
+          Cargando pedidos...
+        </div>
+      ) : viewMode === "kanban" ? (
+        <OrderKanbanView
+          orders={localOrders}
+          recentOrderIds={recentOrderIds}
+          dateFilter={dateFilter}
+          onVerifyPayment={(order) => setPaymentModal({ isOpen: true, order })}
+          onSendToPreparation={handleStartPreparing}
+          onSendToPool={handleSendToPool}
+          onRequeueIncident={handleRequeueIncident}
+          onNavigateDetail={(orderNumber) =>
+            navigate(`/admin/pedidos/${orderNumber}`)
+          }
+          updatingOrderId={updatingOrderId}
+          deliveryStaff={deliveryStaff}
+        />
+      ) : displayedOrders.length === 0 ? (
+        <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
+          No encontramos pedidos con los filtros aplicados.
+        </div>
+      ) : viewMode === "grid" ? (
+        /* VISTA EN TARJETAS */
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {displayedOrders.map((order) => {
+            const customerName =
+              order.customer_name ||
+              [order.profiles?.first_name, order.profiles?.paternal_surname]
+                .filter(Boolean)
+                .join(" ") ||
+              "Cliente";
+            const phone = order.customer_phone || order.profiles?.phone || "";
+            const isIncident = order.status === "incidencia_transporte";
+            const isRecent = recentOrderIds.includes(order.id);
 
-      <Card className="p-0 overflow-hidden">
-        {error ? (
-          <div className="p-6 text-sm text-status-danger-text">{error.message}</div>
-        ) : loading ? (
-          <div className="p-6 text-sm text-brand-secondary">Cargando pedidos...</div>
-        ) : localOrders.length === 0 ? (
-          <div className="p-10 text-center text-sm text-brand-secondary">
-            No encontramos pedidos con esos filtros.
-          </div>
-        ) : (
+            return (
+              <Card
+                key={order.id}
+                className={`p-4 flex flex-col justify-between border border-border bg-surface-card hover:border-brand-primary/40 transition-colors ${
+                  isIncident ? "border-l-4 border-l-rose-500 bg-rose-50/20" : ""
+                } ${
+                  isRecent
+                    ? "ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] animate-pulse"
+                    : ""
+                }`}
+              >
+                {/* Header Card */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {isIncident && (
+                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      <span className="font-bold font-mono text-base text-accent truncate">
+                        #{order.order_number}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <OrderStatusBadge status={order.status} />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(`/admin/pedidos/${order.order_number}`)
+                        }
+                        title="Ver detalle completo"
+                        className="p-1 text-brand-muted hover:text-brand-primary rounded"
+                      >
+                        <ClipboardList className="w-3.5 h-3.5 inline" />
+                        <ArrowRight className="w-2.5 h-2.5 -ml-0.5 inline" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Cuerpo Card */}
+                  <div className="space-y-2 text-xs">
+                    <div>
+                      <span className="font-bold text-brand-primary block truncate">
+                        {customerName}
+                      </span>
+                      {phone && (
+                        <span className="text-brand-secondary font-mono text-[11px]">
+                          {phone}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                      <span className="text-brand-muted text-[11px]">
+                        Modalidad:
+                      </span>
+                      {renderDeliveryBadge(order.delivery_type)}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-brand-muted text-[11px]">
+                        Repartidor:
+                      </span>
+                      {renderDriverInfo(order)}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                      <span className="text-brand-muted text-[11px]">
+                        Pago:
+                      </span>
+                      <div className="text-right">
+                        {renderPaymentInfo(order)}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 text-brand-muted text-[11px]">
+                      <span>Fecha:</span>
+                      <span className="font-mono">
+                        {formatConciseDate(order.created_at)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Card */}
+                <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-border">
+                  <div>
+                    <span className="block text-[10px] text-brand-muted uppercase tracking-wider font-semibold">
+                      Total
+                    </span>
+                    <span className="font-mono font-black text-lg text-brand-primary">
+                      {money(order.total_amount)}
+                    </span>
+                  </div>
+
+                  <div>{renderQuickAction(order)}</div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        /* VISTA EN TABLA */
+        <div className="bg-surface-card border border-border rounded-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] text-sm">
               <thead className="bg-surface-subtle">
                 <tr>
-                  <th className="text-left p-4">Pedido / Cliente</th>
-                  <th className="text-left p-4">Fecha</th>
-                  <th className="text-left p-4">Despacho</th>
-                  <th className="text-left p-4">Pago</th>
-                  <th className="text-left p-4">Repartidor</th>
-                  <th className="text-left p-4">Estado</th>
-                  <th className="text-right p-4">Total</th>
-                  <th className="p-4 text-center">Acción Rápida</th>
+                  <th className="text-left p-4 font-semibold text-brand-primary">
+                    Pedido / Cliente
+                  </th>
+                  <th className="text-left p-4 font-semibold text-brand-primary">
+                    Fecha
+                  </th>
+                  <th className="text-left p-4 font-semibold text-brand-primary">
+                    Despacho
+                  </th>
+                  <th className="text-left p-4 font-semibold text-brand-primary">
+                    Pago
+                  </th>
+                  <th className="text-left p-4 font-semibold text-brand-primary">
+                    Repartidor
+                  </th>
+                  <th className="text-left p-4 font-semibold text-brand-primary">
+                    Estado
+                  </th>
+                  <th className="text-right p-4 font-semibold text-brand-primary">
+                    Total
+                  </th>
+                  <th className="p-4 text-center font-semibold text-brand-primary">
+                    Acción Rápida
+                  </th>
                   <th className="p-4" />
                 </tr>
               </thead>
-              <tbody>
-                {localOrders.map((order) => {
-                  const type = (order.delivery_type || "").toLowerCase();
-                  const isPickup = type === "pickup" || type === "recojo";
-                  const isExpress = type === "express";
+              <tbody className="divide-y divide-border">
+                {displayedOrders.map((order) => {
                   const isIncident = order.status === "incidencia_transporte";
-                  const isReadyForPool = order.status === "en_preparacion" && !isPickup;
-
+                  const isRecent = recentOrderIds.includes(order.id);
                   const customerName =
                     order.customer_name ||
-                    [order.profiles?.first_name, order.profiles?.paternal_surname]
+                    [
+                      order.profiles?.first_name,
+                      order.profiles?.paternal_surname,
+                    ]
                       .filter(Boolean)
                       .join(" ") ||
                     "Cliente";
-                  const phone = order.customer_phone || order.profiles?.phone || "";
+                  const phone =
+                    order.customer_phone || order.profiles?.phone || "";
 
                   return (
                     <tr
                       key={order.id}
-                      className={`border-t border-border hover:bg-surface-subtle/40 ${isIncident ? "bg-rose-50/70 border-l-4 border-l-rose-500" : ""
-                        }`}
+                      className={`hover:bg-surface-subtle/50 transition-colors ${
+                        isIncident
+                          ? "bg-rose-50/70 border-l-4 border-l-rose-500"
+                          : ""
+                      } ${isRecent ? "bg-emerald-50/40 animate-pulse" : ""}`}
                     >
                       <td className="p-4">
                         <div className="flex items-center gap-1.5">
-                          {isIncident && <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />}
-                          <p className="font-bold text-brand-primary">#{order.order_number}</p>
+                          {isIncident && (
+                            <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                          )}
+                          <p className="font-bold font-mono text-accent">
+                            #{order.order_number}
+                          </p>
                         </div>
                         <p className="text-xs text-brand-secondary mt-0.5">
                           {customerName}
@@ -291,94 +906,27 @@ export default function OrdersListView() {
                       </td>
 
                       <td className="p-4 text-xs">
-                        <div className="space-y-1">
-                          {isPickup ? (
-                            <Badge variant="neutral">Recojo en Tienda</Badge>
-                          ) : isExpress ? (
-                            <Badge variant="warning">Express</Badge>
-                          ) : (
-                            <Badge variant="neutral" className="bg-sky-50 text-sky-800 border-sky-200">
-                              Programado
-                            </Badge>
-                          )}
-                        </div>
+                        {renderDeliveryBadge(order.delivery_type)}
                       </td>
 
                       <td className="p-4 text-xs text-brand-primary whitespace-nowrap">
-                        <div>
-                          <span>{formatPaymentMethod(order.payment_method)}</span>
-                          {order.payment_status === "pending_verification" && (
-                            <span className="block text-[10px] text-amber-700 font-bold">Por verificar</span>
-                          )}
-                        </div>
+                        {renderPaymentInfo(order)}
                       </td>
 
                       <td className="p-4 text-xs">
-                        {isPickup ? (
-                          <span className="text-xs text-brand-muted italic whitespace-nowrap">
-                            No aplica (Recojo)
-                          </span>
-                        ) : (
-                          <select
-                            disabled={updatingOrderId === order.id}
-                            value={order.assigned_delivery_id || ""}
-                            onChange={(e) => handleAssignDelivery(order, e.target.value)}
-                            className="h-8 text-xs border border-border rounded px-2 bg-white text-brand-primary max-w-[170px]"
-                          >
-                            <option value="">-- Sin asignar --</option>
-                            {deliveryStaff.map((staff) => (
-                              <option key={staff.id} value={staff.id}>
-                                {staff.first_name} {staff.paternal_surname || ""}
-                              </option>
-                            ))}
-                          </select>
-                        )}
+                        {renderDriverInfo(order)}
                       </td>
 
                       <td className="p-4 whitespace-nowrap">
-                        {isIncident ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
-                            <AlertOctagon className="w-3 h-3" /> Incidencia
-                          </span>
-                        ) : order.status === "por_asignar_repartidor" ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                            A la espera de motorizado
-                          </span>
-                        ) : (
-                          <OrderStatusBadge status={order.status} />
-                        )}
+                        <OrderStatusBadge status={order.status} />
                       </td>
 
-                      <td className="p-4 text-right font-mono font-bold text-sm whitespace-nowrap">
+                      <td className="p-4 text-right font-mono font-bold text-sm whitespace-nowrap text-brand-primary">
                         {money(order.total_amount)}
                       </td>
 
                       <td className="p-4 text-center whitespace-nowrap">
-                        {isReadyForPool && (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => handleSendToPool(order)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold shadow-xs transition-colors"
-                            title="Empaque terminado: pasar a bolsa de repartidores"
-                          >
-                            <PackageCheck className="w-3.5 h-3.5" />
-                            <span>A Bolsa</span>
-                          </button>
-                        )}
-                        {isIncident && (
-                          <button
-                            type="button"
-                            disabled={updatingOrderId === order.id}
-                            onClick={() => handleRequeueIncident(order)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-bold shadow-xs transition-colors"
-                            title="Reencolar a la bolsa de repartidores tras coordinar"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Reencolar</span>
-                          </button>
-                        )}
-                        {!isReadyForPool && !isIncident && <span className="text-xs text-brand-muted">—</span>}
+                        {renderQuickAction(order)}
                       </td>
 
                       <td className="p-4 text-right whitespace-nowrap">
@@ -386,7 +934,9 @@ export default function OrdersListView() {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => navigate(`/admin/pedidos/${order.order_number}`)}
+                          onClick={() =>
+                            navigate(`/admin/pedidos/${order.order_number}`)
+                          }
                         >
                           <Eye className="h-4 w-4 mr-1" /> Ver
                         </Button>
@@ -397,10 +947,15 @@ export default function OrdersListView() {
               </tbody>
             </table>
           </div>
-        )}
+        </div>
+      )}
 
-        <div className="border-t border-border p-4 flex items-center justify-between">
-          <p className="text-xs text-brand-secondary">{count} pedido(s)</p>
+      {/* PAGINACIÓN (Solo en Grid y Tabla) */}
+      {viewMode !== "kanban" && (
+        <div className="bg-surface-card border border-border rounded-card p-3 flex items-center justify-between">
+          <p className="text-xs text-brand-secondary">
+            {displayedOrders.length} pedido(s)
+          </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -410,7 +965,7 @@ export default function OrdersListView() {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-xs font-semibold">
+            <span className="text-xs font-semibold text-brand-primary">
               Página {page} / {totalPages}
             </span>
             <Button
@@ -423,7 +978,22 @@ export default function OrdersListView() {
             </Button>
           </div>
         </div>
-      </Card>
+      )}
+
+      {/* MODAL DE VALIDACIÓN DE PAGO */}
+      <OrderPaymentModal
+        order={paymentModal.order}
+        isOpen={paymentModal.isOpen}
+        onClose={() => setPaymentModal({ isOpen: false, order: null })}
+        onSuccess={(updatedOrder) => {
+          setLocalOrders((prev) =>
+            prev.map((o) =>
+              o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o,
+            ),
+          );
+          setRefreshTick((t) => t + 1);
+        }}
+      />
     </div>
   );
 }

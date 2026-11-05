@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Ruler,
@@ -17,6 +17,7 @@ import heroImg from "../../assets/hero.png";
 import mediaImg from "../../assets/mediasImg.png";
 import trusaImg from "../../assets/trusaImg.png";
 import topImg from "../../assets/topImg.png";
+import { supabase } from "../../services/supabase";
 import { mockProducts } from "../catalog/data/mockCatalog";
 import ProductCard from "../catalog/components/ProductCard";
 import SizeMatcherModal from "../catalog/components/SizeMatcherModal";
@@ -32,16 +33,61 @@ export default function HomeView() {
   const [activeHotspot, setActiveHotspot] = useState(null);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [genderFilter, setGenderFilter] = useState("all");
+  const [dbFeaturedProducts, setDbFeaturedProducts] = useState([]);
+  const [loadingFeatured, setLoadingFeatured] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadFeatured() {
+      try {
+        setLoadingFeatured(true);
+        const { data, error } = await supabase
+          .from("products")
+          .select(`
+            id, name, slug, price, main_image_url, target_gender, is_featured, is_active,
+            product_variants (
+              id, color, color_hex, stock, is_active,
+              sizes:size_id ( id, name )
+            )
+          `)
+          .eq("is_active", true)
+          .eq("is_featured", true)
+          .limit(8);
+
+        if (error) throw error;
+        if (isMounted) {
+          setDbFeaturedProducts(data || []);
+        }
+      } catch (err) {
+        console.error("Error al cargar destacados desde Supabase:", err);
+      } finally {
+        if (isMounted) setLoadingFeatured(false);
+      }
+    }
+    loadFeatured();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const featuredProducts = useMemo(() => {
-    let list = mockProducts.filter((p) => p.is_featured);
-    if (list.length === 0) list = mockProducts.slice(0, 4);
+    // Si hay datos en base de datos con is_featured = true, se usan los de Supabase.
+    // Si no hay ninguno marcado o falló la consulta, se usa el mock como fallback.
+    let baseList =
+      dbFeaturedProducts.length > 0
+        ? dbFeaturedProducts
+        : mockProducts.filter((p) => p.is_featured);
+
+    if (baseList.length === 0) baseList = mockProducts.slice(0, 4);
 
     if (genderFilter !== "all") {
-      list = list.filter((p) => p.target_gender === genderFilter);
+      return baseList.filter(
+        (p) =>
+          (p.target_gender || "").toLowerCase() === genderFilter.toLowerCase(),
+      );
     }
-    return list;
-  }, [genderFilter]);
+    return baseList;
+  }, [dbFeaturedProducts, genderFilter]);
 
   const handleProductSelect = (product) => {
     navigate(`/producto/${product.slug}`);
@@ -49,7 +95,7 @@ export default function HomeView() {
 
   const handleQuickAdd = (product) => {
     const availableVariant = product.product_variants?.find(
-      (v) => (v.stock || 0) > 0 && v.is_active !== false
+      (v) => (v.stock || 0) > 0 && v.is_active !== false,
     );
 
     if (availableVariant) {
@@ -66,7 +112,7 @@ export default function HomeView() {
             stock: availableVariant.stock,
             imageUrl: product.main_image_url,
           },
-          1
+          1,
         );
       } catch (err) {
         console.error("No se pudo añadir al carrito:", err.message);
@@ -113,8 +159,7 @@ export default function HomeView() {
       id: "medias-tobilleras",
       name: "Medias Tobilleras",
       category: "Calcetería Unisex",
-      image:
-        mediaImg,
+      image: mediaImg,
       alt: "Medias Tobilleras ERXIDI",
       hotspots: [
         {
@@ -147,8 +192,7 @@ export default function HomeView() {
       id: "trusa-modal",
       name: "Trusa Clásico Invisible",
       category: "Línea Femenina",
-      image:
-        trusaImg,
+      image: trusaImg,
       alt: "Trusa Invisible ERXIDI",
       hotspots: [
         {
@@ -181,8 +225,7 @@ export default function HomeView() {
       id: "top-confort",
       name: "Top Bralette Confort Diario",
       category: "Línea Femenina",
-      image:
-        topImg,
+      image: topImg,
       alt: "Top Bralette Confort ERXIDI",
       hotspots: [
         {
@@ -217,12 +260,16 @@ export default function HomeView() {
 
   const handlePrevSlide = () => {
     setActiveHotspot(null);
-    setCurrentSlide((prev) => (prev === 0 ? carouselItems.length - 1 : prev - 1));
+    setCurrentSlide((prev) =>
+      prev === 0 ? carouselItems.length - 1 : prev - 1,
+    );
   };
 
   const handleNextSlide = () => {
     setActiveHotspot(null);
-    setCurrentSlide((prev) => (prev === carouselItems.length - 1 ? 0 : prev + 1));
+    setCurrentSlide((prev) =>
+      prev === carouselItems.length - 1 ? 0 : prev + 1,
+    );
   };
 
   // Pilares comerciales de ERXIDI
@@ -275,7 +322,8 @@ export default function HomeView() {
 
               <p className="text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
                 Prendas íntimas y calcetería de uso diario con calce ergonómico.
-                Comodidad duradera y elasticidad equilibrada para acompañar tu jornada sin molestias.
+                Comodidad duradera y elasticidad equilibrada para acompañar tu
+                jornada sin molestias.
               </p>
 
               {/* Botones de Acción */}
@@ -305,7 +353,10 @@ export default function HomeView() {
                 <div className="pt-1">
                   <Badge variant="success" className="text-xs py-1.5 px-3.5">
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                    Talla recomendada: <span className="font-mono font-bold ml-1">{suggestedSize}</span>
+                    Talla recomendada:{" "}
+                    <span className="font-mono font-bold ml-1">
+                      {suggestedSize}
+                    </span>
                   </Badge>
                 </div>
               )}
@@ -339,15 +390,12 @@ export default function HomeView() {
               </div>
             </div>
 
-            {/* Showcase Flotante en Carrusel (Mantiene la estética limpia sin tarjetas) */}
+            {/* Showcase Flotante en Carrusel */}
             <div className="lg:col-span-6 flex justify-center">
               <div className="relative w-full max-w-lg flex flex-col items-center">
-                {/* Resplandor radial de fondo */}
                 <div className="absolute inset-0 bg-accent/10 blur-3xl rounded-full pointer-events-none" />
 
-                {/* Contenedor relativo con flechas externas y margen */}
                 <div className="relative w-full flex items-center justify-center">
-                  {/* Flecha Anterior (con margen externo para no tapar la prenda) */}
                   <button
                     type="button"
                     onClick={handlePrevSlide}
@@ -357,7 +405,6 @@ export default function HomeView() {
                     <ChevronLeft className="w-5 h-5" />
                   </button>
 
-                  {/* Prenda Flotante con padding interno protector */}
                   <div className="relative aspect-[4/5] w-full max-w-sm sm:max-w-md px-6 sm:px-8 flex items-center justify-center select-none">
                     <img
                       key={currentItem.id}
@@ -367,7 +414,6 @@ export default function HomeView() {
                       loading="eager"
                     />
 
-                    {/* Hotspots interactivos de la prenda activa con superposición z-[60]/z-[70] y dirección calibrada */}
                     {currentItem.hotspots.map((spot) => {
                       const isActive = activeHotspot === spot.id;
                       const xVal = parseFloat(spot.x) || 50;
@@ -379,12 +425,15 @@ export default function HomeView() {
                         <div
                           key={spot.id}
                           style={{ top: spot.y, left: spot.x }}
-                          className={`absolute -translate-x-1/2 -translate-y-1/2 ${isActive ? "z-[60]" : "z-10"
-                            }`}
+                          className={`absolute -translate-x-1/2 -translate-y-1/2 ${
+                            isActive ? "z-[60]" : "z-10"
+                          }`}
                         >
                           <button
                             type="button"
-                            onClick={() => setActiveHotspot(isActive ? null : spot.id)}
+                            onClick={() =>
+                              setActiveHotspot(isActive ? null : spot.id)
+                            }
                             onMouseEnter={() => setActiveHotspot(spot.id)}
                             className="group relative flex items-center justify-center focus:outline-none"
                             aria-label={spot.title}
@@ -392,22 +441,24 @@ export default function HomeView() {
                             <span className="absolute h-6 w-6 rounded-full bg-accent/40 animate-ping" />
                             <span className="relative flex h-5 w-5 rounded-full border-2 border-white bg-accent text-white items-center justify-center shadow-lg transition-transform duration-150 group-hover:scale-110">
                               <Plus
-                                className={`w-3 h-3 transition-transform duration-150 ${isActive ? "rotate-45" : ""
-                                  }`}
+                                className={`w-3 h-3 transition-transform duration-150 ${
+                                  isActive ? "rotate-45" : ""
+                                }`}
                               />
                             </span>
                           </button>
 
-                          {/* Micro-etiqueta flotante con apertura superior/inferior por hotspot */}
                           {isActive && (
                             <div
-                              className={`absolute w-52 bg-slate-950 border border-white/30 text-white rounded-lg p-3 shadow-2xl z-[70] pointer-events-none animate-in fade-in zoom-in-95 duration-150 ${isTopPlacement ? "bottom-8" : "top-8"
-                                } ${isRightSide
+                              className={`absolute w-52 bg-slate-950 border border-white/30 text-white rounded-lg p-3 shadow-2xl z-[70] pointer-events-none animate-in fade-in zoom-in-95 duration-150 ${
+                                isTopPlacement ? "bottom-8" : "top-8"
+                              } ${
+                                isRightSide
                                   ? "right-0 translate-x-0"
                                   : isLeftSide
                                     ? "left-0 translate-x-0"
                                     : "left-1/2 -translate-x-1/2"
-                                }`}
+                              }`}
                             >
                               <strong className="block text-xs font-bold text-accent leading-tight">
                                 {spot.title}
@@ -422,7 +473,6 @@ export default function HomeView() {
                     })}
                   </div>
 
-                  {/* Flecha Siguiente (con margen externo para no tapar la prenda) */}
                   <button
                     type="button"
                     onClick={handleNextSlide}
@@ -433,7 +483,6 @@ export default function HomeView() {
                   </button>
                 </div>
 
-                {/* Indicadores de puntos (Dots) */}
                 <div className="flex items-center gap-1.5 mt-3">
                   {carouselItems.map((item, idx) => (
                     <button
@@ -443,18 +492,20 @@ export default function HomeView() {
                         setActiveHotspot(null);
                         setCurrentSlide(idx);
                       }}
-                      className={`h-1.5 rounded-full transition-all duration-200 ${idx === currentSlide
-                        ? "w-6 bg-accent"
-                        : "w-1.5 bg-white/30 hover:bg-white/60"
-                        }`}
+                      className={`h-1.5 rounded-full transition-all duration-200 ${
+                        idx === currentSlide
+                          ? "w-6 bg-accent"
+                          : "w-1.5 bg-white/30 hover:bg-white/60"
+                      }`}
                       aria-label={`Ir a ${item.name}`}
                     />
                   ))}
                 </div>
 
-                {/* Indicador inferior sutil */}
                 <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-slate-400">
-                  <span>{currentItem.name} · Toca los puntos (+) para inspeccionar</span>
+                  <span>
+                    {currentItem.name} · Toca los puntos (+) para inspeccionar
+                  </span>
                 </div>
               </div>
             </div>
@@ -599,9 +650,10 @@ export default function HomeView() {
             </h3>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Por normas sanitarias y de salud pública, la ropa interior no admite cambios
-              ni devoluciones tras ser entregada. Para tu tranquilidad, utiliza nuestro calculador
-              antropométrico con tus medidas de cintura o cadera y acierta tu talla al primer intento.
+              Por normas sanitarias y de salud pública, la ropa interior no
+              admite cambios ni devoluciones tras ser entregada. Para tu
+              tranquilidad, utiliza nuestro calculador antropométrico con tus
+              medidas de cintura o cadera y acierta tu talla al primer intento.
             </p>
 
             <div className="pt-2 flex flex-wrap items-center gap-4">

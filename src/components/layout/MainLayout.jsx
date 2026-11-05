@@ -3,7 +3,6 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import DeliveryLayout from "./DeliveryLayout"; // <-- CAMBIO 1: import nuevo
 import SizeMatcherModal from "../../features/catalog/components/SizeMatcherModal";
 import CartDrawer from "../../features/cart/CartDrawer";
 
@@ -19,15 +18,18 @@ export default function MainLayout() {
     profile?.role === "delivery" ||
     location.pathname.startsWith("/reparto");
 
-  // CAMBIO 2: si es repartidor, se muestra su propio layout
-  if (isDelivery) return <DeliveryLayout />;
+  // El repartidor ve solo su pantalla: el dashboard ya trae su propio
+  // encabezado, selector de estado y navegación inferior.
+  if (isDelivery) return <Outlet />;
 
   return (
     <div className="flex flex-col min-h-screen bg-surface-app text-brand-primary">
-      <Navbar
-        onOpenSizeMatcher={() => setIsSizeMatcherOpen(true)}
-        onOpenCartDrawer={() => setIsCartDrawerOpen(true)}
-      />
+      {!isDelivery && (
+        <Navbar
+          onOpenSizeMatcher={() => setIsSizeMatcherOpen(true)}
+          onOpenCartDrawer={() => setIsCartDrawerOpen(true)}
+        />
+      )}
 
       <main className="flex-1 flex flex-col">
         <Outlet />

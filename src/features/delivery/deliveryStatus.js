@@ -15,6 +15,7 @@ export const INCIDENT_STATUS = "incidencia_transporte"; // no se pudo entregar
 // Aquí se unifican a un solo nombre para no repetir lógica en la pantalla.
 export const STATUS_ALIASES = {
   por_asignar_repartidor: "por_asignar_repartidor",
+  asignado: "asignado",
   preparing: "en_preparacion",
   en_preparacion: "en_preparacion",
   dispatched: "en_camino",
@@ -48,6 +49,7 @@ export const STATUS_CONFIG = {
     className: "bg-amber-50 text-amber-900 border-amber-200",
     icon: ShoppingBag,
   },
+  asignado: { label: "En base", variant: "neutral", icon: Package },
   en_preparacion: { label: "Por entregar", variant: "neutral", icon: Package },
   en_camino: { label: "En camino", variant: "warning", icon: Truck },
   cerca: { label: "Cerca", variant: "warning", icon: MapPin },

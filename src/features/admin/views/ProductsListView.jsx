@@ -36,7 +36,13 @@ export default function ProductsListView() {
   const navigate = useNavigate();
 
   // Consulta global de productos y categorías maestras
-  const { data = [], loading, error, refetch, reload: reloadProducts, } = useAdminProducts({});
+  const {
+    data = [],
+    loading,
+    error,
+    refetch,
+    reload: reloadProducts,
+  } = useAdminProducts({});
   const [categories, setCategories] = useState([]);
 
   // Estados de filtros y vista
@@ -67,21 +73,22 @@ export default function ProductsListView() {
   // Desactivar / Activar prenda
   async function toggle(product) {
     const action = product.is_active ? "desactivar" : "activar";
-    if (!window.confirm(`¿Deseas ${action} la prenda "${product.name}"?`)) return;
+    if (!window.confirm(`¿Deseas ${action} la prenda "${product.name}"?`))
+      return;
     try {
       await setProductActive(product.id, !product.is_active);
 
-      // Ejecuta la función de recarga disponible en el hook
       if (typeof refetch === "function") {
         await refetch();
       } else if (typeof reloadProducts === "function") {
         await reloadProducts();
       } else {
-        // Fallback si el hook no expone recarga: recarga la vista
         window.location.reload();
       }
     } catch (err) {
-      window.alert(err.message || "No se pudo actualizar el estado del producto.");
+      window.alert(
+        err.message || "No se pudo actualizar el estado del producto.",
+      );
     }
   }
 
@@ -98,10 +105,16 @@ export default function ProductsListView() {
   const genderCounts = useMemo(() => {
     return {
       all: data.length,
-      hombre: data.filter((p) => (p.target_gender || "").toLowerCase() === "hombre").length,
-      mujer: data.filter((p) => (p.target_gender || "").toLowerCase() === "mujer").length,
-      nino: data.filter((p) => (p.target_gender || "").toLowerCase() === "nino").length,
-      nina: data.filter((p) => (p.target_gender || "").toLowerCase() === "nina").length,
+      hombre: data.filter(
+        (p) => (p.target_gender || "").toLowerCase() === "hombre",
+      ).length,
+      mujer: data.filter(
+        (p) => (p.target_gender || "").toLowerCase() === "mujer",
+      ).length,
+      nino: data.filter((p) => (p.target_gender || "").toLowerCase() === "nino")
+        .length,
+      nina: data.filter((p) => (p.target_gender || "").toLowerCase() === "nina")
+        .length,
     };
   }, [data]);
 
@@ -135,7 +148,9 @@ export default function ProductsListView() {
         const query = search.trim().toLowerCase();
         const matchesName = product.name?.toLowerCase().includes(query);
         const matchesSlug = product.slug?.toLowerCase().includes(query);
-        const matchesMaterial = product.materials?.name?.toLowerCase().includes(query);
+        const matchesMaterial = product.materials?.name
+          ?.toLowerCase()
+          .includes(query);
         if (!matchesName && !matchesSlug && !matchesMaterial) return false;
       }
 
@@ -145,20 +160,17 @@ export default function ProductsListView() {
         const prodCatId = product.categories?.id || product.category_id;
         const prodCatParentId = product.categories?.parent_id;
 
-        // Comprobar si la categoría seleccionada tiene subcategorías hijas
         const childCategoryIds = categories
           .filter((c) => c.parent_id === catId)
           .map((c) => c.id);
 
         if (childCategoryIds.length > 0) {
-          // Categoría padre seleccionada: Coincide si el producto está en la categoría o en cualquiera de sus hijas
           const matchesParentOrChild =
             prodCatId === catId ||
             childCategoryIds.includes(prodCatId) ||
             prodCatParentId === catId;
           if (!matchesParentOrChild) return false;
         } else {
-          // Subcategoría específica seleccionada
           if (prodCatId !== catId) return false;
         }
       }
@@ -177,7 +189,15 @@ export default function ProductsListView() {
 
       return true;
     });
-  }, [data, selectedGender, search, selectedCategory, stockPreset, manualMaxStock, categories]);
+  }, [
+    data,
+    selectedGender,
+    search,
+    selectedCategory,
+    stockPreset,
+    manualMaxStock,
+    categories,
+  ]);
 
   // Paginación sobre resultados filtrados
   const totalPages = Math.ceil(filteredProducts.length / pageSize) || 1;
@@ -193,11 +213,34 @@ export default function ProductsListView() {
 
   return (
     <div className="space-y-6">
-      {/* 1. Encabezado Depurado */}
-      <div className="flex items-center justify-between gap-4 border-b border-border pb-4">
-        <h1 className="text-2xl font-black text-brand-primary tracking-tight">
-          Inventario de Productos
-        </h1>
+      {/* 1. Fila Superior Fusionada: Pestañas de Audiencia + Botón de Nuevo Producto */}
+      <div className="border-b border-border pb-3 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          {[
+            { id: "all", label: "Todos", count: genderCounts.all },
+            { id: "hombre", label: "Hombres", count: genderCounts.hombre },
+            { id: "mujer", label: "Mujeres", count: genderCounts.mujer },
+            { id: "nino", label: "Niños", count: genderCounts.nino },
+            { id: "nina", label: "Niñas", count: genderCounts.nina },
+          ].map((tab) => {
+            const isSelected = selectedGender === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleGenderChange(tab.id)}
+                className={`px-3.5 py-2 text-xs font-bold border-b-2 transition-colors whitespace-nowrap ${
+                  isSelected
+                    ? "border-brand-primary text-brand-primary"
+                    : "border-transparent text-brand-secondary hover:text-brand-primary"
+                }`}
+              >
+                {tab.label} ({tab.count})
+              </button>
+            );
+          })}
+        </div>
+
         <Button size="sm" onClick={() => navigate("/admin/productos/nuevo")}>
           <Plus className="h-4 w-4 mr-1.5" /> Agregar nuevo producto
         </Button>
@@ -211,7 +254,9 @@ export default function ProductsListView() {
               <AlertTriangle className="h-4 w-4 text-amber-600" />
               <span>
                 Alertas de Stock Crítico ({lowStockWarnings.length}{" "}
-                {lowStockWarnings.length === 1 ? "prenda requiere" : "prendas requieren"}{" "}
+                {lowStockWarnings.length === 1
+                  ? "prenda requiere"
+                  : "prendas requieren"}{" "}
                 atención)
               </span>
             </div>
@@ -221,14 +266,17 @@ export default function ProductsListView() {
               className="text-xs text-amber-800 hover:text-amber-950 font-semibold flex items-center gap-1"
             >
               {showWarnings ? "Ocultar panel" : "Ver alertas"}
-              {showWarnings ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {showWarnings ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
             </button>
           </div>
 
           {showWarnings && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
               {lowStockWarnings.map(({ product, stock }) => {
-                // Color progresivo según nivel de criticidad
                 const isOutOfStock = stock === 0;
                 const isVeryLow = stock > 0 && stock <= 5;
 
@@ -251,15 +299,21 @@ export default function ProductsListView() {
                   >
                     <div className="min-w-0">
                       <p className="font-bold truncate">{product.name}</p>
-                      <span className={`inline-block mt-0.5 text-[10px] font-black px-1.5 py-0.2 rounded ${badgeBg}`}>
-                        {isOutOfStock ? "Agotado (0 un.)" : `${stock} un. restantes`}
+                      <span
+                        className={`inline-block mt-0.5 text-[10px] font-black px-1.5 py-0.2 rounded ${badgeBg}`}
+                      >
+                        {isOutOfStock
+                          ? "Agotado (0 un.)"
+                          : `${stock} un. restantes`}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
                         type="button"
-                        onClick={() => navigate(`/admin/productos/${product.id}/editar`)}
+                        onClick={() =>
+                          navigate(`/admin/productos/${product.id}/editar`)
+                        }
                         className="px-2 py-1 rounded bg-white/80 hover:bg-white text-slate-700 font-semibold text-[11px] border border-black/10 transition-colors"
                       >
                         Editar
@@ -281,35 +335,7 @@ export default function ProductsListView() {
         </div>
       )}
 
-      {/* 3. Pestañas de Audiencia Alineadas a la Derecha */}
-      <div className="flex justify-end border-b border-border pb-px overflow-x-auto">
-        <div className="flex items-center gap-2">
-          {[
-            { id: "all", label: "Todos", count: genderCounts.all },
-            { id: "hombre", label: "Hombres", count: genderCounts.hombre },
-            { id: "mujer", label: "Mujeres", count: genderCounts.mujer },
-            { id: "nino", label: "Niños", count: genderCounts.nino },
-            { id: "nina", label: "Niñas", count: genderCounts.nina },
-          ].map((tab) => {
-            const isSelected = selectedGender === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => handleGenderChange(tab.id)}
-                className={`px-3.5 py-2 text-xs font-bold border-b-2 transition-colors whitespace-nowrap ${isSelected
-                  ? "border-brand-primary text-brand-primary"
-                  : "border-transparent text-brand-secondary hover:text-brand-primary"
-                  }`}
-              >
-                {tab.label} ({tab.count})
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 4. Barra de Controles: Búsqueda, Prenda, Stock Dinámico y Selector de Vista */}
+      {/* 3. Barra de Controles: Búsqueda, Prenda, Stock Dinámico y Selector de Vista */}
       <Card className="p-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-center">
           {/* Buscador */}
@@ -383,8 +409,11 @@ export default function ProductsListView() {
               <button
                 type="button"
                 onClick={() => setViewMode("cards")}
-                className={`p-1.5 rounded text-xs transition-colors ${viewMode === "cards" ? "bg-white text-brand-primary shadow-sm" : "text-brand-muted hover:text-brand-primary"
-                  }`}
+                className={`p-1.5 rounded text-xs transition-colors ${
+                  viewMode === "cards"
+                    ? "bg-white text-brand-primary shadow-sm"
+                    : "text-brand-muted hover:text-brand-primary"
+                }`}
                 title="Vista en tarjetas"
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -392,8 +421,11 @@ export default function ProductsListView() {
               <button
                 type="button"
                 onClick={() => setViewMode("table")}
-                className={`p-1.5 rounded text-xs transition-colors ${viewMode === "table" ? "bg-white text-brand-primary shadow-sm" : "text-brand-muted hover:text-brand-primary"
-                  }`}
+                className={`p-1.5 rounded text-xs transition-colors ${
+                  viewMode === "table"
+                    ? "bg-white text-brand-primary shadow-sm"
+                    : "text-brand-muted hover:text-brand-primary"
+                }`}
                 title="Vista en tabla"
               >
                 <TableIcon className="h-4 w-4" />
@@ -403,9 +435,11 @@ export default function ProductsListView() {
         </div>
       </Card>
 
-      {/* 5. Contenido Principal */}
+      {/* 4. Contenido Principal */}
       {error ? (
-        <Card className="p-6 text-sm text-status-danger-text">{error.message}</Card>
+        <Card className="p-6 text-sm text-status-danger-text">
+          {error.message}
+        </Card>
       ) : loading ? (
         <Card className="p-8 text-center text-sm text-brand-secondary">
           Sincronizando inventario de prendas...
@@ -413,8 +447,12 @@ export default function ProductsListView() {
       ) : paginatedProducts.length === 0 ? (
         <Card className="p-12 text-center text-sm text-brand-secondary space-y-2">
           <Archive className="h-8 w-8 text-brand-muted mx-auto stroke-[1.5]" />
-          <p className="font-semibold text-brand-primary">No se encontraron productos coincidentes.</p>
-          <p className="text-xs text-brand-muted">Prueba modificando los filtros de categoría o el umbral de stock.</p>
+          <p className="font-semibold text-brand-primary">
+            No se encontraron productos coincidentes.
+          </p>
+          <p className="text-xs text-brand-muted">
+            Prueba modificando los filtros de categoría o el umbral de stock.
+          </p>
         </Card>
       ) : viewMode === "cards" ? (
         /* VISTA EN TARJETAS CON FONDO CROMÁTICO DIFERENCIADO */
@@ -426,22 +464,28 @@ export default function ProductsListView() {
             return (
               <div
                 key={product.id}
-                className={`rounded-xl border p-4 flex flex-col justify-between transition-all ${isInactive
-                  ? "bg-slate-200/80 border-slate-300 text-slate-500 shadow-none"
-                  : "bg-white border-border text-brand-primary shadow-sm hover:border-border-strong"
-                  }`}
+                className={`rounded-xl border p-4 flex flex-col justify-between transition-all ${
+                  isInactive
+                    ? "bg-slate-200/80 border-slate-300 text-slate-500 shadow-none"
+                    : "bg-white border-border text-brand-primary shadow-sm hover:border-border-strong"
+                }`}
               >
                 <div>
                   {/* Fotografía principal */}
                   <div
-                    className={`relative w-full h-40 rounded-lg overflow-hidden mb-3 border ${isInactive ? "border-slate-300 bg-slate-300" : "border-border bg-surface-subtle"
-                      }`}
+                    className={`relative w-full h-40 rounded-lg overflow-hidden mb-3 border ${
+                      isInactive
+                        ? "border-slate-300 bg-slate-300"
+                        : "border-border bg-surface-subtle"
+                    }`}
                   >
                     {product.main_image_url ? (
                       <img
                         src={product.main_image_url}
                         alt={product.name}
-                        className={`w-full h-full object-cover ${isInactive ? "grayscale opacity-50" : ""}`}
+                        className={`w-full h-full object-cover ${
+                          isInactive ? "grayscale opacity-50" : ""
+                        }`}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-xs text-brand-muted">
@@ -457,10 +501,18 @@ export default function ProductsListView() {
                   <div className="flex items-center gap-1.5 text-[10px] text-brand-muted font-semibold mb-1">
                     <span>{product.brands?.name || "ERXIDI"}</span>
                     <span>•</span>
-                    <span className="font-bold text-brand-secondary">{product.categories?.name || "Sin prenda"}</span>
+                    <span className="font-bold text-brand-secondary">
+                      {product.categories?.name || "Sin prenda"}
+                    </span>
                   </div>
 
-                  <h3 className={`text-xs font-bold leading-snug line-clamp-2 ${isInactive ? "text-slate-600 line-through" : "text-brand-primary"}`}>
+                  <h3
+                    className={`text-xs font-bold leading-snug line-clamp-2 ${
+                      isInactive
+                        ? "text-slate-600 line-through"
+                        : "text-brand-primary"
+                    }`}
+                  >
                     {product.name}
                   </h3>
                   <p className="text-[11px] text-brand-muted mt-1 truncate">
@@ -475,12 +527,13 @@ export default function ProductsListView() {
                       {money(product.price)}
                     </span>
                     <span
-                      className={`text-[11px] font-semibold ${stock === 0
-                        ? "text-rose-700 bg-rose-100 px-2 py-0.5 rounded"
-                        : stock < 20
-                          ? "text-orange-700 bg-orange-100 px-2 py-0.5 rounded"
-                          : "text-brand-secondary"
-                        }`}
+                      className={`text-[11px] font-semibold ${
+                        stock === 0
+                          ? "text-rose-700 bg-rose-100 px-2 py-0.5 rounded"
+                          : stock < 20
+                            ? "text-orange-700 bg-orange-100 px-2 py-0.5 rounded"
+                            : "text-brand-secondary"
+                      }`}
                     >
                       Stock: <strong>{stock}</strong> un.
                     </span>
@@ -491,7 +544,9 @@ export default function ProductsListView() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/admin/productos/${product.id}/editar`)}
+                      onClick={() =>
+                        navigate(`/admin/productos/${product.id}/editar`)
+                      }
                       className="flex-1 text-xs h-8"
                     >
                       <Edit3 className="h-3.5 w-3.5 mr-1" /> Editar
@@ -501,9 +556,16 @@ export default function ProductsListView() {
                       variant="ghost"
                       size="sm"
                       onClick={() => toggle(product)}
-                      className={`h-8 px-2.5 text-xs ${product.is_active ? "text-rose-600 hover:bg-rose-50" : "text-emerald-700 hover:bg-emerald-50"
-                        }`}
-                      title={product.is_active ? "Desactivar prenda" : "Activar prenda"}
+                      className={`h-8 px-2.5 text-xs ${
+                        product.is_active
+                          ? "text-rose-600 hover:bg-rose-50"
+                          : "text-emerald-700 hover:bg-emerald-50"
+                      }`}
+                      title={
+                        product.is_active
+                          ? "Desactivar prenda"
+                          : "Activar prenda"
+                      }
                     >
                       <Power className="h-3.5 w-3.5" />
                     </Button>
@@ -537,7 +599,11 @@ export default function ProductsListView() {
                   return (
                     <tr
                       key={product.id}
-                      className={`transition-colors ${isInactive ? "bg-slate-100/70 text-slate-400" : "hover:bg-surface-subtle"}`}
+                      className={`transition-colors ${
+                        isInactive
+                          ? "bg-slate-100/70 text-slate-400"
+                          : "hover:bg-surface-subtle"
+                      }`}
                     >
                       <td className="p-3">
                         <div className="flex items-center gap-2.5">
@@ -546,28 +612,49 @@ export default function ProductsListView() {
                               <img
                                 src={product.main_image_url}
                                 alt={product.name}
-                                className={`w-full h-full object-cover ${isInactive ? "grayscale opacity-50" : ""}`}
+                                className={`w-full h-full object-cover ${
+                                  isInactive ? "grayscale opacity-50" : ""
+                                }`}
                               />
                             )}
                           </div>
                           <div>
-                            <p className={`font-bold ${isInactive ? "line-through text-slate-500" : "text-brand-primary"}`}>
+                            <p
+                              className={`font-bold ${
+                                isInactive
+                                  ? "line-through text-slate-500"
+                                  : "text-brand-primary"
+                              }`}
+                            >
                               {product.name}
                             </p>
-                            <p className="font-mono text-[10px] text-brand-muted">{product.slug}</p>
+                            <p className="font-mono text-[10px] text-brand-muted">
+                              {product.slug}
+                            </p>
                           </div>
                         </div>
                       </td>
                       <td className="p-3 uppercase text-[10px] font-semibold text-brand-secondary">
                         {product.target_gender}
                       </td>
-                      <td className="p-3 text-brand-secondary">{product.categories?.name || "—"}</td>
-                      <td className="p-3 text-brand-muted">{product.materials?.name || "—"}</td>
-                      <td className="p-3 font-mono font-bold text-brand-primary">{money(product.price)}</td>
+                      <td className="p-3 text-brand-secondary">
+                        {product.categories?.name || "—"}
+                      </td>
+                      <td className="p-3 text-brand-muted">
+                        {product.materials?.name || "—"}
+                      </td>
+                      <td className="p-3 font-mono font-bold text-brand-primary">
+                        {money(product.price)}
+                      </td>
                       <td className="p-3 text-center">
                         <span
-                          className={`font-mono font-bold ${stock === 0 ? "text-rose-600" : stock < 20 ? "text-orange-600" : "text-brand-primary"
-                            }`}
+                          className={`font-mono font-bold ${
+                            stock === 0
+                              ? "text-rose-600"
+                              : stock < 20
+                                ? "text-orange-600"
+                                : "text-brand-primary"
+                          }`}
                         >
                           {stock}
                         </span>
@@ -577,7 +664,9 @@ export default function ProductsListView() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => navigate(`/admin/productos/${product.id}/editar`)}
+                            onClick={() =>
+                              navigate(`/admin/productos/${product.id}/editar`)
+                            }
                             className="h-7 text-xs"
                           >
                             <Edit3 className="h-3.5 w-3.5 mr-1" /> Editar
@@ -586,8 +675,11 @@ export default function ProductsListView() {
                             variant="ghost"
                             size="sm"
                             onClick={() => toggle(product)}
-                            className={`h-7 px-2 text-xs ${product.is_active ? "text-rose-600 hover:bg-rose-50" : "text-emerald-700 hover:bg-emerald-50"
-                              }`}
+                            className={`h-7 px-2 text-xs ${
+                              product.is_active
+                                ? "text-rose-600 hover:bg-rose-50"
+                                : "text-emerald-700 hover:bg-emerald-50"
+                            }`}
                           >
                             <Power className="h-3.5 w-3.5" />
                           </Button>
@@ -602,13 +694,16 @@ export default function ProductsListView() {
         </Card>
       )}
 
-      {/* 6. Barra de Paginación */}
+      {/* 5. Barra de Paginación */}
       {filteredProducts.length > 0 && (
         <Card className="px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-brand-secondary">
           <span>
             Mostrando{" "}
             <strong className="text-brand-primary font-bold">
-              {Math.min((currentPage - 1) * pageSize + 1, filteredProducts.length)}
+              {Math.min(
+                (currentPage - 1) * pageSize + 1,
+                filteredProducts.length,
+              )}
             </strong>{" "}
             -{" "}
             <strong className="text-brand-primary font-bold">
@@ -636,10 +731,11 @@ export default function ProductsListView() {
                 key={page}
                 type="button"
                 onClick={() => setCurrentPage(page)}
-                className={`w-7 h-7 rounded text-xs font-bold transition-colors ${page === currentPage
-                  ? "bg-brand-primary text-white"
-                  : "border border-border text-brand-primary hover:bg-surface-subtle"
-                  }`}
+                className={`w-7 h-7 rounded text-xs font-bold transition-colors ${
+                  page === currentPage
+                    ? "bg-brand-primary text-white"
+                    : "border border-border text-brand-primary hover:bg-surface-subtle"
+                }`}
               >
                 {page}
               </button>

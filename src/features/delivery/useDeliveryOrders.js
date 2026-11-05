@@ -11,6 +11,15 @@ import {
 
 export const MAX_ITEMS_PER_TRIP = 30;
 
+// Pedidos actualmente tomados por el repartidor (cuentan para la capacidad)
+const BAG_STATUSES = ["asignado", "en_camino", "cerca"];
+
+const POOL_ELIGIBLE_STATUSES = [
+  "por_asignar_repartidor",
+  "en_preparacion",
+  "preparando",
+];
+
 // Misma forma que repartidor.json: pedido -> customer, shipping_address, items
 // Los nombres después de "!" son las llaves foráneas reales de la tabla orders.
 const ORDERS_SELECT = `
@@ -36,6 +45,21 @@ const POOL_ORDERS_SELECT = `
   order_items ( id, quantity, variant_id, product_variants ( products ( name ) ) )
 `;
 
+function isPoolEligible(order, driverDeliveryType) {
+  if (!order) return false;
+  if (order.assigned_delivery_id) return false;
+  if (order.delivery_type === "pickup" || PICKUP_TYPES.includes(order.delivery_type)) {
+    return false;
+  }
+  if (driverDeliveryType === "express" && order.delivery_type !== "express") {
+    return false;
+  }
+  if (driverDeliveryType === "scheduled" && order.delivery_type !== "scheduled") {
+    return false;
+  }
+  return POOL_ELIGIBLE_STATUSES.includes(order.status);
+}
+
 function prepare(row) {
   const rawItems = row.items ?? row.order_items ?? [];
   return {
@@ -58,14 +82,26 @@ function prepare(row) {
 }
 
 // useMock = true usa repartidor.json (pruebas sin base de datos)
-export function useDeliveryOrders({ useMock = false } = {}) {
-  const { user, profile } = useAuth();
+export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) {
+  const { user, profile: authProfile } = useAuth();
+  const profile = userProfile || authProfile;
+  const driverDeliveryType = profile?.delivery_type || user?.delivery_type;
+
   const [orders, setOrders] = useState([]);
   const [poolOrders, setPoolOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
   const [actionError, setActionError] = useState(null);
+  const [operationalStatus, setOperationalStatus] = useState(
+    profile?.operational_status || "available",
+  );
+
+  useEffect(() => {
+    if (profile?.operational_status) {
+      setOperationalStatus(profile.operational_status);
+    }
+  }, [profile?.operational_status]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -76,6 +112,21 @@ export function useDeliveryOrders({ useMock = false } = {}) {
     }
 
     setLoading(true);
+
+    let poolQuery = supabase
+      .from("orders")
+      .select(POOL_ORDERS_SELECT)
+      .in("status", POOL_ELIGIBLE_STATUSES)
+      .is("assigned_delivery_id", null)
+      .not("delivery_type", "in", `(${PICKUP_TYPES.join(",")})`)
+      .order("created_at", { ascending: false });
+
+    if (driverDeliveryType === "express") {
+      poolQuery = poolQuery.eq("delivery_type", "express");
+    } else if (driverDeliveryType === "scheduled") {
+      poolQuery = poolQuery.eq("delivery_type", "scheduled");
+    }
+
     const [assignedRes, poolRes] = await Promise.all([
       supabase
         .from("orders")
@@ -84,13 +135,7 @@ export function useDeliveryOrders({ useMock = false } = {}) {
         .in("status", VISIBLE_DB_STATUSES)
         .not("delivery_type", "in", `(${PICKUP_TYPES.join(",")})`)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("orders")
-        .select(POOL_ORDERS_SELECT)
-        .eq("status", "por_asignar_repartidor")
-        .is("assigned_delivery_id", null)
-        .not("delivery_type", "in", `(${PICKUP_TYPES.join(",")})`)
-        .order("created_at", { ascending: false }),
+      poolQuery,
     ]);
 
     const queryError = assignedRes.error || poolRes.error;
@@ -103,7 +148,7 @@ export function useDeliveryOrders({ useMock = false } = {}) {
       setPoolOrders((poolRes.data ?? []).map(prepare));
     }
     setLoading(false);
-  }, [user, useMock]);
+  }, [user, driverDeliveryType, useMock]);
 
   useEffect(() => {
     load();
@@ -129,16 +174,12 @@ export function useDeliveryOrders({ useMock = false } = {}) {
           const { eventType, new: newOrder, old: oldOrder } = payload;
 
           if (eventType === "INSERT") {
-            const isPoolEligible =
-              !PICKUP_TYPES.includes(newOrder.delivery_type) &&
-              !newOrder.assigned_delivery_id &&
-              [
-                "preparando",
-                "por_asignar_repartidor",
-                "pendiente",
-              ].includes(newOrder.status);
-
-            if (isPoolEligible) {
+            if (newOrder.assigned_delivery_id === user.id) {
+              setOrders((prev) => [
+                prepare(newOrder),
+                ...prev.filter((o) => o.id !== newOrder.id),
+              ]);
+            } else if (isPoolEligible(newOrder, driverDeliveryType)) {
               setPoolOrders((prev) => [
                 prepare(newOrder),
                 ...prev.filter((o) => o.id !== newOrder.id),
@@ -158,7 +199,17 @@ export function useDeliveryOrders({ useMock = false } = {}) {
               setPoolOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
               setOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
             } else {
-              setPoolOrders((prev) => merge(prev, newOrder));
+              const eligible = isPoolEligible(newOrder, driverDeliveryType);
+              if (eligible) {
+                setPoolOrders((prev) =>
+                  prev.some((o) => o.id === newOrder.id)
+                    ? merge(prev, newOrder)
+                    : [prepare(newOrder), ...prev],
+                );
+              } else {
+                setPoolOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
+              }
+              setOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
             }
           }
 
@@ -173,11 +224,11 @@ export function useDeliveryOrders({ useMock = false } = {}) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id, useMock]);
+  }, [user?.id, driverDeliveryType, useMock]);
 
   // Suma total de quantity de los pedidos activos asignados en ruta (en_camino y cerca)
   const currentTripItemsCount = orders
-    .filter((o) => o.status === "en_camino" || o.status === "cerca")
+    .filter((o) => BAG_STATUSES.includes(o.status))
     .reduce(
       (sum, o) =>
         sum +
@@ -272,54 +323,77 @@ export function useDeliveryOrders({ useMock = false } = {}) {
 
     setUpdatingId(orderId);
 
-    if (!useMock) {
-      const { data, error: claimError } = await supabase
-        .from("orders")
-        .update({
-          assigned_delivery_id: user.id,
-          status: "en_camino",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", orderId)
-        .is("assigned_delivery_id", null)
-        .select("id");
+    try {
+      let claimedRow = null;
+      if (!useMock) {
+        const { data, error } = await supabase
+          .from("orders")
+          .update({
+            assigned_delivery_id: user.id,
+            status: "asignado",
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", orderId)
+          .is("assigned_delivery_id", null)
+          .select();
 
-      if (claimError) {
-        setActionError(claimError.message);
-        setUpdatingId(null);
-        return false;
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          throw new Error("El pedido ya no está disponible en la bolsa.");
+        }
+        claimedRow = data[0];
       }
 
-      if (!data?.length) {
-        setActionError(
-          "Otro repartidor ya tomó este pedido. Actualizando bolsa de pedidos...",
-        );
-        setUpdatingId(null);
-        await load();
-        return false;
-      }
+      // Actualiza inmediatamente el estado local pasando el pedido a orders y removiéndolo de poolOrders
+      const updatedOrder = prepare({
+        ...(poolOrder || {}),
+        ...(claimedRow || {}),
+        id: orderId,
+        assigned_delivery_id: user.id,
+        status: "asignado",
+      });
+
+      setOrders((prev) => [
+        updatedOrder,
+        ...prev.filter((o) => o.id !== orderId),
+      ]);
+      setPoolOrders((prev) => prev.filter((o) => o.id !== orderId));
+      return true;
+    } catch (err) {
+      setActionError(err.message);
+      throw err;
+    } finally {
+      setUpdatingId(null);
     }
-
-    await load();
-    setUpdatingId(null);
-    return true;
   }
 
   // Reporta una incidencia en ruta y retira el pedido de entregas activas
-  async function reportIncident(orderId, { reason, comment }) {
+  async function reportIncident(
+    orderId,
+    { reason, comment, returnToPool = false },
+  ) {
     setActionError(null);
     setUpdatingId(orderId);
+
+    const patch = returnToPool
+      ? {
+          status: "por_asignar_repartidor",
+          assigned_delivery_id: null,
+          incident_reason: "reasignacion_entre_repartidores",
+          incident_comment: comment,
+        }
+      : {
+          status: "incidencia_transporte",
+          incident_reason: reason,
+          incident_comment: comment,
+        };
 
     if (!useMock) {
       const { error: incidentError } = await supabase
         .from("orders")
-        .update({
-          status: "incidencia_transporte",
-          incident_reason: reason,
-          incident_comment: comment,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", orderId);
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", orderId)
+        .eq("assigned_delivery_id", user.id);
 
       if (incidentError) {
         setActionError(incidentError.message);
@@ -328,13 +402,92 @@ export function useDeliveryOrders({ useMock = false } = {}) {
       }
     }
 
+    // Con incidencia el pedido sigue en `orders` (métricas); al devolver a bolsa sale
+    setOrders((prev) =>
+      returnToPool
+        ? prev.filter((o) => o.id !== orderId)
+        : prev.map((o) =>
+            o.id === orderId
+              ? { ...o, status: "incidencia_transporte", incident_reason: reason }
+              : o,
+          ),
+    );
+    setUpdatingId(null);
+    return true;
+  }
+
+  // Devuelve un pedido tomado a la bolsa
+  async function returnToPool(orderId) {
+    setActionError(null);
+    setUpdatingId(orderId);
+    if (!useMock) {
+      const { error: e } = await supabase
+        .from("orders")
+        .update({
+          status: "por_asignar_repartidor",
+          assigned_delivery_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", orderId)
+        .eq("assigned_delivery_id", user.id);
+      if (e) {
+        setActionError(e.message);
+        setUpdatingId(null);
+        return false;
+      }
+    }
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
     setUpdatingId(null);
     return true;
   }
 
+  // Inicia ruta: todos los pedidos en base pasan a en_camino y el semáforo a on_route
+  async function startRoute() {
+    setActionError(null);
+    const ids = orders.filter((o) => o.status === "asignado").map((o) => o.id);
+    if (ids.length === 0) return false;
+    if (!useMock) {
+      const { error: e } = await supabase
+        .from("orders")
+        .update({ status: "en_camino", updated_at: new Date().toISOString() })
+        .in("id", ids)
+        .eq("assigned_delivery_id", user.id);
+      if (e) {
+        setActionError(e.message);
+        return false;
+      }
+    }
+    setOrders((prev) =>
+      prev.map((o) => (ids.includes(o.id) ? { ...o, status: "en_camino" } : o)),
+    );
+    await changeOperationalStatus("on_route");
+    return true;
+  }
+
+  // Semáforo operativo persistido en profiles.operational_status
+  async function changeOperationalStatus(next) {
+    const previous = operationalStatus;
+    setOperationalStatus(next);
+    if (useMock || !user?.id) return true;
+    const { error: e } = await supabase
+      .from("profiles")
+      .update({ operational_status: next })
+      .eq("id", user.id);
+    if (e) {
+      setOperationalStatus(previous);
+      setActionError(e.message);
+      return false;
+    }
+    return true;
+  }
+
   return {
     repartidorName: profile?.first_name,
+    profile,
+    operationalStatus,
+    changeOperationalStatus,
+    returnToPool,
+    startRoute,
     orders,
     poolOrders,
     currentTripItemsCount,
@@ -346,6 +499,7 @@ export function useDeliveryOrders({ useMock = false } = {}) {
     reload: load,
     changeStatus,
     claimOrder,
+    takeOrder: claimOrder,
     reportIncident,
   };
 }

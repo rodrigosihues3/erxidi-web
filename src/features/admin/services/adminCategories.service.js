@@ -7,7 +7,9 @@ import { supabase } from "../../../services/supabase";
 export async function listCategories() {
   const { data, error } = await supabase
     .from("categories")
-    .select("id, name, slug, description, image_url, parent_id, is_active, display_order, created_at, updated_at")
+    .select(
+      "id, name, slug, description, image_url, parent_id, is_active, display_order, created_at, updated_at",
+    )
     .order("display_order", { ascending: true })
     .order("name", { ascending: true });
 
@@ -135,6 +137,61 @@ export async function setMaterialActive(id, isActive) {
   const { error } = await supabase
     .from("materials")
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+// ==========================================
+// TALLAS (sizes)
+// ==========================================
+
+export async function listSizes() {
+  const { data, error } = await supabase
+    .from("sizes")
+    .select("id, name, display_order, is_active, target_genders, created_at")
+    .order("display_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createSize(payload) {
+  const { data, error } = await supabase
+    .from("sizes")
+    .insert({
+      name: payload.name,
+      display_order: payload.display_order ?? 0,
+      target_genders: payload.target_genders,
+    })
+    .select("id, name, display_order, is_active, target_genders, created_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSize(id, payload) {
+  const { data, error } = await supabase
+    .from("sizes")
+    .update({
+      name: payload.name,
+      display_order: payload.display_order ?? 0,
+      target_genders: payload.target_genders,
+    })
+    .eq("id", id)
+    .select("id, name, display_order, is_active, target_genders, created_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function setSizeActive(id, isActive) {
+  const { error } = await supabase
+    .from("sizes")
+    .update({ is_active: isActive })
     .eq("id", id);
 
   if (error) throw error;

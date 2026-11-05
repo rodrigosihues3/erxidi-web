@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Plus, Trash2, Pipette, X, Palette } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Pipette, X, Palette, Check } from "lucide-react";
 import Button from "../../../components/ui/Button";
 
 const QUICK_PRESETS = [
@@ -11,19 +11,6 @@ const QUICK_PRESETS = [
   { name: "Gris Jaspe", hex: "#6B7280" },
   { name: "Vino", hex: "#881337" },
 ];
-
-const KIDS_SIZE_REGEX = /^(\d{1,2}T?|T[- ]?\d{1,2})$/i;
-
-function isKidsSizeName(name = "") {
-  const clean = String(name).trim();
-  return KIDS_SIZE_REGEX.test(clean);
-}
-
-function matchesTargetAudience(sizeName, targetGender) {
-  const isKidsAudience = targetGender === "nino" || targetGender === "nina";
-  const isKidsSize = isKidsSizeName(sizeName);
-  return isKidsAudience ? isKidsSize : !isKidsSize;
-}
 
 function buildSku(colorName, sizeName, sizeId) {
   const prefix =
@@ -41,85 +28,106 @@ export default function VariantMatrix({
   sizes = [],
   variants = [],
   targetGender = "hombre",
+  activeColor: externalActiveColor,
+  onActiveColorChange,
+  onDropImageToColor,
   onChange,
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [colorName, setColorName] = useState("");
   const [colorHex, setColorHex] = useState("#E8C8B5");
   const [error, setError] = useState("");
-  const [excludedSizeIds, setExcludedSizeIds] = useState([]);
+  const [copiedHex, setCopiedHex] = useState(null);
+  const [dragOverColor, setDragOverColor] = useState(null);
 
-  // 1. Filtrar tallas correspondientes al público seleccionado
+  // 1. Filtrar tallas correspondientes al público seleccionado de forma estricta
   const audienceSizes = useMemo(() => {
-    const filtered = sizes.filter((s) =>
-      matchesTargetAudience(s.name, targetGender)
-    );
-    return filtered.length > 0 ? filtered : sizes;
+    if (!Array.isArray(sizes) || sizes.length === 0) return [];
+
+    return sizes.filter((s) => {
+      if (s.is_active === false) return false;
+      if (!Array.isArray(s.target_genders)) return false;
+      return s.target_genders.includes(targetGender);
+    });
   }, [sizes, targetGender]);
-
-  // 2. Determinar las tallas habilitadas en la matriz (excluyendo las desmarcadas manualmente)
-  const activeSizes = useMemo(() => {
-    const enabled = audienceSizes.filter(
-      (s) => !excludedSizeIds.includes(Number(s.id))
-    );
-    return enabled.length > 0 ? enabled : audienceSizes.slice(0, 1);
-  }, [audienceSizes, excludedSizeIds]);
-
-  const activeSizeIdSet = useMemo(
-    () => new Set(activeSizes.map((s) => Number(s.id))),
-    [activeSizes]
-  );
 
   const colors = useMemo(
     () => [...new Set(variants.map((v) => v.color).filter(Boolean))],
-    [variants]
+    [variants],
   );
 
-  const hasEyeDropper = typeof window !== "undefined" && "EyeDropper" in window;
+  // Estado del Color Seleccionado (sincronizado con prop externa o local)
+  const [internalSelectedColor, setInternalSelectedColor] = useState(
+    colors[0] || "",
+  );
+  const selectedColor =
+    externalActiveColor !== undefined
+      ? externalActiveColor
+      : internalSelectedColor;
 
-  function toggleSizeSelection(size) {
-    const sizeId = Number(size.id);
-    const isCurrentlyActive = activeSizeIdSet.has(sizeId);
+  function handleSelectColor(color) {
+    setInternalSelectedColor(color);
+    if (onActiveColorChange) {
+      onActiveColorChange(color);
+    }
+  }
 
-    if (isCurrentlyActive) {
-      if (activeSizes.length <= 1) {
-        window.alert("Debe permanecer al menos una talla activa en la matriz.");
-        return;
+  useEffect(() => {
+    if (colors.length > 0) {
+      if (!colors.includes(selectedColor)) {
+        handleSelectColor(colors[0]);
       }
-      setExcludedSizeIds((prev) => [...prev, sizeId]);
-      onChange(variants.filter((v) => Number(v.size_id) !== sizeId));
-    } else {
-      setExcludedSizeIds((prev) => prev.filter((id) => id !== sizeId));
-      if (colors.length > 0) {
-        const newCells = [];
-        for (const color of colors) {
-          const exists = variants.some(
-            (v) => v.color === color && Number(v.size_id) === sizeId
-          );
-          if (!exists) {
-            const sample = variants.find((v) => v.color === color);
-            newCells.push({
-              product_id: sample?.product_id ?? null,
-              size_id: sizeId,
-              color,
-              color_hex: sample?.color_hex || "#111827",
-              stock: 0,
-              sku: buildSku(color, size.name, sizeId),
-              is_active: true,
-            });
-          }
-        }
-        if (newCells.length > 0) {
-          onChange([...variants, ...newCells]);
+    } else if (selectedColor !== "") {
+      handleSelectColor("");
+    }
+  }, [colors, selectedColor]);
+
+  // Sincronizar celdas existentes cuando cambia el público objetivo (targetGender)
+  useEffect(() => {
+    if (colors.length === 0 || audienceSizes.length === 0) return;
+
+    const validSizeIdSet = new Set(audienceSizes.map((s) => Number(s.id)));
+    const filteredVariants = variants.filter((v) =>
+      validSizeIdSet.has(Number(v.size_id)),
+    );
+    const missingCells = [];
+
+    for (const color of colors) {
+      const sample = variants.find((v) => v.color === color);
+      for (const size of audienceSizes) {
+        const sizeId = Number(size.id);
+        const exists = filteredVariants.some(
+          (v) => v.color === color && Number(v.size_id) === sizeId,
+        );
+        if (!exists) {
+          missingCells.push({
+            product_id: sample?.product_id ?? null,
+            size_id: sizeId,
+            color,
+            color_hex: sample?.color_hex || "#111827",
+            stock: 0,
+            sku: buildSku(color, size.name, sizeId),
+            image_url: sample?.image_url || null,
+            is_active: true,
+          });
         }
       }
     }
-  }
+
+    if (
+      missingCells.length > 0 ||
+      filteredVariants.length !== variants.length
+    ) {
+      onChange([...filteredVariants, ...missingCells]);
+    }
+  }, [targetGender, audienceSizes]);
+
+  const hasEyeDropper = typeof window !== "undefined" && "EyeDropper" in window;
 
   async function handlePickFromScreen() {
     if (!hasEyeDropper) {
       window.alert(
-        "La herramienta cuentagotas requiere Chrome, Edge u Opera en escritorio."
+        "La herramienta cuentagotas requiere Chrome, Edge u Opera en escritorio.",
       );
       return;
     }
@@ -131,6 +139,18 @@ export default function VariantMatrix({
       }
     } catch {
       // Cancelado por el usuario con tecla Escape
+    }
+  }
+
+  async function handleCopyHex(hex) {
+    try {
+      await navigator.clipboard.writeText(hex);
+      setCopiedHex(hex);
+      setTimeout(() => {
+        setCopiedHex((curr) => (curr === hex ? null : curr));
+      }, 2000);
+    } catch {
+      // Fallback si el navegador no concede permisos de portapapeles
     }
   }
 
@@ -147,8 +167,8 @@ export default function VariantMatrix({
       return;
     }
 
-    if (activeSizes.length === 0) {
-      setError("Selecciona al menos una talla antes de agregar un color.");
+    if (audienceSizes.length === 0) {
+      setError("No hay tallas configuradas para el público objetivo seleccionado.");
       return;
     }
 
@@ -158,17 +178,19 @@ export default function VariantMatrix({
       cleanHex = "#111827";
     }
 
-    const next = activeSizes.map((size) => ({
+    const next = audienceSizes.map((size) => ({
       product_id: null,
       size_id: size.id,
       color: cleanName,
       color_hex: cleanHex.toUpperCase(),
       stock: 0,
       sku: buildSku(cleanName, size.name, size.id),
+      image_url: null,
       is_active: true,
     }));
 
     onChange([...variants, ...next]);
+    handleSelectColor(cleanName);
     setIsModalOpen(false);
     setColorName("");
     setColorHex("#E8C8B5");
@@ -184,15 +206,14 @@ export default function VariantMatrix({
   }
 
   function removeColor(color) {
-    onChange(variants.filter((variant) => variant.color !== color));
-  }
-
-  function updateColorHex(color, newHex) {
-    onChange(
-      variants.map((variant) =>
-        variant.color === color ? { ...variant, color_hex: newHex } : variant
+    if (
+      !window.confirm(
+        `¿Eliminar el color "${color}" y todas sus variantes de la matriz?`,
       )
-    );
+    ) {
+      return;
+    }
+    onChange(variants.filter((variant) => variant.color !== color));
   }
 
   function updateCell(color, sizeId, field, rawValue) {
@@ -209,7 +230,7 @@ export default function VariantMatrix({
           [field]:
             field === "stock" ? Math.max(0, Number(rawValue) || 0) : rawValue,
         };
-      })
+      }),
     );
   }
 
@@ -224,18 +245,78 @@ export default function VariantMatrix({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-bold text-brand-primary">
-            Variantes por talla y color
-          </p>
-          <p className="text-xs text-brand-muted">
-            Mostrando tallas para público:{" "}
-            <span className="font-semibold uppercase text-brand-primary">
-              {targetGender}
-            </span>
-            . Puedes activar o desactivar tallas específicas para esta prenda.
-          </p>
-        </div>
+        <p className="text-sm font-bold text-brand-primary">
+          Variantes e Inventario por Color
+        </p>
+      </div>
+
+      {/* B. Pastillas de Color con Receptor Drop Nativo */}
+      <div className="flex flex-wrap items-center gap-2">
+        {colors.map((color) => {
+          const sample = variants.find((v) => v.color === color);
+          const currentColorHex = sample?.color_hex || "#111827";
+          const isSelected = selectedColor === color;
+
+          return (
+            <div
+              key={color}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }}
+              onDragEnter={() => setDragOverColor(color)}
+              onDragLeave={() => setDragOverColor(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverColor(null);
+                const draggedUrl = e.dataTransfer.getData("text/plain");
+                if (draggedUrl && onDropImageToColor) {
+                  onDropImageToColor(draggedUrl, color);
+                }
+              }}
+              className={`rounded-button border overflow-hidden inline-flex items-stretch shadow-xs transition-all ${
+                dragOverColor === color
+                  ? "ring-2 ring-accent border-accent scale-105 bg-amber-50/50"
+                  : isSelected
+                  ? "border-accent ring-2 ring-accent/30 scale-[1.03] shadow-sm z-10"
+                  : "border-border hover:border-border-strong opacity-85 hover:opacity-100"
+              }`}
+            >
+              {/* 1. Bloque Swatch (Copia Hex): */}
+              <button
+                type="button"
+                onClick={() => handleCopyHex(currentColorHex)}
+                style={{ backgroundColor: currentColorHex }}
+                className="w-7 min-h-[32px] flex items-center justify-center cursor-pointer transition-opacity hover:opacity-90 border-r border-border/40"
+                title={`Copiar tono: ${currentColorHex}`}
+              >
+                {copiedHex === currentColorHex && (
+                  <Check className="w-3 h-3 text-white drop-shadow-md" />
+                )}
+              </button>
+
+              {/* 2. Bloque Texto (Fondo blanco siempre): */}
+              <button
+                type="button"
+                onClick={() => handleSelectColor(color)}
+                className="px-3 py-1.5 text-xs font-bold bg-white text-brand-primary hover:bg-slate-50 transition-colors flex items-center"
+              >
+                {color}
+              </button>
+
+              {/* 3. Bloque Eliminar (X con hover rojo): */}
+              <button
+                type="button"
+                onClick={() => removeColor(color)}
+                className="px-2 flex items-center justify-center border-l border-border/40 text-slate-400 hover:bg-rose-600 hover:text-white bg-slate-50 transition-colors"
+                title={`Eliminar color ${color}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          );
+        })}
+
         <Button
           type="button"
           variant="outline"
@@ -244,142 +325,134 @@ export default function VariantMatrix({
             setError("");
             setIsModalOpen(true);
           }}
+          className="h-8 px-3 text-xs"
         >
-          <Plus className="h-4 w-4 mr-1" /> Color
+          <Plus className="h-3.5 w-3.5 mr-1" /> Color
         </Button>
       </div>
 
-      {/* Selector de tallas habilitadas según el público objetivo */}
-      <div className="flex flex-wrap items-center gap-2 p-3 bg-surface-subtle rounded-button border border-border">
-        <span className="text-xs font-semibold uppercase tracking-wider text-brand-secondary mr-1">
-          Tallas habilitadas:
-        </span>
-        {audienceSizes.map((size) => {
-          const checked = activeSizeIdSet.has(Number(size.id));
-          return (
-            <button
-              key={size.id}
-              type="button"
-              onClick={() => toggleSizeSelection(size)}
-              className={
-                checked
-                  ? "px-3 py-1 rounded-badge text-xs font-semibold border transition-colors bg-brand-primary text-white border-brand-primary"
-                  : "px-3 py-1 rounded-badge text-xs font-semibold border transition-colors bg-white text-brand-secondary border-border hover:border-brand-primary"
-              }
-            >
-              {size.name}
-            </button>
-          );
-        })}
-      </div>
-
+      {/* C. Grilla de Tallas, SKU e Inventario del Color Activo */}
       {colors.length === 0 ? (
-        <div className="border border-dashed border-border rounded-card p-6 text-center text-sm text-brand-secondary">
-          Agrega el primer color para crear la matriz con las tallas habilitadas.
+        <div className="border border-dashed border-border rounded-card p-6 text-center text-xs text-brand-secondary">
+          Agrega el primer color con el botón <strong>+ Color</strong> para
+          habilitar la grilla de tallas e inventario.
         </div>
       ) : (
-        <div className="overflow-x-auto border border-border rounded-card">
-          <table className="w-full min-w-[700px] text-sm">
-            <thead className="bg-surface-subtle">
-              <tr>
-                <th className="text-left p-3">Color / Tono</th>
-                {activeSizes.map((size) => (
-                  <th key={size.id} className="p-3 text-left">
-                    {size.name}
-                  </th>
-                ))}
-                <th className="p-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {colors.map((color) => {
-                const currentVariant = variants.find((v) => v.color === color);
-                const currentColorHex = currentVariant?.color_hex || "#111827";
+        selectedColor && (
+          <div className="overflow-x-auto border border-border rounded-card bg-white">
+            <table className="w-full text-xs">
+              <thead className="bg-surface-subtle border-b border-border text-brand-secondary uppercase tracking-wider font-bold">
+                <tr>
+                  <th className="text-left p-3">Talla</th>
+                  <th className="text-left p-3">SKU de la Variante</th>
+                  <th className="text-left p-3">Stock Físico Disponible</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {audienceSizes.map((size) => {
+                  const variant = variants.find(
+                    (v) =>
+                      v.color === selectedColor &&
+                      Number(v.size_id) === Number(size.id),
+                  );
 
-                return (
-                  <tr key={color} className="border-t border-border">
-                    <td className="p-3">
-                      <div className="flex items-center gap-2.5">
+                  return (
+                    <tr key={size.id} className="hover:bg-surface-subtle/40">
+                      <td className="p-3">
+                        <span className="font-bold text-xs text-brand-primary">
+                          {size.name}
+                        </span>
+                      </td>
+
+                      <td className="p-3">
                         <input
-                          type="color"
-                          value={currentColorHex}
+                          type="text"
+                          value={variant?.sku || ""}
                           onChange={(e) =>
-                            updateColorHex(color, e.target.value)
+                            updateCell(
+                              selectedColor,
+                              size.id,
+                              "sku",
+                              e.target.value,
+                            )
                           }
-                          className="w-7 h-7 rounded-full border border-border cursor-pointer p-0 bg-transparent shrink-0"
-                          title="Clic para cambiar el tono de este color"
+                          className="w-full max-w-[200px] h-8 px-2 border border-border rounded-button text-xs font-mono uppercase"
+                          placeholder="SKU-AUTO"
                         />
-                        <div>
-                          <span className="font-semibold block leading-tight text-brand-primary">
-                            {color}
+                      </td>
+
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateCell(
+                                  selectedColor,
+                                  size.id,
+                                  "stock",
+                                  Math.max(
+                                    0,
+                                    Number(variant?.stock || 0) - 1,
+                                  ),
+                                )
+                              }
+                              className="w-7 h-8 border border-border rounded-l-button bg-slate-50 hover:bg-slate-100 font-bold text-xs"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min="0"
+                              value={variant?.stock ?? 0}
+                              onChange={(e) =>
+                                updateCell(
+                                  selectedColor,
+                                  size.id,
+                                  "stock",
+                                  e.target.value,
+                                )
+                              }
+                              className="w-14 h-8 text-center text-xs font-mono font-bold border-y border-border focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateCell(
+                                  selectedColor,
+                                  size.id,
+                                  "stock",
+                                  Number(variant?.stock || 0) + 1,
+                                )
+                              }
+                              className="w-7 h-8 border border-border rounded-r-button bg-slate-50 hover:bg-slate-100 font-bold text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            un.
                           </span>
-                          <span className="text-[10px] font-mono text-brand-muted uppercase">
-                            {currentColorHex}
-                          </span>
+
+                          {/* Badge contextual de stock */}
+                          {Number(variant?.stock || 0) === 0 ? (
+                            <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                              Sin stock
+                            </span>
+                          ) : Number(variant?.stock || 0) <= 5 ? (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                              Stock bajo
+                            </span>
+                          ) : null}
                         </div>
-                      </div>
-                    </td>
-                    {activeSizes.map((size) => {
-                      const variant = variants.find(
-                        (v) =>
-                          v.color === color &&
-                          Number(v.size_id) === Number(size.id)
-                      );
-                      return (
-                        <td key={size.id} className="p-3">
-                          {variant ? (
-                            <div className="space-y-2">
-                              <input
-                                type="number"
-                                min="0"
-                                value={variant.stock}
-                                onChange={(e) =>
-                                  updateCell(
-                                    color,
-                                    size.id,
-                                    "stock",
-                                    e.target.value
-                                  )
-                                }
-                                className="w-24 h-9 px-2 border border-border rounded-button text-sm"
-                              />
-                              <input
-                                type="text"
-                                value={variant.sku}
-                                onChange={(e) =>
-                                  updateCell(
-                                    color,
-                                    size.id,
-                                    "sku",
-                                    e.target.value
-                                  )
-                                }
-                                className="w-32 h-9 px-2 border border-border rounded-button text-xs font-mono"
-                                placeholder="SKU"
-                              />
-                            </div>
-                          ) : (
-                            <span className="text-xs text-brand-muted">—</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="p-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => removeColor(color)}
-                        className="p-2 rounded-button text-red-600 hover:bg-red-50"
-                        title="Eliminar este color de la matriz"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
 
       {/* Modal para Agregar Color */}

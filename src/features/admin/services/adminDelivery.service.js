@@ -35,6 +35,10 @@ export async function listDeliveryUsers() {
       email,
       phone,
       role,
+      is_active,
+      is_on_duty,
+      operational_status,
+      delivery_type,
       created_at,
       updated_at
     `)
@@ -65,6 +69,10 @@ export async function getDeliveryUser(id) {
       email,
       phone,
       role,
+      is_active,
+      is_on_duty,
+      operational_status,
+      delivery_type,
       created_at,
       updated_at
     `)
@@ -83,14 +91,19 @@ export async function getDeliveryUser(id) {
  * Actualizar información del repartidor
  */
 export async function updateDeliveryStaff(id, payload) {
+  const cleanPaternalSurname = (payload.paternal_surname || "")
+    .replace(/\[.*?\]/g, "")
+    .trim();
+
   const { data, error } = await supabase
     .from("profiles")
     .update({
       first_name: payload.first_name,
-      paternal_surname: payload.paternal_surname,
+      paternal_surname: cleanPaternalSurname,
       maternal_surname: payload.maternal_surname,
       phone: payload.phone,
       dni: payload.dni,
+      delivery_type: payload.delivery_type || "scheduled",
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -112,6 +125,11 @@ export async function updateDeliveryUser(id, values) {
  * Creación de cuenta operativa de repartidor
  */
 export async function createDeliveryStaff(payload) {
+  const cleanPaternalSurname = (payload.paternal_surname || "")
+    .replace(/\[.*?\]/g, "")
+    .trim();
+  const deliveryType = payload.delivery_type || "scheduled";
+
   // 1. Registro en Auth con cliente aislado (no toca localStorage)
   const authClient = getAuthAdminClient();
   const { data: authData, error: authError } = await authClient.auth.signUp({
@@ -120,9 +138,10 @@ export async function createDeliveryStaff(payload) {
     options: {
       data: {
         first_name: payload.first_name,
-        paternal_surname: payload.paternal_surname,
+        paternal_surname: cleanPaternalSurname,
         maternal_surname: payload.maternal_surname,
         role: "delivery",
+        delivery_type: deliveryType,
       },
     },
   });
@@ -141,11 +160,12 @@ export async function createDeliveryStaff(payload) {
 
   const profileData = {
     first_name: payload.first_name,
-    paternal_surname: payload.paternal_surname,
+    paternal_surname: cleanPaternalSurname,
     maternal_surname: payload.maternal_surname,
     phone: payload.phone || null,
     dni: payload.dni || null,
     role: "delivery",
+    delivery_type: deliveryType,
     updated_at: new Date().toISOString(),
   };
 
@@ -179,6 +199,24 @@ export async function createDeliveryUser(payload) {
 }
 
 /**
+ * Alternar estado activo / inactivo del repartidor
+ */
+export async function toggleDeliveryStaffActive(staffId, currentStatus) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      is_active: !currentStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", staffId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Eliminación segura con desvinculación foránea
  */
 export async function deleteDeliveryStaff(staffId) {
@@ -196,7 +234,13 @@ export async function deleteDeliveryStaff(staffId) {
       updated_at: now,
     })
     .eq("assigned_delivery_id", staffId)
-    .in("status", ["en_camino", "dispatched", "cerca", "nearby", "incidencia_transporte"]);
+    .in("status", [
+      "en_camino",
+      "cerca",
+      "dispatched",
+      "nearby",
+      "incidencia_transporte",
+    ]);
 
   if (routeError) throw routeError;
 

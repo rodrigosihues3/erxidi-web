@@ -5,14 +5,17 @@ export const ORDER_STATUS = {
   PREPARING: "en_preparacion",
   POOL: "por_asignar_repartidor",
   READY_FOR_DELIVERY: "por_asignar_repartidor",
+  ASSIGNED: "asignado",
   DISPATCHED: "en_camino",
   NEARBY: "cerca",
+  ARRIVED: "en_destino",
   DELIVERED: "entregado",
   INCIDENT: "incidencia_transporte",
   CANCELLED: "cancelado",
 };
 
 export const ORDER_STATUS_LABELS = {
+  recibido: "Recibido",
   received: "Recibido",
   pending: "Pendiente",
   pendiente_pago: "Pendiente de pago",
@@ -20,10 +23,13 @@ export const ORDER_STATUS_LABELS = {
   preparing: "En preparación",
   en_preparacion: "En preparación",
   por_asignar_repartidor: "Por asignar repartidor",
+  asignado: "Asignado",
   dispatched: "En camino",
   en_camino: "En camino",
   nearby: "Cerca",
   cerca: "Cerca",
+  en_destino: "En destino",
+  arrived: "En destino",
   incidencia_transporte: "Incidencia en reparto",
   delivered: "Entregado",
   entregado: "Entregado",
@@ -39,6 +45,17 @@ const ORDER_SELECT = `
   incident_reason, incident_comment,
   profiles:customer_id (
     id, dni, first_name, paternal_surname, maternal_surname, email, phone
+  ),
+  delivery_profile:assigned_delivery_id (
+    id, first_name, paternal_surname, phone, delivery_type
+  ),
+  order_items (
+    id, quantity, unit_price, subtotal,
+    product_variants:variant_id (
+      id, color, sku,
+      sizes:size_id ( name ),
+      products:product_id ( name )
+    )
   )
 `;
 
@@ -48,6 +65,7 @@ export async function listOrders({
   status = "all",
   invoiceType = "all",
   paymentMethod = "all",
+  deliveryType = "all",
   search = "",
 } = {}) {
   let query = supabase
@@ -58,12 +76,13 @@ export async function listOrders({
   if (status !== "all") query = query.eq("status", status);
   if (invoiceType !== "all") query = query.eq("invoice_type", invoiceType);
   if (paymentMethod !== "all") query = query.eq("payment_method", paymentMethod);
+  if (deliveryType !== "all") query = query.eq("delivery_type", deliveryType);
 
   const term = search.trim();
   if (term) {
     const safe = term.replace(/[%_,]/g, " ");
     query = query.or(
-      `order_number.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_email.ilike.%${safe}%,customer_phone.ilike.%${safe}%`,
+      `order_number.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_email.ilike.%${safe}%,customer_phone.ilike.%${safe}%,payment_gateway_tx_id.ilike.%${safe}%`,
     );
   }
 
@@ -129,8 +148,16 @@ const isPickupOrder = (order) =>
 // Siguientes estados que la dueña puede aplicar desde el panel
 export function getNextStatuses(order) {
   const status = normalizeOrderStatus(order?.status);
-  const { PREPARING, POOL, DISPATCHED, NEARBY, DELIVERED, INCIDENT, CANCELLED } =
-    ORDER_STATUS;
+  const {
+    PREPARING,
+    POOL,
+    ASSIGNED,
+    DISPATCHED,
+    NEARBY,
+    DELIVERED,
+    INCIDENT,
+    CANCELLED,
+  } = ORDER_STATUS;
 
   if (EARLY_STATUSES.includes(status)) return [PREPARING, CANCELLED];
   if (status === PREPARING) {
@@ -138,7 +165,7 @@ export function getNextStatuses(order) {
     // Con repartidor asignado a mano, él lo inicia desde su panel
     return order?.assigned_delivery_id ? [CANCELLED] : [POOL, CANCELLED];
   }
-  if ([POOL, DISPATCHED, NEARBY].includes(status)) return [CANCELLED];
+  if ([POOL, ASSIGNED, DISPATCHED, NEARBY].includes(status)) return [CANCELLED];
   if (status === INCIDENT) return [POOL, CANCELLED];
   return [];
 }
@@ -192,6 +219,26 @@ export async function verifyOrderPayment(orderId) {
 }
 
 /**
+ * Rechaza un voucher no válido o pago fraudulento.
+ */
+export async function rejectOrderPayment(orderId, reasonComment) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      payment_status: "failed",
+      status: "cancelado",
+      incident_comment: reasonComment || "Voucher o transferencia no verificada por administración",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("id, order_number, status, payment_status, updated_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Marca el empaque como listo y traslada la orden a la bolsa de repartidores ('por_asignar_repartidor').
  */
 export async function markOrderReadyForDelivery(orderId) {
@@ -233,7 +280,7 @@ export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_
 export async function getDeliveryStaff() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, first_name, paternal_surname, phone")
+    .select("id, first_name, paternal_surname, phone, delivery_type")
     .eq("role", "delivery");
 
   if (error) throw error;
@@ -260,19 +307,20 @@ export async function updateDeliveryStaff(id, payload) {
 }
 
 /**
- * Asigna (o quita) un repartidor a mano. Con repartidor, el pedido entra directo
- * a "Mis asignados"; al quitarlo de un pedido en ruta, vuelve a la bolsa.
+ * Asigna (o quita) un repartidor a mano. Con repartidor, el pedido queda como
+ * "asignado" y aparece en su pestaña "Mis Asignados"; al quitarlo de un pedido
+ * asignado o en ruta, vuelve a la bolsa.
  */
 export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
-  const { PREPARING, POOL, INCIDENT, DISPATCHED, NEARBY } = ORDER_STATUS;
+  const { PREPARING, POOL, ASSIGNED, INCIDENT, DISPATCHED, NEARBY } = ORDER_STATUS;
   const status = normalizeOrderStatus(currentStatus);
   let nextStatus = currentStatus;
 
   if (deliveryId) {
-    if ([...EARLY_STATUSES, POOL, INCIDENT].includes(status)) {
-      nextStatus = PREPARING;
+    if ([...EARLY_STATUSES, PREPARING, POOL, INCIDENT].includes(status)) {
+      nextStatus = ASSIGNED;
     }
-  } else if ([DISPATCHED, NEARBY].includes(status)) {
+  } else if ([ASSIGNED, DISPATCHED, NEARBY].includes(status)) {
     nextStatus = POOL;
   }
 
