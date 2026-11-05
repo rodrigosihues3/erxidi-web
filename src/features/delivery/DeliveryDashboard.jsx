@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Banknote,
   Pause,
+  QrCode,
   MapPin,
   Phone,
   Navigation,
@@ -26,6 +27,7 @@ import { useDeliveryOrders, MAX_ITEMS_PER_TRIP } from "./useDeliveryOrders";
 import { STATUS_CONFIG, CASH_METHODS } from "./deliveryStatus";
 import { calculateAzimuth, isRouteCompatible } from "../../utils/geoUtils";
 import DeliveryMapView from "./DeliveryMapView";
+import PaymentQrModal from "./PaymentQrModal";
 
 const FALLBACK_STORE = [-12.1215, -77.0298];
 const BAG_STATUSES = ["asignado", "en_camino", "cerca"];
@@ -324,6 +326,7 @@ function AssignedCard({
   onReturn,
   onChangeStatus,
   onOpenIncident,
+  onShowQr,
   isUpdating,
 }) {
   const status = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.asignado;
@@ -400,8 +403,18 @@ function AssignedCard({
           {inRoute && (
             <div>
               {isCash ? (
-                <div className="p-2 rounded bg-amber-100 text-amber-900 font-bold text-xs">
-                  Cobrar S/ {Number(order.total_amount || 0).toFixed(2)} en efectivo
+                <div className="space-y-2">
+                  <div className="p-2 rounded bg-amber-100 text-amber-900 font-bold text-xs">
+                    Cobrar S/ {Number(order.total_amount || 0).toFixed(2)} al entregar
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => onShowQr(order)}
+                    className="w-full"
+                  >
+                    <QrCode className="w-4 h-4 mr-1.5" />
+                    Cobrar con Yape / Plin
+                  </Button>
                 </div>
               ) : (
                 <span className="text-xs text-muted-foreground">
@@ -783,6 +796,8 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
   const [subTab, setSubTab] = useState("pool");
   const [openId, setOpenId] = useState(null);
   const [incidentOrder, setIncidentOrder] = useState(null);
+  const [qrOrder, setQrOrder] = useState(null);
+  const [mapOpen, setMapOpen] = useState(false);
 
   const isExpress = profile?.delivery_type === "express";
   const { signOut } = useAuth();
@@ -819,6 +834,7 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
 
   // Desde el mapa: abre el pedido en su pestaña
   const handleViewOrder = (order, kind) => {
+    setMapOpen(false);
     if (kind === "assigned") {
       setSubTab("mine");
       setOpenId(order.id);
@@ -918,17 +934,45 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
 
             <CapacityBar current={currentTripItemsCount} />
 
-            <div className="grid grid-cols-3 gap-1 p-1 rounded-button bg-surface-subtle border border-border">
+            <div className="rounded-card border border-border bg-surface-card overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setMapOpen((o) => !o)}
+                aria-expanded={mapOpen}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-semibold text-brand-primary outline-none"
+              >
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-brand-secondary" />
+                  Mapa de pedidos
+                </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-brand-secondary transition-transform ${
+                    mapOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+              {mapOpen && (
+                <div className="border-t border-border p-2">
+                  <DeliveryMapView
+                    assigned={assigned}
+                    poolOrders={poolOrders}
+                    store={base}
+                    onViewOrder={handleViewOrder}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-button bg-surface-subtle border border-border">
               {[
                 { key: "pool", label: "Bolsa", count: poolOrders.length },
                 { key: "mine", label: "Mis Asignados", count: assigned.length },
-                { key: "map", label: "Mapa" },
               ].map((t) => (
                 <button
                   key={t.key}
                   type="button"
                   onClick={() => setSubTab(t.key)}
-                  className={`py-2 px-1 text-xs font-semibold rounded-button transition-colors truncate ${
+                  className={`py-2 text-xs font-semibold rounded-button transition-colors ${
                     subTab === t.key
                       ? "bg-surface-card text-brand-primary border border-border"
                       : "text-brand-secondary"
@@ -959,13 +1003,6 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
                   Reintentar
                 </Button>
               </div>
-            ) : subTab === "map" ? (
-              <DeliveryMapView
-                assigned={assigned}
-                poolOrders={poolOrders}
-                store={base}
-                onViewOrder={handleViewOrder}
-              />
             ) : subTab === "pool" ? (
               poolOrders.length === 0 ? (
                 <p className="text-sm text-brand-secondary py-6 text-center">
@@ -1013,6 +1050,7 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
                   onReturn={returnToPool}
                   onChangeStatus={changeStatus}
                   onOpenIncident={setIncidentOrder}
+                  onShowQr={setQrOrder}
                   isUpdating={updatingId === order.id}
                 />
               ))
@@ -1043,6 +1081,12 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
         isSubmitting={Boolean(incidentOrder && updatingId === incidentOrder.id)}
         onClose={() => setIncidentOrder(null)}
         onSubmit={handleIncident}
+      />
+
+      <PaymentQrModal
+        key={qrOrder?.id ?? "none"}
+        order={qrOrder}
+        onClose={() => setQrOrder(null)}
       />
     </div>
   );

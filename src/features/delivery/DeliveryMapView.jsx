@@ -161,7 +161,7 @@ export default function DeliveryMapView({
   return (
     <div className="space-y-2">
       <div
-        className="relative z-0 h-[60vh] min-h-[320px] overflow-hidden rounded-card border border-border"
+        className="relative z-0 h-[45vh] min-h-[280px] overflow-hidden rounded-card border border-border"
         style={{ isolation: "isolate" }}
       >
         <MapContainer center={store} zoom={13} className="h-full w-full">
