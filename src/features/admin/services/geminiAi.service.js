@@ -301,7 +301,7 @@ export async function processStudioPhoto({
     const safetyError = new Error("RESTRICCION_COPYRIGHT");
     safetyError.code = "SAFETY_RESTRICTION";
     safetyError.details =
-      "La prenda contiene ilustraciones, logotipos o elementos protegidos por derechos de autor o marcas comerciales (copyright). Por políticas de propiedad intelectual, no es posible generar una toma sintética de estudio.";
+      "La prenda contiene ilustraciones, personajes o marcas comerciales con derechos de autor protegidos (copyright). Por políticas de propiedad intelectual de Google, no es posible generar una toma sintética de estudio.";
     throw safetyError;
   }
 

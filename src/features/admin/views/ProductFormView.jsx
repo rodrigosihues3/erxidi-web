@@ -413,7 +413,7 @@ export default function ProductFormView() {
         : [payloadFiles];
       if (filesArray.length === 0) return;
 
-      const targetColor = activeColor || availableColors[0] || "Blanco";
+      const targetColor = activeColor || (availableColors.length > 0 ? availableColors[0] : "Blanco");
       const uploadedEntries = [];
 
       for (let i = 0; i < filesArray.length; i++) {
@@ -449,8 +449,56 @@ export default function ProductFormView() {
         setForm((prev) => ({ ...prev, main_image_url: firstUploadedUrl }));
       }
 
-      // Sincronizar variantes locales del color activo
-      if (firstUploadedUrl) {
+      // 2. Verificar si el color ya existe en la matriz de variantes o autogenerarlo
+      const colorAlreadyExists = variants.some(
+        (v) => v.color.toLowerCase() === targetColor.toLowerCase(),
+      );
+
+      let updatedVariants = [...variants];
+
+      if (!colorAlreadyExists) {
+        // Filtrar tallas aplicables al público objetivo si existen, o tomar todas
+        const availableSizes = deps.sizes || [];
+        const applicableSizes = availableSizes.filter((s) => {
+          if (s.is_active === false) return false;
+          if (s.target_genders && form.target_gender) {
+            return s.target_genders.includes(form.target_gender);
+          }
+          return true;
+        });
+
+        const sizesToGenerate =
+          applicableSizes.length > 0 ? applicableSizes : availableSizes;
+
+        // Determinar color hexadecimal por defecto (Blanco -> #FFFFFF, Negro -> #000000, etc.)
+        const defaultHex =
+          targetColor.toLowerCase() === "blanco" ? "#FFFFFF" : "#1E293B";
+
+        // Prefijo SKU
+        const namePrefix = (form.name || "PRD")
+          .slice(0, 3)
+          .toUpperCase()
+          .replace(/[^A-Z]/g, "X");
+        const colorPrefix = targetColor
+          .slice(0, 3)
+          .toUpperCase()
+          .replace(/[^A-Z]/g, "C");
+
+        const newVariantsForColor = sizesToGenerate.map((size, idx) => ({
+          size_id: size.id,
+          color: targetColor,
+          color_hex: defaultHex,
+          stock: 0,
+          sku: `${colorPrefix}-${size.name}-${Math.floor(10000 + Math.random() * 90000)}-${idx + 1}`,
+          image_url: firstUploadedUrl,
+          is_active: true,
+        }));
+
+        updatedVariants = [...updatedVariants, ...newVariantsForColor];
+        setVariants(updatedVariants);
+        setActiveColor(targetColor);
+      } else {
+        // Si ya existía el color, simplemente sincronizar image_url en sus variantes
         setVariants((prev) =>
           prev.map((v) =>
             v.color.toLowerCase() === targetColor.toLowerCase()

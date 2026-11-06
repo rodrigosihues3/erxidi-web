@@ -426,7 +426,8 @@ CREATE TABLE IF NOT EXISTS "public"."categories" (
     "display_order" smallint DEFAULT 0 NOT NULL,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
-    "parent_id" bigint
+    "parent_id" bigint,
+    "target_genders" "text"[] DEFAULT ARRAY['hombre'::"text", 'mujer'::"text", 'nino'::"text", 'nina'::"text"]
 );
 
 

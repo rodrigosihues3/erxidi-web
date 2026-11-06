@@ -47,6 +47,8 @@ export default function AiPhotoStudioModal({
   const [copyrightAlert, setCopyrightAlert] = useState(null);
   const [modalError, setModalError] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isCopyrightBlocked, setIsCopyrightBlocked] = useState(false);
+  const [isAlertVisible, setIsAlertVisible] = useState(true);
   const [processingStep, setProcessingStep] = useState(0);
   const [studioVersions, setStudioVersions] = useState([]);
   const [activeStudioVersion, setActiveStudioVersion] = useState(null);
@@ -88,28 +90,23 @@ export default function AiPhotoStudioModal({
 
   // Reset de estados al abrir modal con un archivo nuevo
   useEffect(() => {
-    if (isOpen && file) {
-      originalFileRef.current = file;
+    if (isOpen) {
       setIsExpanded(false);
       setPerspective("frontal");
       setIsGenerating(false);
       setProcessingStep(0);
       setStudioVersions([]);
-      setActiveStudioVersion({
-        id: "original",
-        previewUrl: originalUrl,
-        label: "Foto original",
-        isOriginal: true,
-        file: file,
-      });
-      setIsMultiSelect(false);
-      setSelectedIds(new Set());
+      setActiveStudioVersion(null);
       setApproving(false);
       setValidationResult(null);
       setCopyrightAlert(null);
+      setIsCopyrightBlocked(false);
+      setIsAlertVisible(true);
       setModalError(null);
+      setIsMultiSelect(false);
+      setSelectedIds(new Set());
     }
-  }, [isOpen, file, originalUrl]);
+  }, [isOpen, file]);
 
   // Guardarraíl: validación de prenda y discrepancia de categoría
   useEffect(() => {
@@ -175,7 +172,7 @@ export default function AiPhotoStudioModal({
   if (!isOpen || !file) return null;
 
   async function handleGenerateWithAi() {
-    if (copyrightAlert) return;
+    if (isCopyrightBlocked) return;
     if (validationResult && !validationResult.isValid) return;
 
     setIsGenerating(true);
@@ -217,13 +214,15 @@ export default function AiPhotoStudioModal({
       if (
         err.code === "SAFETY_RESTRICTION" ||
         err.message === "RESTRICCION_COPYRIGHT" ||
-        err.message?.includes("imagen generada") ||
-        err.message?.includes("SAFETY")
+        err.message?.includes("SAFETY") ||
+        err.message?.includes("imagen generada")
       ) {
+        setIsCopyrightBlocked(true);
+        setIsAlertVisible(true);
         setCopyrightAlert({
           details:
             err.details ||
-            "La prenda contiene ilustraciones, logotipos o elementos protegidos por derechos de autor o marcas registradas. No es posible generar la versión de estudio sintética.",
+            "La prenda contiene ilustraciones o marcas protegidas por derechos de autor. No es posible generar la versión de estudio sintética.",
         });
         setModalError(null);
       } else {
@@ -401,9 +400,22 @@ export default function AiPhotoStudioModal({
         ========================================================= */
         <div className="max-w-xl w-full bg-white rounded-card p-6 shadow-2xl space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-border">
-            <h3 className="text-sm font-bold text-brand-primary">
-              Previsualización de Fotografía ({colorName || "Prenda"})
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-brand-primary">
+                Previsualización de Fotografía ({colorName || "Prenda"})
+              </h3>
+              {isCopyrightBlocked && !isAlertVisible && (
+                <button
+                  type="button"
+                  onClick={() => setIsAlertVisible(true)}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition-colors"
+                  title="Ver motivo de restricción"
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                  <span>Restricción de copyright</span>
+                </button>
+              )}
+            </div>
             <button
               type="button"
               onClick={onClose}
@@ -414,7 +426,7 @@ export default function AiPhotoStudioModal({
             </button>
           </div>
 
-          {copyrightAlert && (
+          {copyrightAlert && isAlertVisible && (
             <div className="w-full p-3.5 bg-amber-50 border border-amber-200 rounded-button text-xs text-amber-900 flex items-start gap-2.5 relative animate-in fade-in duration-200">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="flex-1 pr-6">
@@ -431,8 +443,9 @@ export default function AiPhotoStudioModal({
               </div>
               <button
                 type="button"
-                onClick={() => setCopyrightAlert(null)}
+                onClick={() => setIsAlertVisible(false)}
                 className="text-amber-500 hover:text-amber-800 absolute top-3 right-3"
+                title="Ocultar advertencia"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -479,7 +492,7 @@ export default function AiPhotoStudioModal({
             <Button
               type="button"
               className={`bg-accent hover:bg-accent-hover text-white font-bold px-5 py-2.5 text-xs shadow-sm ${
-                copyrightAlert ? "ring-2 ring-accent ring-offset-2" : ""
+                isCopyrightBlocked ? "ring-2 ring-accent ring-offset-2 animate-pulse" : ""
               }`}
               onClick={handleSaveOriginal}
               disabled={approving}
@@ -493,7 +506,7 @@ export default function AiPhotoStudioModal({
               disabled={
                 approving ||
                 isValidating ||
-                Boolean(copyrightAlert) ||
+                isCopyrightBlocked ||
                 (validationResult && !validationResult.isValid)
               }
             >
@@ -514,6 +527,17 @@ export default function AiPhotoStudioModal({
               <h3 className="text-sm font-bold text-brand-primary">
                 Estudio Fotográfico IA · ERXIDI ({colorName || "Prenda"})
               </h3>
+              {isCopyrightBlocked && !isAlertVisible && (
+                <button
+                  type="button"
+                  onClick={() => setIsAlertVisible(true)}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition-colors"
+                  title="Ver motivo de restricción"
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                  <span>Restricción de copyright</span>
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -526,7 +550,7 @@ export default function AiPhotoStudioModal({
           </div>
 
           {/* Alerta Superior de Ancho Completo para Rechazos de Copyright */}
-          {copyrightAlert && (
+          {copyrightAlert && isAlertVisible && (
             <div className="w-full p-3.5 bg-amber-50 border border-amber-200 rounded-button text-xs text-amber-900 flex items-start gap-2.5 relative animate-in fade-in duration-200 shrink-0">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="flex-1 pr-6">
@@ -544,8 +568,9 @@ export default function AiPhotoStudioModal({
               </div>
               <button
                 type="button"
-                onClick={() => setCopyrightAlert(null)}
+                onClick={() => setIsAlertVisible(false)}
                 className="text-amber-500 hover:text-amber-800 absolute top-3 right-3"
+                title="Ocultar advertencia"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -633,7 +658,7 @@ export default function AiPhotoStudioModal({
                       <button
                         key={p.id}
                         type="button"
-                        disabled={isGenerating || Boolean(copyrightAlert)}
+                        disabled={isGenerating || isCopyrightBlocked}
                         onClick={() => setPerspective(p.id)}
                         className={`px-3 py-2 rounded-button text-xs font-semibold border flex items-center transition-all ${
                           selected
@@ -648,36 +673,34 @@ export default function AiPhotoStudioModal({
                   })}
                 </div>
 
-                <div className="mt-3">
-                  <Button
-                    type="button"
-                    disabled={
-                      isValidating ||
-                      Boolean(copyrightAlert) ||
-                      (validationResult && !validationResult.isValid) ||
-                      isGenerating
-                    }
-                    onClick={handleGenerateWithAi}
-                    className="w-full bg-brand-primary hover:bg-brand-primary/90 text-white font-bold py-2.5 flex items-center justify-center gap-2 text-xs transition-all disabled:opacity-50"
-                  >
-                    {isGenerating ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-white" />
-                        <span>Transformando en Estudio IA...</span>
-                      </>
-                    ) : isValidating ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-slate-300" />
-                        <span>Validando prenda textil...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4" />
-                        <span>Editar con IA</span>
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  disabled={
+                    isValidating ||
+                    isGenerating ||
+                    isCopyrightBlocked ||
+                    (validationResult && !validationResult.isValid)
+                  }
+                  onClick={handleGenerateWithAi}
+                  className="w-full mt-3 bg-brand-primary hover:bg-slate-800 text-white font-bold py-2.5 flex items-center justify-center gap-2 text-xs shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed border border-brand-primary/30"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                      <span>Transformando en Estudio IA...</span>
+                    </>
+                  ) : isCopyrightBlocked ? (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-amber-400" />
+                      <span>Generación bloqueada por copyright</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-accent" />
+                      <span>Editar con IA</span>
+                    </>
+                  )}
+                </Button>
               </div>
 
               {/* Grilla de Versiones (Siempre incluye Foto Original en #1) */}
@@ -772,7 +795,7 @@ export default function AiPhotoStudioModal({
               <Button
                 type="button"
                 className={`bg-accent hover:bg-accent-hover text-white font-bold px-5 py-2.5 text-xs shadow-sm ${
-                  copyrightAlert
+                  isCopyrightBlocked
                     ? "ring-2 ring-accent ring-offset-2 ring-offset-white animate-pulse"
                     : ""
                 }`}
@@ -783,7 +806,7 @@ export default function AiPhotoStudioModal({
               </Button>
               <Button
                 type="button"
-                className="bg-brand-primary text-white font-bold px-5 py-2 text-xs"
+                className="bg-brand-primary hover:bg-slate-800 text-white font-bold px-5 py-2.5 text-xs shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 onClick={handleApproveSelection}
                 disabled={
                   isGenerating ||
