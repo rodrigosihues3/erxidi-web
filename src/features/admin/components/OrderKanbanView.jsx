@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  ClipboardList,
+  ArrowUpRight,
   ArrowRight,
   Calendar,
   Zap,
@@ -296,11 +296,10 @@ export default function OrderKanbanView({
                                 onClick={() =>
                                   onNavigateDetail(order.order_number)
                                 }
-                                className="p-1 text-slate-800 hover:text-black hover:bg-slate-200/60 rounded transition-colors inline-flex items-center gap-0.5"
-                                title="Ver detalle completo"
+                                className="p-1 text-slate-400 hover:text-brand-primary hover:bg-slate-100 rounded transition-colors"
+                                title="Ver detalle completo del pedido"
                               >
-                                <ClipboardList className="w-4 h-4" />
-                                <ArrowRight className="w-3 h-3 -ml-0.5" />
+                                <ArrowUpRight className="w-4 h-4" />
                               </button>
                             </div>
                             <p className="text-[10px] text-slate-500 font-mono mt-0.5">

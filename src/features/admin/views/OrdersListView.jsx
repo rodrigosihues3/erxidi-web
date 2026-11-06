@@ -7,7 +7,7 @@ import {
   RefreshCw,
   RotateCcw,
   X,
-  ClipboardList,
+  ArrowUpRight,
   Eye,
   ChevronLeft,
   ChevronRight,
@@ -106,6 +106,7 @@ export default function OrdersListView() {
   const [statusFilter, setStatusFilter] = useState("todos");
   const [shippingFilter, setShippingFilter] = useState("todos");
   const [paymentFilter, setPaymentFilter] = useState("todos");
+  const [dateFilter, setDateFilter] = useState("todos"); // "todos" | "hoy" | "7dias" | "30dias" | "mes"
   const [viewMode, setViewMode] = useState("kanban"); // 'kanban' | 'cards' | 'table'
   const [refreshTick, setRefreshTick] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -197,15 +198,17 @@ export default function OrdersListView() {
       searchQuery.trim() !== "" ||
       statusFilter !== "todos" ||
       shippingFilter !== "todos" ||
-      paymentFilter !== "todos"
+      paymentFilter !== "todos" ||
+      dateFilter !== "todos"
     );
-  }, [searchQuery, statusFilter, shippingFilter, paymentFilter]);
+  }, [searchQuery, statusFilter, shippingFilter, paymentFilter, dateFilter]);
 
   function handleClearFilters() {
     setSearchQuery("");
     setStatusFilter("todos");
     setShippingFilter("todos");
     setPaymentFilter("todos");
+    setDateFilter("todos");
     setPage(1);
   }
 
@@ -238,8 +241,56 @@ export default function OrdersListView() {
   }, [data]);
 
   const displayedOrders = useMemo(() => {
-    return localOrders;
-  }, [localOrders]);
+    if (!dateFilter || dateFilter === "todos") return localOrders;
+
+    const now = new Date();
+
+    return localOrders.filter((order) => {
+      if (!order.created_at) return false;
+      const orderDate = new Date(order.created_at);
+      if (Number.isNaN(orderDate.getTime())) return false;
+
+      if (dateFilter === "hoy") {
+        const startOfToday = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          0,
+          0,
+          0,
+          0,
+        );
+        return orderDate >= startOfToday;
+      }
+
+      if (dateFilter === "7dias") {
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        return orderDate >= sevenDaysAgo;
+      }
+
+      if (dateFilter === "30dias") {
+        const thirtyDaysAgo = new Date(
+          now.getTime() - 30 * 24 * 60 * 60 * 1000,
+        );
+        return orderDate >= thirtyDaysAgo;
+      }
+
+      if (dateFilter === "mes") {
+        const startOfMonth = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          1,
+          0,
+          0,
+          0,
+          0,
+        );
+        return orderDate >= startOfMonth;
+      }
+
+      return true;
+    });
+  }, [localOrders, dateFilter]);
 
   useEffect(() => {
     let active = true;
@@ -588,7 +639,7 @@ export default function OrdersListView() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
         {/* Izquierda: Título de sección */}
         <div>
-          <h1 className="text-xl font-black tracking-tight text-brand-primary">
+          <h1 className="text-2xl font-black tracking-tight text-brand-primary">
             Pedidos
           </h1>
         </div>
@@ -600,11 +651,10 @@ export default function OrdersListView() {
             <button
               type="button"
               onClick={() => setViewMode("kanban")}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${
-                viewMode === "kanban"
-                  ? "bg-white text-brand-primary shadow-xs"
-                  : "text-slate-600 hover:text-brand-primary"
-              }`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${viewMode === "kanban"
+                ? "bg-white text-brand-primary shadow-xs"
+                : "text-slate-600 hover:text-brand-primary"
+                }`}
               title="Vista de tablero por etapas"
             >
               <Columns3 className="w-3.5 h-3.5" />
@@ -614,11 +664,10 @@ export default function OrdersListView() {
             <button
               type="button"
               onClick={() => setViewMode("cards")}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${
-                viewMode === "cards" || viewMode === "grid"
-                  ? "bg-white text-brand-primary shadow-xs"
-                  : "text-slate-600 hover:text-brand-primary"
-              }`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${viewMode === "cards" || viewMode === "grid"
+                ? "bg-white text-brand-primary shadow-xs"
+                : "text-slate-600 hover:text-brand-primary"
+                }`}
               title="Vista en tarjetas cuadrícula"
             >
               <LayoutGrid className="w-3.5 h-3.5" />
@@ -628,11 +677,10 @@ export default function OrdersListView() {
             <button
               type="button"
               onClick={() => setViewMode("table")}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${
-                viewMode === "table"
-                  ? "bg-white text-brand-primary shadow-xs"
-                  : "text-slate-600 hover:text-brand-primary"
-              }`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${viewMode === "table"
+                ? "bg-white text-brand-primary shadow-xs"
+                : "text-slate-600 hover:text-brand-primary"
+                }`}
               title="Vista en tabla o filas compactas"
             >
               <LayoutList className="w-3.5 h-3.5" />
@@ -673,6 +721,19 @@ export default function OrdersListView() {
 
         {/* Derecha: Desplegables y Limpiador de Filtros */}
         <div className="flex flex-wrap items-center gap-2 justify-end">
+          {/* Botón dinámico: Limpiar Filtros con texto completo */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="h-9 px-3 inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-button shadow-xs transition-colors animate-in fade-in duration-150"
+              title="Restablecer todos los filtros y búsqueda"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Limpiar filtros</span>
+            </button>
+          )}
+
           {/* Filtro por Estado de Pedido */}
           <select
             value={statusFilter}
@@ -711,18 +772,18 @@ export default function OrdersListView() {
             <option value="contraentrega">Contraentrega</option>
           </select>
 
-          {/* Botón dinámico: Limpiar Filtros con texto completo */}
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={handleClearFilters}
-              className="h-9 px-3 inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-button shadow-xs transition-colors animate-in fade-in duration-150"
-              title="Restablecer todos los filtros y búsqueda"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Limpiar filtros</span>
-            </button>
-          )}
+          {/* Filtro por Rango de Fechas */}
+          <select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+            className="h-9 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary shadow-xs"
+          >
+            <option value="todos">Fecha: Todas</option>
+            <option value="hoy">Hoy</option>
+            <option value="7dias">Últimos 7 días</option>
+            <option value="30dias">Últimos 30 días</option>
+            <option value="mes">Este mes</option>
+          </select>
         </div>
       </div>
 
@@ -737,7 +798,7 @@ export default function OrdersListView() {
         </div>
       ) : viewMode === "kanban" ? (
         <OrderKanbanView
-          orders={localOrders}
+          orders={displayedOrders}
           recentOrderIds={recentOrderIds}
           onVerifyPayment={(order) => setPaymentModal({ isOpen: true, order })}
           onSendToPreparation={handleStartPreparing}
@@ -770,13 +831,11 @@ export default function OrdersListView() {
             return (
               <Card
                 key={order.id}
-                className={`p-4 flex flex-col justify-between border border-border bg-surface-card hover:border-brand-primary/40 transition-colors ${
-                  isIncident ? "border-l-4 border-l-rose-500 bg-rose-50/20" : ""
-                } ${
-                  isRecent
+                className={`p-4 flex flex-col justify-between border border-border bg-surface-card hover:border-brand-primary/40 transition-colors ${isIncident ? "border-l-4 border-l-rose-500 bg-rose-50/20" : ""
+                  } ${isRecent
                     ? "ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] animate-pulse"
                     : ""
-                }`}
+                  }`}
               >
                 {/* Header Card */}
                 <div className="space-y-3">
@@ -797,11 +856,10 @@ export default function OrdersListView() {
                         onClick={() =>
                           navigate(`/admin/pedidos/${order.order_number}`)
                         }
-                        title="Ver detalle completo"
-                        className="p-1 text-brand-muted hover:text-brand-primary rounded"
+                        className="p-1 text-slate-400 hover:text-brand-primary hover:bg-slate-100 rounded transition-colors"
+                        title="Ver detalle completo del pedido"
                       >
-                        <ClipboardList className="w-3.5 h-3.5 inline" />
-                        <ArrowRight className="w-2.5 h-2.5 -ml-0.5 inline" />
+                        <ArrowUpRight className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -921,11 +979,10 @@ export default function OrdersListView() {
                   return (
                     <tr
                       key={order.id}
-                      className={`hover:bg-surface-subtle/50 transition-colors ${
-                        isIncident
-                          ? "bg-rose-50/70 border-l-4 border-l-rose-500"
-                          : ""
-                      } ${isRecent ? "bg-emerald-50/40 animate-pulse" : ""}`}
+                      className={`hover:bg-surface-subtle/50 transition-colors ${isIncident
+                        ? "bg-rose-50/70 border-l-4 border-l-rose-500"
+                        : ""
+                        } ${isRecent ? "bg-emerald-50/40 animate-pulse" : ""}`}
                     >
                       <td className="p-4">
                         <div className="flex items-center gap-1.5">
