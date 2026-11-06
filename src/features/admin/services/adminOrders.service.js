@@ -52,7 +52,7 @@ const ORDER_SELECT = `
     product_variants:variant_id (
       id, color, sku,
       sizes:size_id ( name ),
-      products:product_id ( name )
+      products:product_id ( name, main_image_url )
     )
   )
 `;

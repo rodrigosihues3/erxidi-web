@@ -124,7 +124,7 @@ export default function OrdersListView() {
   });
 
   const statusApiValue = useMemo(() => {
-    if (statusFilter === "todos") return "all";
+    if (viewMode === "kanban" || statusFilter === "todos") return "all";
     if (statusFilter === "por_validar")
       return ["received", "recibido", "pendiente_pago", "pending"];
     if (statusFilter === "en_preparacion")
@@ -145,7 +145,7 @@ export default function OrdersListView() {
     if (statusFilter === "cancelado")
       return ["cancelado", "cancelled"];
     return statusFilter;
-  }, [statusFilter]);
+  }, [statusFilter, viewMode]);
 
   const shippingApiValue = useMemo(() => {
     if (shippingFilter === "todos") return "all";
@@ -196,12 +196,28 @@ export default function OrdersListView() {
   const hasActiveFilters = useMemo(() => {
     return (
       searchQuery.trim() !== "" ||
-      statusFilter !== "todos" ||
+      (viewMode !== "kanban" && statusFilter !== "todos") ||
       shippingFilter !== "todos" ||
       paymentFilter !== "todos" ||
       dateFilter !== "todos"
     );
-  }, [searchQuery, statusFilter, shippingFilter, paymentFilter, dateFilter]);
+  }, [
+    searchQuery,
+    statusFilter,
+    shippingFilter,
+    paymentFilter,
+    dateFilter,
+    viewMode,
+  ]);
+
+  const FINALIZED_STATUSES = [
+    "entregado",
+    "delivered",
+    "cancelado",
+    "cancelled",
+    "incidencia_transporte",
+  ];
+  const FINALIZED_LIMIT = 10;
 
   function handleClearFilters() {
     setSearchQuery("");
@@ -291,6 +307,23 @@ export default function OrdersListView() {
       return true;
     });
   }, [localOrders, dateFilter]);
+
+  const { kanbanOrders, finalizedTotal } = useMemo(() => {
+    const live = [];
+    const finalized = [];
+    displayedOrders.forEach((o) =>
+      (FINALIZED_STATUSES.includes(o.status) ? finalized : live).push(o),
+    );
+    finalized.sort(
+      (a, b) =>
+        new Date(b.updated_at || b.created_at) -
+        new Date(a.updated_at || a.created_at),
+    );
+    return {
+      kanbanOrders: [...live, ...finalized.slice(0, FINALIZED_LIMIT)],
+      finalizedTotal: finalized.length,
+    };
+  }, [displayedOrders]);
 
   useEffect(() => {
     let active = true;
@@ -734,20 +767,22 @@ export default function OrdersListView() {
             </button>
           )}
 
-          {/* Filtro por Estado de Pedido */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary shadow-xs"
-          >
-            <option value="todos">Estado: Todos</option>
-            <option value="por_validar">Por Validar</option>
-            <option value="en_preparacion">En Preparación</option>
-            <option value="en_bolsa">En Bolsa</option>
-            <option value="en_ruta">En Ruta</option>
-            <option value="finalizado">Finalizados</option>
-            <option value="cancelado">Cancelados</option>
-          </select>
+          {/* Filtro por Estado de Pedido (oculto en Kanban: las columnas ya lo representan) */}
+          {viewMode !== "kanban" && (
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-9 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary shadow-xs"
+            >
+              <option value="todos">Estado: Todos</option>
+              <option value="por_validar">Por Validar</option>
+              <option value="en_preparacion">En Preparación</option>
+              <option value="en_bolsa">En Bolsa</option>
+              <option value="en_ruta">En Ruta</option>
+              <option value="finalizado">Finalizados</option>
+              <option value="cancelado">Cancelados</option>
+            </select>
+          )}
 
           {/* Filtro por Tipo de Despacho */}
           <select
@@ -798,7 +833,9 @@ export default function OrdersListView() {
         </div>
       ) : viewMode === "kanban" ? (
         <OrderKanbanView
-          orders={displayedOrders}
+          orders={kanbanOrders}
+          finalizedTotal={finalizedTotal}
+          onViewHistory={() => setViewMode("table")}
           recentOrderIds={recentOrderIds}
           onVerifyPayment={(order) => setPaymentModal({ isOpen: true, order })}
           onSendToPreparation={handleStartPreparing}

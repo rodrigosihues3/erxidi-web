@@ -1,13 +1,13 @@
-import { useState } from "react";
 import {
-  ArrowUpRight,
   ArrowRight,
-  Calendar,
+  CalendarClock,
+  ChevronRight,
   Zap,
   Store,
-  Copy,
-  Check,
-  AlertOctagon,
+  UserX,
+  CircleCheck,
+  Clock,
+  History,
 } from "lucide-react";
 import Badge from "../../../components/ui/Badge";
 import Button from "../../../components/ui/Button";
@@ -17,19 +17,29 @@ const KANBAN_COLUMNS = [
     id: "por_validar",
     title: "Por Validar",
     statuses: ["recibido", "received", "pendiente_pago", "pending"],
-    headerBg: "bg-slate-700",
+    bar: "bg-status-warning-text",
+    headerBg: "bg-status-warning-bg",
+    dot: "bg-status-warning-text",
+    count:
+      "bg-status-warning-bg text-status-warning-text border-status-warning-border",
   },
   {
     id: "en_preparacion",
     title: "En Preparación",
     statuses: ["en_preparacion", "preparing"],
-    headerBg: "bg-blue-600",
+    bar: "bg-stage-prep-dot",
+    headerBg: "bg-stage-prep-bg",
+    dot: "bg-stage-prep-dot",
+    count: "bg-stage-prep-bg text-stage-prep-dot border-stage-prep-border",
   },
   {
     id: "en_bolsa",
     title: "En Bolsa",
     statuses: ["por_asignar_repartidor", "asignado"],
-    headerBg: "bg-amber-600",
+    bar: "bg-brand-muted",
+    headerBg: "bg-surface-subtle",
+    dot: "bg-brand-muted",
+    count: "bg-surface-subtle text-brand-secondary border-border",
   },
   {
     id: "en_ruta",
@@ -42,7 +52,10 @@ const KANBAN_COLUMNS = [
       "en_destino",
       "arrived",
     ],
-    headerBg: "bg-indigo-600",
+    bar: "bg-stage-route-dot",
+    headerBg: "bg-stage-route-bg",
+    dot: "bg-stage-route-dot",
+    count: "bg-stage-route-bg text-stage-route-dot border-stage-route-border",
   },
   {
     id: "finalizados",
@@ -54,9 +67,16 @@ const KANBAN_COLUMNS = [
       "cancelled",
       "incidencia_transporte",
     ],
-    headerBg: "bg-emerald-700",
+    bar: "bg-status-success-text",
+    headerBg: "bg-status-success-bg",
+    dot: "bg-status-success-text",
+    count:
+      "bg-status-success-bg text-status-success-text border-status-success-border",
   },
 ];
+
+const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000;
+const MAX_ITEMS_PREVIEW = 2;
 
 function money(value) {
   return new Intl.NumberFormat("es-PE", {
@@ -65,118 +85,195 @@ function money(value) {
   }).format(Number(value || 0));
 }
 
-function formatConciseDate(dateStr) {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${day}/${month} · ${hours}:${minutes}`;
+function getAgeMs(dateStr) {
+  if (!dateStr) return null;
+  const ms = new Date(dateStr).getTime();
+  if (Number.isNaN(ms)) return null;
+  return Math.max(0, Date.now() - ms);
+}
+
+function formatRelativeAge(ageMs) {
+  if (ageMs === null) return "—";
+  const minutes = Math.floor(ageMs / 60000);
+  if (minutes < 1) return "Hace un momento";
+  if (minutes < 60) return `Hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Hace ${hours} h`;
+  return `Hace ${Math.floor(hours / 24)} d`;
+}
+
+function toTitleCase(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/(^|\s)([a-záéíóúñü])/g, (_, space, char) => space + char.toUpperCase());
 }
 
 function isRecentlyCreatedReceived(order) {
   const validStatuses = ["recibido", "received", "pendiente_pago", "pending"];
-  if (!validStatuses.includes(order.status) || !order.created_at) return false;
-  const createdMs = new Date(order.created_at).getTime();
-  if (Number.isNaN(createdMs)) return false;
-  return Date.now() - createdMs < 5 * 60 * 1000;
+  if (!validStatuses.includes(order.status)) return false;
+  const age = getAgeMs(order.created_at);
+  return age !== null && age < 5 * 60 * 1000;
 }
 
-function matchesDateFilter(order, dateFilter) {
-  if (!dateFilter || dateFilter === "all") return true;
-  const refDate = new Date(order.updated_at || order.created_at);
-  if (Number.isNaN(refDate.getTime())) return true;
-
-  const now = new Date();
-  if (dateFilter === "today") {
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    return refDate >= startOfToday;
-  }
-  if (dateFilter === "week") {
-    const startOfWeek = new Date(now);
-    const day = startOfWeek.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    startOfWeek.setDate(startOfWeek.getDate() - diff);
-    startOfWeek.setHours(0, 0, 0, 0);
-    return refDate >= startOfWeek;
-  }
-  if (dateFilter === "month") {
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    return refDate >= startOfMonth;
-  }
-  return true;
-}
-
-function getNormalizedPaymentLabel(method) {
-  if (method === "yape_plin" || method === "transferencia") {
-    return "Pago manual";
-  }
-  if (method === "contraentrega" || method === "efectivo") {
-    return "Contraentrega";
-  }
-  if (method === "culqi_gateway") {
-    return "Culqi (Online)";
-  }
+function getPaymentMethodLabel(method) {
+  if (method === "yape_plin" || method === "transferencia") return "Pago manual";
+  if (method === "contraentrega" || method === "efectivo") return "Contraentrega";
+  if (method === "culqi_gateway" || method === "tarjeta") return "Culqi (Online)";
   return method || "—";
+}
+
+function PaymentBadges({ order }) {
+  const isCashOnDelivery =
+    order.payment_method === "contraentrega" ||
+    order.payment_method === "efectivo";
+  const isPaid = order.payment_status === "paid";
+  const isPending = order.payment_status === "pending_verification";
+
+  return (
+    <>
+      <Badge
+        variant="neutral"
+        className="rounded-sm text-[11px] px-2 py-0.5 font-medium"
+      >
+        {getPaymentMethodLabel(order.payment_method)}
+      </Badge>
+      {!isCashOnDelivery && isPaid && (
+        <Badge
+          variant="success"
+          icon={CircleCheck}
+          className="rounded-sm text-[11px] px-2 py-0.5 font-medium"
+        >
+          Validado
+        </Badge>
+      )}
+      {!isCashOnDelivery && isPending && (
+        <Badge
+          variant="warning"
+          icon={Clock}
+          className="rounded-sm text-[11px] px-2 py-0.5 font-medium"
+        >
+          Pendiente
+        </Badge>
+      )}
+    </>
+  );
+}
+
+const DELIVERY_STYLES = {
+  programado: {
+    label: "Programado",
+    icon: CalendarClock,
+    classes:
+      "bg-delivery-scheduled-bg text-delivery-scheduled-text border-delivery-scheduled-border",
+  },
+  scheduled: {
+    label: "Programado",
+    icon: CalendarClock,
+    classes:
+      "bg-delivery-scheduled-bg text-delivery-scheduled-text border-delivery-scheduled-border",
+  },
+  express: {
+    label: "Express",
+    icon: Zap,
+    classes:
+      "bg-delivery-express-bg text-delivery-express-text border-delivery-express-border",
+  },
+  recojo: {
+    label: "Recojo",
+    icon: Store,
+    classes: "bg-surface-subtle text-brand-secondary border-border",
+  },
+  pickup: {
+    label: "Recojo",
+    icon: Store,
+    classes: "bg-surface-subtle text-brand-secondary border-border",
+  },
+};
+
+const DELIVERY_FALLBACK_CLASSES =
+  "bg-surface-subtle text-brand-secondary border-border";
+
+function CardRevealFooter() {
+  return (
+    <div
+      aria-hidden="true"
+      className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-visible:grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
+    >
+      <div className="overflow-hidden">
+        <div className="h-7 flex items-center justify-center gap-1 bg-brand-primary text-white text-xs font-semibold">
+          <span>Ver pedido</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeliveryBadge({ type }) {
+  const raw = String(type || "");
+  const style = DELIVERY_STYLES[raw.toLowerCase()];
+  const Icon = style?.icon;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-sm border text-[11px] font-medium ${
+        style ? style.classes : DELIVERY_FALLBACK_CLASSES
+      }`}
+    >
+      {Icon && <Icon className="w-3 h-3 flex-shrink-0" aria-hidden="true" />}
+      {style ? style.label : raw || "—"}
+    </span>
+  );
+}
+
+function OrderItemSummary({ item }) {
+  const product = item.product_variants?.products;
+  const imageUrl = product?.main_image_url;
+
+  return (
+    <div className="flex items-start gap-2.5 mb-2 last:mb-0">
+      {imageUrl && (
+        <div className="w-10 shrink-0 aspect-[4/5] bg-slate-50 border border-border rounded-button overflow-hidden">
+          <img
+            src={imageUrl}
+            alt={product?.name || "Prenda"}
+            loading="lazy"
+            className="w-full h-full object-contain"
+          />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-brand-primary leading-snug break-words">
+          {product?.name || "Prenda"}
+          <span className="font-mono font-bold text-brand-secondary ml-1.5">
+            {item.quantity}x
+          </span>
+        </p>
+        <div className="flex flex-wrap items-center gap-1 mt-1">
+          <span className="text-xs px-1.5 py-0.5 rounded-sm bg-surface-subtle border border-border text-brand-primary capitalize">
+            {item.product_variants?.color || "—"}
+          </span>
+          <span className="text-xs font-mono px-1.5 py-0.5 rounded-sm bg-surface-subtle border border-border text-brand-primary">
+            {item.product_variants?.sizes?.name || "U"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function OrderKanbanView({
   orders = [],
   recentOrderIds = [],
-  dateFilter = "all",
+  finalizedTotal = 0,
   onVerifyPayment,
   onSendToPreparation,
   onSendToPool,
   onNavigateDetail,
+  onViewHistory,
   updatingOrderId,
   deliveryStaff = [],
 }) {
-  const [copiedId, setCopiedId] = useState(null);
-
-  function handleCopyOp(txId) {
-    if (!txId) return;
-    navigator.clipboard.writeText(txId);
-    setCopiedId(txId);
-    setTimeout(() => setCopiedId(null), 2000);
-  }
-
-  function renderPaymentBadge(method) {
-    const label = getNormalizedPaymentLabel(method);
-    return (
-      <Badge className="bg-slate-100 text-slate-800 border-slate-300 rounded-button text-[10px] font-semibold px-2 py-0.5">
-        {label}
-      </Badge>
-    );
-  }
-
-  function renderDeliveryBadge(type) {
-    const t = (type || "").toLowerCase();
-    if (t === "express") {
-      return (
-        <Badge className="bg-amber-50 text-amber-800 border-amber-200 rounded-button text-[10px] font-semibold px-2 py-0.5">
-          <Zap className="w-3 h-3 mr-1" /> Express
-        </Badge>
-      );
-    }
-    if (t === "pickup" || t === "recojo") {
-      return (
-        <Badge className="bg-slate-100 text-slate-700 border-slate-200 rounded-button text-[10px] font-semibold px-2 py-0.5">
-          <Store className="w-3 h-3 mr-1" /> Recojo
-        </Badge>
-      );
-    }
-    return (
-      <Badge className="bg-sky-50 text-sky-800 border-sky-200 rounded-button text-[10px] font-semibold px-2 py-0.5">
-        <Calendar className="w-3 h-3 mr-1" /> Programado
-      </Badge>
-    );
-  }
-
   function resolveDriverName(order) {
     if (order.delivery_name) return order.delivery_name;
     if (!order.assigned_delivery_id) return null;
@@ -190,6 +287,74 @@ export default function OrderKanbanView({
     return "Asignado";
   }
 
+  function handleCardKeyDown(e, order) {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onNavigateDetail(order.order_number);
+    }
+  }
+
+  function renderAction(col, order, isCashOnDelivery, isUpdating) {
+    if (col.id === "por_validar") {
+      if (isCashOnDelivery) {
+        return (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={isUpdating}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSendToPreparation(order.id);
+            }}
+            className="h-8 px-3 text-xs"
+          >
+            <span>A Preparación</span>
+            <ArrowRight className="w-3.5 h-3.5 ml-1" />
+          </Button>
+        );
+      }
+      return (
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={isUpdating}
+          onClick={(e) => {
+            e.stopPropagation();
+            onVerifyPayment(order);
+          }}
+          className="h-8 px-3 text-xs"
+        >
+          <span>Validar pago</span>
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    if (col.id === "en_preparacion") {
+      return (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={isUpdating}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSendToPool(order);
+          }}
+          className="h-8 px-3 text-xs"
+        >
+          <span>A Bolsa</span>
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    return null;
+  }
+
   return (
     <div className="overflow-x-auto h-[calc(100vh-175px)]">
       <div className="grid grid-cols-5 gap-4 min-w-[1250px] h-full pb-2">
@@ -200,15 +365,11 @@ export default function OrderKanbanView({
             col.id === "en_ruta" ||
             col.id === "finalizados";
 
-          const rawOrders = orders.filter((o) =>
+          const columnOrders = orders.filter((o) =>
             col.statuses.includes(o.status),
           );
 
-          const filteredOrders = isFinalizados
-            ? rawOrders.filter((o) => matchesDateFilter(o, dateFilter))
-            : rawOrders;
-
-          const sortedOrders = [...filteredOrders].sort((a, b) => {
+          const sortedOrders = [...columnOrders].sort((a, b) => {
             if (isFinalizados) {
               return (
                 new Date(b.updated_at || b.created_at) -
@@ -218,255 +379,182 @@ export default function OrderKanbanView({
             return new Date(a.created_at) - new Date(b.created_at);
           });
 
-          const visibleOrders = isFinalizados
-            ? sortedOrders.slice(0, 15)
-            : sortedOrders;
+          const totalCount = isFinalizados
+            ? Math.max(finalizedTotal, columnOrders.length)
+            : columnOrders.length;
 
           return (
-            <div key={col.id} className="flex flex-col h-full min-h-0">
-              {/* Header Sólido */}
-              <div
-                className={`h-11 px-3.5 flex items-center justify-between rounded-t-card text-white font-bold text-xs shadow-xs shrink-0 ${col.headerBg}`}
+            <section
+              key={col.id}
+              className="flex flex-col h-full min-h-0 bg-surface-subtle border border-border rounded-card overflow-hidden"
+            >
+              {/* Franja de etapa + cabecera tintada */}
+              <div className={`h-[3px] shrink-0 ${col.bar}`} aria-hidden="true" />
+              <header
+                className={`h-11 px-3.5 flex items-center justify-between shrink-0 border-b border-border ${col.headerBg}`}
               >
-                <span className="tracking-tight">{col.title}</span>
-                <span className="bg-white/20 text-white font-mono px-2 py-0.5 rounded-full text-[11px]">
-                  {filteredOrders.length}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2 h-2 rounded-full ${col.dot}`}
+                    aria-hidden="true"
+                  />
+                  <h2 className="text-xs font-bold tracking-tight text-brand-primary">
+                    {col.title}
+                  </h2>
+                </div>
+                <span
+                  className={`border font-mono px-2 py-0.5 rounded-badge text-[11px] ${col.count}`}
+                >
+                  {totalCount}
                 </span>
-              </div>
+              </header>
 
-              {/* Cuerpo de Tarjetas con Scroll Independiente */}
-              <div className="bg-surface-subtle border-x border-b border-border rounded-b-card p-2.5 flex-1 overflow-y-auto max-h-[calc(100vh-230px)] space-y-2.5 scrollbar-thin">
-                {visibleOrders.length === 0 ? (
-                  <div className="h-32 border border-dashed border-border rounded-card flex items-center justify-center text-[11px] text-brand-muted">
-                    Sin pedidos en esta etapa
-                  </div>
+              {/* Cuerpo con scroll independiente */}
+              <div className="p-2.5 flex-1 overflow-y-auto space-y-2.5 scrollbar-thin">
+                {sortedOrders.length === 0 ? (
+                  <p className="py-4 text-center text-[11px] text-brand-muted">
+                    Sin pedidos
+                  </p>
                 ) : (
-                  <>
-                    {visibleOrders.map((order) => {
-                      const isNewPulse =
-                        recentOrderIds.includes(order.id) ||
-                        isRecentlyCreatedReceived(order);
-                      const isIncident =
-                        order.status === "incidencia_transporte";
-                      const isUpdating = updatingOrderId === order.id;
+                  sortedOrders.map((order) => {
+                    const isNewPulse =
+                      recentOrderIds.includes(order.id) ||
+                      isRecentlyCreatedReceived(order);
+                    const isIncident = order.status === "incidencia_transporte";
+                    const isUpdating = updatingOrderId === order.id;
 
-                      const customerName =
-                        order.customer_name ||
-                        [
-                          order.profiles?.first_name,
-                          order.profiles?.paternal_surname,
-                        ]
-                          .filter(Boolean)
-                          .join(" ") ||
-                        "Cliente";
-                      const phone =
-                        order.customer_phone || order.profiles?.phone || "";
-                      const isCashOnDelivery =
-                        order.payment_method === "contraentrega" ||
-                        order.payment_method === "efectivo";
-                      const paymentBadge = renderPaymentBadge(
-                        order.payment_method,
-                      );
-                      const deliveryBadge = renderDeliveryBadge(
-                        order.delivery_type,
-                      );
-                      const driverName = resolveDriverName(order);
+                    const rawName =
+                      order.customer_name ||
+                      [
+                        order.profiles?.first_name,
+                        order.profiles?.paternal_surname,
+                      ]
+                        .filter(Boolean)
+                        .join(" ") ||
+                      "Cliente";
+                    const customerName = toTitleCase(rawName);
+                    const isCashOnDelivery =
+                      order.payment_method === "contraentrega" ||
+                      order.payment_method === "efectivo";
+                    const driverName = resolveDriverName(order);
 
-                      return (
-                        <div
-                          key={order.id}
-                          className={`bg-surface-card border border-border rounded-card shadow-xs overflow-hidden transition-all ${
-                            isNewPulse
-                              ? "ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] animate-pulse"
-                              : ""
-                          } ${
-                            isIncident
-                              ? "border-l-4 border-l-rose-500 bg-rose-50/20"
-                              : ""
-                          }`}
-                        >
-                          {/* Bloque A - Cabecera de la Card */}
-                          <div className="bg-slate-50 border-b border-border/80 px-3 py-2 rounded-t-card">
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono font-bold text-accent text-sm tracking-tight">
-                                #{order.order_number}
+                    const ageMs = getAgeMs(order.created_at);
+                    const isStale =
+                      !isFinalizados &&
+                      ageMs !== null &&
+                      ageMs > STALE_THRESHOLD_MS;
+
+                    const items = order.order_items || [];
+                    const visibleItems = items.slice(0, MAX_ITEMS_PREVIEW);
+                    const hiddenItems = items.length - visibleItems.length;
+                    const action = renderAction(
+                      col,
+                      order,
+                      isCashOnDelivery,
+                      isUpdating,
+                    );
+
+                    return (
+                      <article
+                        key={order.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Ver detalle del pedido ${order.order_number}`}
+                        onClick={() => onNavigateDetail(order.order_number)}
+                        onKeyDown={(e) => handleCardKeyDown(e, order)}
+                        className={`group overflow-hidden bg-surface-card border border-border rounded-card cursor-pointer transition-colors hover:border-border-strong hover:bg-surface-app focus:outline-none focus-visible:border-border-strong focus-visible:bg-surface-app focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-1 ${
+                          isNewPulse
+                            ? "ring-2 ring-status-success-text animate-pulse"
+                            : ""
+                        } ${isIncident ? "border-l-4 border-l-rose-500" : ""}`}
+                      >
+                        {/* Nivel 1 - Identificación y antigüedad */}
+                        <div className="px-3 pt-3 flex items-center justify-between gap-2">
+                          <span className="font-mono font-bold text-brand-primary text-sm tracking-tight truncate">
+                            #{order.order_number}
+                          </span>
+                          <span
+                            className={`font-mono text-[11px] shrink-0 ${
+                              isStale
+                                ? "px-1.5 py-0.5 rounded-sm border font-bold bg-status-warning-bg text-status-warning-text border-status-warning-border"
+                                : "text-brand-secondary"
+                            }`}
+                          >
+                            {formatRelativeAge(ageMs)}
+                          </span>
+                        </div>
+
+                        {/* Nivel 2 - Cliente y producto */}
+                        <div className="px-3 pt-2 pb-3">
+                          <p className="font-bold text-sm text-brand-primary leading-tight break-words">
+                            {customerName}
+                          </p>
+                          <div className="border-t border-border my-2" />
+                          {visibleItems.map((item) => (
+                            <OrderItemSummary key={item.id} item={item} />
+                          ))}
+                          {hiddenItems > 0 && (
+                            <p className="text-xs text-brand-secondary">
+                              +{hiddenItems} prenda{hiddenItems > 1 ? "s" : ""} más
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Nivel 3 - Pago, despacho, repartidor y monto */}
+                        <div className="px-3 py-2.5 border-t border-border space-y-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <PaymentBadges order={order} />
+                            <DeliveryBadge type={order.delivery_type} />
+                          </div>
+
+                          {showDeliverySection && (
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-brand-secondary">
+                                Repartidor
                               </span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onNavigateDetail(order.order_number)
-                                }
-                                className="p-1 text-slate-400 hover:text-brand-primary hover:bg-slate-100 rounded transition-colors"
-                                title="Ver detalle completo del pedido"
-                              >
-                                <ArrowUpRight className="w-4 h-4" />
-                              </button>
-                            </div>
-                            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                              {formatConciseDate(order.created_at)}
-                            </p>
-                          </div>
-
-                          {/* Bloque B - Cuerpo de la Card */}
-                          <div className="p-3">
-                            {/* Paso 1: Fila del Cliente y Divisor */}
-                            <p className="font-bold text-xs text-brand-primary w-full break-words leading-tight">
-                              {customerName}
-                            </p>
-                            <p className="text-xs text-slate-500 font-mono mt-0.5">
-                              {phone || "Sin teléfono"}
-                            </p>
-                            <div className="border-t border-border/60 my-2" />
-
-                            {/* Paso 2: Fila de Prendas (Color arriba, Talla abajo en 2 filas) */}
-                            {order.order_items?.map((item) => (
-                              <div
-                                key={item.id}
-                                className="bg-surface-subtle border border-border/60 rounded-button p-2 text-[11px] grid grid-cols-[1fr_auto_auto] items-center gap-2 mb-1.5"
-                              >
-                                <span className="text-brand-primary font-medium break-words leading-snug">
-                                  {item.product_variants?.products?.name ||
-                                    "Prenda"}
+                              {order.assigned_delivery_id ? (
+                                <span className="text-brand-primary">
+                                  {driverName || "Asignado"}
                                 </span>
-
-                                <div className="bg-white border border-border/50 rounded px-1.5 py-0.5 text-center font-mono leading-tight flex flex-col justify-center min-w-[75px]">
-                                  <span className="text-[10px] text-brand-primary font-semibold truncate capitalize">
-                                    {item.product_variants?.color || "—"}
-                                  </span>
-                                  <span className="text-[9px] text-brand-secondary truncate border-t border-border/30 mt-0.5 pt-0.5">
-                                    {item.product_variants?.sizes?.name || "U"}
-                                  </span>
-                                </div>
-
-                                <span className="text-brand-primary font-bold font-mono text-[11px] whitespace-nowrap pl-1">
-                                  {item.quantity}x
-                                </span>
-                              </div>
-                            ))}
-
-                            {/* Paso 3: Pago y Despacho */}
-                            <div className="flex items-center justify-between gap-2 mt-2">
-                              {paymentBadge}
-                              {deliveryBadge}
-                            </div>
-
-                            {order.payment_gateway_tx_id && (
-                              <div className="flex items-center justify-between text-[11px] mt-1.5 px-0.5">
-                                <span className="text-slate-500">
-                                  Número de operación:
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleCopyOp(order.payment_gateway_tx_id)
-                                  }
-                                  className="font-mono font-bold text-brand-primary hover:text-accent flex items-center gap-1"
-                                  title="Copiar número"
+                              ) : (
+                                <Badge
+                                  variant="warning"
+                                  icon={UserX}
+                                  className="rounded-sm text-[11px] px-2 py-0.5 font-medium cursor-default"
                                 >
-                                  <span>{order.payment_gateway_tx_id}</span>
-                                  {copiedId === order.payment_gateway_tx_id ? (
-                                    <Check className="w-3 h-3 text-emerald-600" />
-                                  ) : (
-                                    <Copy className="w-3 h-3 text-slate-400" />
-                                  )}
-                                </button>
-                              </div>
-                            )}
+                                  Sin asignar
+                                </Badge>
+                              )}
+                            </div>
+                          )}
 
-                            {/* Paso 4: Divisor y Sección del Repartidor al Final */}
-                            {showDeliverySection && (
-                              <>
-                                <div className="border-t border-border/60 my-2" />
-                                <div className="text-xs flex items-center justify-between px-0.5">
-                                  <span className="text-slate-500 text-[11px]">
-                                    Repartidor:
-                                  </span>
-                                  {order.assigned_delivery_id ? (
-                                    <span className="font-bold text-brand-primary text-xs">
-                                      {order.delivery_name ||
-                                        driverName ||
-                                        "Asignado"}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-500 font-normal text-xs">
-                                      Sin asignar
-                                    </span>
-                                  )}
-                                </div>
-                              </>
-                            )}
-                          </div>
-
-                          {/* Bloque C - Pie de la Card */}
-                          <div className="bg-slate-50/70 border-t border-border/80 px-3 py-2 flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-2 pt-1">
                             <span className="font-mono font-bold text-base text-brand-primary">
                               {money(order.total_amount)}
                             </span>
-
-                            <div>
-                              {col.id === "por_validar" &&
-                                (isCashOnDelivery ? (
-                                  <Button
-                                    size="sm"
-                                    disabled={isUpdating}
-                                    onClick={() =>
-                                      onSendToPreparation(order.id)
-                                    }
-                                    className="h-7 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px]"
-                                  >
-                                    <span>A Preparación</span>
-                                    <ArrowRight className="w-3 h-3 ml-1" />
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    disabled={isUpdating}
-                                    onClick={() => onVerifyPayment(order)}
-                                    className="h-7 px-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px]"
-                                  >
-                                    <span>Validar Pago</span>
-                                    <ArrowRight className="w-3 h-3 ml-1" />
-                                  </Button>
-                                ))}
-
-                              {col.id === "en_preparacion" && (
-                                <Button
-                                  size="sm"
-                                  disabled={isUpdating}
-                                  onClick={() => onSendToPool(order)}
-                                  className="h-7 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px]"
-                                >
-                                  <span>A Bolsa</span>
-                                  <ArrowRight className="w-3 h-3 ml-1" />
-                                </Button>
-                              )}
-
-                              {col.id === "en_ruta" && (
-                                <span className="text-[11px] text-indigo-700 font-semibold">
-                                  En ruta
-                                </span>
-                              )}
-
-                              {col.id === "finalizados" && (
-                                <span className="text-[11px] text-brand-muted">
-                                  Completado
-                                </span>
-                              )}
-                            </div>
+                            {action}
                           </div>
                         </div>
-                      );
-                    })}
+                        <CardRevealFooter />
+                      </article>
+                    );
+                  })
+                )}
 
-                    {isFinalizados && sortedOrders.length > 0 && (
-                      <p className="text-center text-[11px] text-brand-muted py-1.5">
-                        Mostrando las últimas 15 entregas
-                      </p>
-                    )}
-                  </>
+                {isFinalizados && totalCount > sortedOrders.length && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onViewHistory}
+                    className="w-full text-xs"
+                  >
+                    <History className="w-3.5 h-3.5 mr-1.5" />
+                    <span>Ver historial completo</span>
+                  </Button>
                 )}
               </div>
-            </div>
+            </section>
           );
         })}
       </div>

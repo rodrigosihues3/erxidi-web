@@ -26,6 +26,30 @@ export default {
           DEFAULT: '#E4E4E7',   // Zinc 200: Bordes estructurales estándar (1px)
           strong: '#CBD5E1',    // Slate 300: Bordes con interacción o focus
         },
+        stage: {
+          prep: {
+            dot: '#2563EB',    // Blue 600: Etapa En Preparación
+            bg: '#EFF6FF',     // Blue 50
+            border: '#BFDBFE', // Blue 200
+          },
+          route: {
+            dot: '#7C3AED',    // Violet 600: Etapa En Ruta
+            bg: '#F5F3FF',     // Violet 50
+            border: '#DDD6FE', // Violet 200
+          },
+        },
+        delivery: {
+          scheduled: {
+            bg: '#F0F9FF',     // Sky 50
+            text: '#0369A1',   // Sky 700
+            border: '#BAE6FD', // Sky 200
+          },
+          express: {
+            bg: '#FFF7ED',     // Orange 50
+            text: '#C2410C',   // Orange 700
+            border: '#FED7AA', // Orange 200
+          },
+        },
         status: {
           success: {
             text: '#047857',    // Emerald 700: Pedidos entregados, stock suficiente
