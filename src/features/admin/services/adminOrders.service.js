@@ -4,6 +4,7 @@ export const ORDER_STATUS = {
   RECEIVED: "received",
   PREPARING: "en_preparacion",
   READY_FOR_DELIVERY: "por_asignar_repartidor",
+  ASSIGNED: "asignado",
   DISPATCHED: "en_camino",
   NEARBY: "cerca",
   ARRIVED: "en_destino",
@@ -11,6 +12,67 @@ export const ORDER_STATUS = {
   CANCELLED: "cancelado",
   INCIDENT: "incidencia_transporte",
 };
+
+export const ORDER_LIFECYCLE_STEPS = [
+  { key: "recibido", label: "Recibido", sublabel: "Validación inicial / Voucher" },
+  { key: "en_preparacion", label: "En Preparación", sublabel: "Armado de paquete" },
+  { key: "por_asignar", label: "Por Asignar", sublabel: "En bolsa común" },
+  { key: "asignado", label: "Asignado", sublabel: "Repartidor con paquete" },
+  { key: "en_camino", label: "En Ruta", sublabel: "En tránsito al destino" },
+  { key: "cerca", label: "Cerca", sublabel: "A pocas cuadras" },
+  { key: "en_ubicacion", label: "En Ubicación", sublabel: "Repartidor en puerta" },
+  { key: "entregado", label: "Entregado", sublabel: "Recepción conforme" },
+];
+
+const STEP_KEY_TO_DB_STATUS = {
+  recibido: "recibido",
+  en_preparacion: "en_preparacion",
+  por_asignar: "por_asignar_repartidor",
+  asignado: "asignado",
+  en_camino: "en_camino",
+  cerca: "cerca",
+  en_ubicacion: "en_destino",
+  entregado: "entregado",
+};
+
+export function mapStepKeyToDbStatus(stepKeyOrStatus) {
+  return STEP_KEY_TO_DB_STATUS[stepKeyOrStatus] || stepKeyOrStatus;
+}
+
+export function normalizeStatusToStepKey(status) {
+  const s = (status || "").toLowerCase();
+  if (["recibido", "received", "pendiente_pago", "pending", "pagado"].includes(s)) {
+    return "recibido";
+  }
+  if (["en_preparacion", "preparing"].includes(s)) {
+    return "en_preparacion";
+  }
+  if (["por_asignar", "por_asignar_repartidor"].includes(s)) {
+    return "por_asignar";
+  }
+  if (s === "asignado") {
+    return "asignado";
+  }
+  if (["en_camino", "dispatched"].includes(s)) {
+    return "en_camino";
+  }
+  if (["cerca", "nearby"].includes(s)) {
+    return "cerca";
+  }
+  if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
+    return "en_ubicacion";
+  }
+  if (["entregado", "delivered"].includes(s)) {
+    return "entregado";
+  }
+  if (["cancelado", "cancelled"].includes(s)) {
+    return "cancelado";
+  }
+  if (s === "incidencia_transporte") {
+    return "incidencia_transporte";
+  }
+  return "recibido";
+}
 
 export const ORDER_STATUS_LABELS = {
   recibido: "Recibido",
@@ -20,14 +82,16 @@ export const ORDER_STATUS_LABELS = {
   pagado: "Pagado",
   preparing: "En preparación",
   en_preparacion: "En preparación",
-  por_asignar_repartidor: "Por asignar repartidor",
+  por_asignar: "Por Asignar",
+  por_asignar_repartidor: "Por Asignar",
   asignado: "Asignado",
-  dispatched: "En camino",
-  en_camino: "En camino",
+  dispatched: "En Ruta",
+  en_camino: "En Ruta",
   nearby: "Cerca",
   cerca: "Cerca",
-  en_destino: "En destino",
-  arrived: "En destino",
+  en_ubicacion: "En Ubicación",
+  en_destino: "En Ubicación",
+  arrived: "En Ubicación",
   incidencia_transporte: "Incidencia en reparto",
   delivered: "Entregado",
   entregado: "Entregado",
@@ -36,13 +100,17 @@ export const ORDER_STATUS_LABELS = {
 };
 
 const ORDER_SELECT = `
-  id, order_number, customer_id, customer_name, customer_email, customer_phone,
+  id, order_number, customer_id, shipping_address_id, customer_name, customer_email, customer_phone,
   delivery_address, scheduled_time_slot, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_gateway_tx_id, status, payment_status,
   invoice_type, invoice_data, created_at, updated_at, assigned_delivery_id,
   incident_reason, incident_comment,
   profiles:customer_id (
     id, dni, first_name, paternal_surname, maternal_surname, email, phone
+  ),
+  addresses:shipping_address_id (
+    id, alias, receiver_name, receiver_phone, department, province, street_address, reference,
+    delivery_zones:zone_id ( id, district_name, delivery_cost, estimated_delivery_time )
   ),
   delivery_profile:assigned_delivery_id (
     id, first_name, paternal_surname, phone, delivery_type
@@ -133,19 +201,149 @@ export async function getOrderDetail(orderId) {
   if (orderError) throw orderError;
   if (itemsError) throw itemsError;
 
-  return { ...order, items: items ?? [] };
+  const isPool =
+    order.status === "por_asignar_repartidor" && !order.assigned_delivery_id;
+
+  return { ...order, in_pool: isPool, items: items ?? [] };
 }
 
 export async function updateOrderStatus(orderId, status) {
+  const dbStatus = mapStepKeyToDbStatus(status);
+  const payload = {
+    status: dbStatus,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (
+    ["recibido", "received", "en_preparacion", "por_asignar_repartidor"].includes(
+      dbStatus,
+    )
+  ) {
+    payload.assigned_delivery_id = null;
+  }
+
   const { data, error } = await supabase
     .from("orders")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update(payload)
     .eq("id", orderId)
-    .select("id, order_number, status, updated_at")
+    .select("id, order_number, status, assigned_delivery_id, updated_at")
     .single();
 
   if (error) throw error;
-  return data;
+  return {
+    ...data,
+    in_pool:
+      data.status === "por_asignar_repartidor" && !data.assigned_delivery_id,
+  };
+}
+
+export async function toggleOrderPool(orderId, currentlyInPool) {
+  const nextStatus = currentlyInPool
+    ? "en_preparacion"
+    : "por_asignar_repartidor";
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: nextStatus,
+      assigned_delivery_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select("id, order_number, status, assigned_delivery_id, updated_at")
+    .single();
+
+  if (error) throw error;
+  return {
+    ...data,
+    in_pool:
+      data.status === "por_asignar_repartidor" && !data.assigned_delivery_id,
+  };
+}
+
+export async function reportOrderIncident(
+  orderId,
+  { reason, comment, returnToPool = false },
+) {
+  const payload = {
+    incident_reason: reason || "Incidencia operativa",
+    incident_comment: comment || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (returnToPool) {
+    payload.status = "por_asignar_repartidor";
+    payload.assigned_delivery_id = null;
+  } else {
+    payload.status = "incidencia_transporte";
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update(payload)
+    .eq("id", orderId)
+    .select(
+      "id, order_number, status, assigned_delivery_id, incident_reason, incident_comment, updated_at",
+    )
+    .single();
+
+  if (error) throw error;
+  return {
+    ...data,
+    in_pool:
+      data.status === "por_asignar_repartidor" && !data.assigned_delivery_id,
+  };
+}
+
+export async function cancelOrderWithStockRestore(
+  orderId,
+  { reason, comment, items = [], previousStatus },
+) {
+  const alreadyCancelled = ["cancelado", "cancelled"].includes(
+    (previousStatus || "").toLowerCase(),
+  );
+
+  if (!alreadyCancelled && items.length > 0) {
+    for (const item of items) {
+      const variantId = item.variant_id || item.product_variants?.id;
+      const qty = Number(item.quantity || 0);
+      if (!variantId || qty <= 0) continue;
+
+      const { data: variantRow } = await supabase
+        .from("product_variants")
+        .select("id, stock")
+        .eq("id", variantId)
+        .single();
+
+      if (variantRow) {
+        await supabase
+          .from("product_variants")
+          .update({
+            stock: Number(variantRow.stock || 0) + qty,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", variantId);
+      }
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      status: "cancelado",
+      assigned_delivery_id: null,
+      incident_reason: reason || "Pedido cancelado",
+      incident_comment: comment || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select(
+      "id, order_number, status, assigned_delivery_id, incident_reason, incident_comment, updated_at",
+    )
+    .single();
+
+  if (error) throw error;
+  return { ...data, in_pool: false };
 }
 
 /**
@@ -256,16 +454,28 @@ export async function updateDeliveryStaff(id, payload) {
   return data;
 }
 
-const IN_ROUTE_STATUSES = ["en_camino", "cerca", "dispatched", "nearby"];
+const IN_ROUTE_STATUSES = [
+  "asignado",
+  "en_camino",
+  "cerca",
+  "en_destino",
+  "dispatched",
+  "nearby",
+  "arrived",
+];
 
 export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
-  let nextStatus = currentStatus;
+  let nextStatus = mapStepKeyToDbStatus(currentStatus);
   if (!deliveryId) {
-    if (IN_ROUTE_STATUSES.includes(currentStatus)) {
+    if (IN_ROUTE_STATUSES.includes(nextStatus)) {
       nextStatus = "por_asignar_repartidor";
     }
-  } else if (currentStatus === "received" || currentStatus === "por_asignar_repartidor") {
-    nextStatus = "en_camino";
+  } else if (
+    ["recibido", "received", "en_preparacion", "por_asignar_repartidor"].includes(
+      nextStatus,
+    )
+  ) {
+    nextStatus = "asignado";
   }
 
   const { data, error } = await supabase
@@ -280,7 +490,11 @@ export async function assignOrderDelivery(orderId, deliveryId, currentStatus) {
     .single();
 
   if (error) throw error;
-  return data;
+  return {
+    ...data,
+    in_pool:
+      data.status === "por_asignar_repartidor" && !data.assigned_delivery_id,
+  };
 }
 
 export async function getDashboardOrders(filterRange = "30days") {
