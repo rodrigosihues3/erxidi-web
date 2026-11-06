@@ -3,10 +3,10 @@ import {
   Search,
   Columns3,
   LayoutGrid,
-  List,
-  RotateCw,
+  LayoutList,
+  RefreshCw,
   RotateCcw,
-  Eraser,
+  X,
   ClipboardList,
   Eye,
   ChevronLeft,
@@ -33,6 +33,7 @@ import OrderKanbanView from "../components/OrderKanbanView";
 import { useAdminOrders } from "../hooks/useAdminOrders";
 import {
   getDeliveryStaff,
+  listOrders,
   markOrderReadyForDelivery,
   resolveOrderIncident,
   updateOrderStatus,
@@ -67,13 +68,6 @@ const PAYMENT_OPTIONS = [
   { value: "transferencia", label: "Transferencia" },
 ];
 
-const DATE_OPTIONS = [
-  { value: "all", label: "Todos" },
-  { value: "today", label: "Hoy" },
-  { value: "week", label: "Esta semana" },
-  { value: "month", label: "Este mes" },
-];
-
 const PAYMENT_LABELS = {
   yape_plin: "Yape / Plin",
   culqi_gateway: "Culqi (Online)",
@@ -105,45 +99,17 @@ function formatConciseDate(dateStr) {
   return `${day}/${month} · ${hours}:${minutes}`;
 }
 
-function matchesDateFilter(order, dateFilter) {
-  if (!dateFilter || dateFilter === "all") return true;
-  const refDate = new Date(order.created_at);
-  if (Number.isNaN(refDate.getTime())) return true;
-
-  const now = new Date();
-  if (dateFilter === "today") {
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    return refDate >= startOfToday;
-  }
-  if (dateFilter === "week") {
-    const startOfWeek = new Date(now);
-    const day = startOfWeek.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    startOfWeek.setDate(startOfWeek.getDate() - diff);
-    startOfWeek.setHours(0, 0, 0, 0);
-    return refDate >= startOfWeek;
-  }
-  if (dateFilter === "month") {
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    return refDate >= startOfMonth;
-  }
-  return true;
-}
-
 export default function OrdersListView() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
-  const [deliveryType, setDeliveryType] = useState("all");
-  const [paymentMethod, setPaymentMethod] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
-  const [viewMode, setViewMode] = useState("kanban"); // 'kanban' | 'grid' | 'table'
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("todos");
+  const [shippingFilter, setShippingFilter] = useState("todos");
+  const [paymentFilter, setPaymentFilter] = useState("todos");
+  const [viewMode, setViewMode] = useState("kanban"); // 'kanban' | 'cards' | 'table'
   const [refreshTick, setRefreshTick] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
 
   const [deliveryStaff, setDeliveryStaff] = useState([]);
   const [localOrders, setLocalOrders] = useState([]);
@@ -156,25 +122,69 @@ export default function OrdersListView() {
     order: null,
   });
 
+  const statusApiValue = useMemo(() => {
+    if (statusFilter === "todos") return "all";
+    if (statusFilter === "por_validar")
+      return ["received", "recibido", "pendiente_pago", "pending"];
+    if (statusFilter === "en_preparacion")
+      return ["en_preparacion", "preparing"];
+    if (statusFilter === "en_bolsa")
+      return ["por_asignar_repartidor", "asignado"];
+    if (statusFilter === "en_ruta")
+      return [
+        "en_camino",
+        "dispatched",
+        "cerca",
+        "nearby",
+        "en_destino",
+        "arrived",
+      ];
+    if (statusFilter === "finalizado")
+      return ["entregado", "delivered"];
+    if (statusFilter === "cancelado")
+      return ["cancelado", "cancelled"];
+    return statusFilter;
+  }, [statusFilter]);
+
+  const shippingApiValue = useMemo(() => {
+    if (shippingFilter === "todos") return "all";
+    if (shippingFilter === "programado")
+      return ["scheduled", "programado"];
+    if (shippingFilter === "express")
+      return ["express"];
+    return shippingFilter;
+  }, [shippingFilter]);
+
+  const paymentApiValue = useMemo(() => {
+    if (paymentFilter === "todos") return "all";
+    if (paymentFilter === "tarjeta")
+      return ["culqi_gateway", "tarjeta"];
+    if (paymentFilter === "yape_plin")
+      return ["yape_plin"];
+    if (paymentFilter === "contraentrega")
+      return ["contraentrega", "efectivo"];
+    return paymentFilter;
+  }, [paymentFilter]);
+
   const pageSize = viewMode === "kanban" ? 100 : 12;
   const filters = useMemo(
     () => ({
       page: viewMode === "kanban" ? 1 : page,
       pageSize,
-      status,
-      deliveryType,
-      paymentMethod,
-      search,
+      status: statusApiValue,
+      deliveryType: shippingApiValue,
+      paymentMethod: paymentApiValue,
+      search: searchQuery,
       refreshTick,
     }),
     [
       viewMode,
       page,
       pageSize,
-      status,
-      deliveryType,
-      paymentMethod,
-      search,
+      statusApiValue,
+      shippingApiValue,
+      paymentApiValue,
+      searchQuery,
       refreshTick,
     ],
   );
@@ -182,21 +192,54 @@ export default function OrdersListView() {
   const { data, count, loading, error } = useAdminOrders(filters);
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
-  const hasActiveFilters =
-    search.trim() !== "" ||
-    status !== "all" ||
-    deliveryType !== "all" ||
-    paymentMethod !== "all" ||
-    dateFilter !== "all";
+  const hasActiveFilters = useMemo(() => {
+    return (
+      searchQuery.trim() !== "" ||
+      statusFilter !== "todos" ||
+      shippingFilter !== "todos" ||
+      paymentFilter !== "todos"
+    );
+  }, [searchQuery, statusFilter, shippingFilter, paymentFilter]);
+
+  function handleClearFilters() {
+    setSearchQuery("");
+    setStatusFilter("todos");
+    setShippingFilter("todos");
+    setPaymentFilter("todos");
+    setPage(1);
+  }
+
+  function showToast(msg) {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((curr) => (curr === msg ? "" : curr));
+    }, 4000);
+  }
+
+  async function handleManualRefresh() {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const result = await listOrders(filters);
+      setLocalOrders(result.data || []);
+      setRefreshTick((t) => t + 1);
+      showToast("Lista de pedidos actualizada.");
+    } catch (err) {
+      showToast("No se pudo actualizar la lista de pedidos.");
+    } finally {
+      setTimeout(() => {
+        setIsRefreshing(false);
+      }, 600);
+    }
+  }
 
   useEffect(() => {
     setLocalOrders(data);
   }, [data]);
 
   const displayedOrders = useMemo(() => {
-    if (viewMode === "kanban") return localOrders;
-    return localOrders.filter((o) => matchesDateFilter(o, dateFilter));
-  }, [localOrders, viewMode, dateFilter]);
+    return localOrders;
+  }, [localOrders]);
 
   useEffect(() => {
     let active = true;
@@ -249,14 +292,7 @@ export default function OrdersListView() {
     };
   }, []);
 
-  function clearFilters() {
-    setSearch("");
-    setStatus("all");
-    setDeliveryType("all");
-    setPaymentMethod("all");
-    setDateFilter("all");
-    setPage(1);
-  }
+
 
   function handleCopyTx(txId, e) {
     e?.stopPropagation?.();
@@ -328,10 +364,7 @@ export default function OrdersListView() {
     }
   }
 
-  function updateFilter(setter, value) {
-    setter(value);
-    setPage(1);
-  }
+
 
   function renderDeliveryBadge(type) {
     const t = (type || "").toLowerCase();
@@ -549,138 +582,147 @@ export default function OrdersListView() {
 
   return (
     <div className="space-y-4">
-      {/* BARRA DE HERRAMIENTAS COMPACTA EN 1 FILA HORIZONTAL */}
-      <div className="bg-surface-card border border-border rounded-card p-3 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 shadow-xs">
-        {/* Izquierda: Filtros Facetados */}
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={status}
-            onChange={(e) => updateFilter(setStatus, e.target.value)}
-            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
-          >
-            {STATUS_OPTIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={deliveryType}
-            onChange={(e) => updateFilter(setDeliveryType, e.target.value)}
-            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
-          >
-            {DELIVERY_OPTIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={paymentMethod}
-            onChange={(e) => updateFilter(setPaymentMethod, e.target.value)}
-            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
-          >
-            {PAYMENT_OPTIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={dateFilter}
-            onChange={(e) => updateFilter(setDateFilter, e.target.value)}
-            className="h-9 text-xs border border-border rounded-button bg-white px-2.5 text-brand-primary outline-none focus:ring-2 focus:ring-accent/20 cursor-pointer"
-          >
-            {DATE_OPTIONS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              title="Limpiar filtros"
-              className="h-9 px-2.5 rounded-button border border-rose-200 bg-rose-50 text-xs text-rose-600 hover:bg-rose-100 flex items-center gap-1 font-semibold transition-colors"
-            >
-              <Eraser className="w-3.5 h-3.5" />
-              <span>Limpiar</span>
-            </button>
-          )}
+      {/* =========================================================================
+          FILA 1: Encabezado de Sección y Conmutador de Vistas (Estilo Repartidores)
+         ========================================================================= */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+        {/* Izquierda: Título de sección */}
+        <div>
+          <h1 className="text-xl font-black tracking-tight text-brand-primary">
+            Pedidos
+          </h1>
         </div>
 
-        {/* Centro: Buscador */}
-        <div className="relative max-w-md w-full xl:mx-auto">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => updateFilter(setSearch, e.target.value)}
-            placeholder="Buscar pedido, cliente, teléfono o #operación..."
-            className="max-w-md w-full h-9 text-xs pl-3 pr-8 rounded-button border border-border bg-white text-brand-primary outline-none focus:ring-2 focus:ring-accent/20"
-          />
-          <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted pointer-events-none" />
-        </div>
-
-        {/* Derecha: Vistas y Recarga */}
-        <div className="flex items-center gap-2 self-end xl:self-auto shrink-0">
-          <div className="inline-flex items-center gap-1 bg-surface-subtle p-1 rounded-button border border-border">
+        {/* Derecha: Botonera de Vistas y Refresco Manual */}
+        <div className="flex items-center gap-2.5 self-end sm:self-auto">
+          {/* Selector de vistas agrupado */}
+          <div className="inline-flex items-center bg-slate-100 p-1 rounded-button border border-border shadow-xs">
             <button
               type="button"
               onClick={() => setViewMode("kanban")}
-              title="Vista tablero Kanban"
-              className={`p-1.5 rounded-button transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${
                 viewMode === "kanban"
-                  ? "bg-brand-primary text-white shadow-xs"
-                  : "text-brand-muted hover:text-brand-primary"
+                  ? "bg-white text-brand-primary shadow-xs"
+                  : "text-slate-600 hover:text-brand-primary"
               }`}
+              title="Vista de tablero por etapas"
             >
-              <Columns3 className="w-4 h-4" />
+              <Columns3 className="w-3.5 h-3.5" />
+              <span>Kanban</span>
             </button>
+
             <button
               type="button"
-              onClick={() => setViewMode("grid")}
-              title="Vista cuadrícula"
-              className={`p-1.5 rounded-button transition-colors ${
-                viewMode === "grid"
-                  ? "bg-brand-primary text-white shadow-xs"
-                  : "text-brand-muted hover:text-brand-primary"
+              onClick={() => setViewMode("cards")}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${
+                viewMode === "cards" || viewMode === "grid"
+                  ? "bg-white text-brand-primary shadow-xs"
+                  : "text-slate-600 hover:text-brand-primary"
               }`}
+              title="Vista en tarjetas cuadrícula"
             >
-              <LayoutGrid className="w-4 h-4" />
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Tarjetas</span>
             </button>
+
             <button
               type="button"
               onClick={() => setViewMode("table")}
-              title="Vista tabla"
-              className={`p-1.5 rounded-button transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xs text-xs font-bold transition-all ${
                 viewMode === "table"
-                  ? "bg-brand-primary text-white shadow-xs"
-                  : "text-brand-muted hover:text-brand-primary"
+                  ? "bg-white text-brand-primary shadow-xs"
+                  : "text-slate-600 hover:text-brand-primary"
               }`}
+              title="Vista en tabla o filas compactas"
             >
-              <List className="w-4 h-4" />
+              <LayoutList className="w-3.5 h-3.5" />
+              <span>Lista</span>
             </button>
           </div>
 
-          <Button
+          {/* Botón de Refresco Manual con Feedback Visual */}
+          <button
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setRefreshTick((t) => t + 1)}
-            title="Refrescar pedidos"
-            className="h-9 px-2.5 text-xs flex items-center gap-1"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="h-9 w-9 inline-flex items-center justify-center rounded-button border border-border bg-white text-slate-600 hover:text-brand-primary hover:border-brand-primary/50 shadow-xs transition-colors disabled:opacity-50"
+            title="Sincronizar pedidos ahora"
           >
-            <RotateCw
-              className={`w-3.5 h-3.5 text-brand-secondary ${
-                loading ? "animate-spin" : ""
-              }`}
+            <RefreshCw
+              className={`w-4 h-4 ${isRefreshing ? "animate-spin text-brand-primary" : ""}`}
             />
-          </Button>
+          </button>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          FILA 2: Buscador a la Izquierda y Filtros Desplegables a la Derecha
+         ========================================================================= */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3">
+        {/* Izquierda: Buscador */}
+        <div className="relative w-full lg:w-96">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar pedido, cliente, teléfono o #operación..."
+            className="w-full h-9 pl-9 pr-3 text-xs bg-white border border-border rounded-button text-brand-primary placeholder:text-slate-400 focus:outline-none focus:border-brand-primary shadow-xs"
+          />
+        </div>
+
+        {/* Derecha: Desplegables y Limpiador de Filtros */}
+        <div className="flex flex-wrap items-center gap-2 justify-end">
+          {/* Filtro por Estado de Pedido */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-9 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary shadow-xs"
+          >
+            <option value="todos">Estado: Todos</option>
+            <option value="por_validar">Por Validar</option>
+            <option value="en_preparacion">En Preparación</option>
+            <option value="en_bolsa">En Bolsa</option>
+            <option value="en_ruta">En Ruta</option>
+            <option value="finalizado">Finalizados</option>
+            <option value="cancelado">Cancelados</option>
+          </select>
+
+          {/* Filtro por Tipo de Despacho */}
+          <select
+            value={shippingFilter}
+            onChange={(e) => setShippingFilter(e.target.value)}
+            className="h-9 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary shadow-xs"
+          >
+            <option value="todos">Despacho: Todos</option>
+            <option value="express">Express</option>
+            <option value="programado">Programado</option>
+          </select>
+
+          {/* Filtro por Método de Pago */}
+          <select
+            value={paymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value)}
+            className="h-9 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary shadow-xs"
+          >
+            <option value="todos">Pago: Todos</option>
+            <option value="yape_plin">Yape / Plin (Manual)</option>
+            <option value="tarjeta">Tarjeta (Culqi)</option>
+            <option value="contraentrega">Contraentrega</option>
+          </select>
+
+          {/* Botón dinámico: Limpiar Filtros con texto completo */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="h-9 px-3 inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-button shadow-xs transition-colors animate-in fade-in duration-150"
+              title="Restablecer todos los filtros y búsqueda"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Limpiar filtros</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -697,7 +739,6 @@ export default function OrdersListView() {
         <OrderKanbanView
           orders={localOrders}
           recentOrderIds={recentOrderIds}
-          dateFilter={dateFilter}
           onVerifyPayment={(order) => setPaymentModal({ isOpen: true, order })}
           onSendToPreparation={handleStartPreparing}
           onSendToPool={handleSendToPool}
@@ -712,7 +753,7 @@ export default function OrdersListView() {
         <div className="bg-surface-card border border-border rounded-card p-12 text-center text-sm text-brand-secondary">
           No encontramos pedidos con los filtros aplicados.
         </div>
-      ) : viewMode === "grid" ? (
+      ) : viewMode === "cards" || viewMode === "grid" ? (
         /* VISTA EN TARJETAS */
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {displayedOrders.map((order) => {
@@ -994,6 +1035,13 @@ export default function OrdersListView() {
           setRefreshTick((t) => t + 1);
         }}
       />
+      {/* Toast Flotante de Notificaciones */}
+      {toastMessage && (
+        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-button bg-brand-primary text-white text-xs font-semibold shadow-xl border border-brand-primary/20 animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

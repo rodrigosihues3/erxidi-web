@@ -71,10 +71,30 @@ export async function listOrders({
     .select(ORDER_SELECT, { count: "exact" })
     .order("created_at", { ascending: false });
 
-  if (status !== "all") query = query.eq("status", status);
-  if (invoiceType !== "all") query = query.eq("invoice_type", invoiceType);
-  if (paymentMethod !== "all") query = query.eq("payment_method", paymentMethod);
-  if (deliveryType !== "all") query = query.eq("delivery_type", deliveryType);
+  if (status !== "all" && status !== "todos") {
+    if (Array.isArray(status)) {
+      query = query.in("status", status);
+    } else {
+      query = query.eq("status", status);
+    }
+  }
+  if (invoiceType !== "all" && invoiceType !== "todos") {
+    query = query.eq("invoice_type", invoiceType);
+  }
+  if (paymentMethod !== "all" && paymentMethod !== "todos") {
+    if (Array.isArray(paymentMethod)) {
+      query = query.in("payment_method", paymentMethod);
+    } else {
+      query = query.eq("payment_method", paymentMethod);
+    }
+  }
+  if (deliveryType !== "all" && deliveryType !== "todos") {
+    if (Array.isArray(deliveryType)) {
+      query = query.in("delivery_type", deliveryType);
+    } else {
+      query = query.eq("delivery_type", deliveryType);
+    }
+  }
 
   const term = search.trim();
   if (term) {
