@@ -6,9 +6,16 @@ import {
   Trash2,
   ImagePlus,
   Sparkles,
+  Download,
+  RotateCcw,
+  CheckCircle2,
+  Loader2,
+  AlertTriangle,
   Image as ImageIcon,
   Pencil,
+  Eye,
   Shirt,
+  X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import Button from "../../../components/ui/Button";
@@ -22,6 +29,7 @@ import {
   uploadProductImage,
 } from "../services/adminProducts.service";
 import { enhanceDescriptionWithAi } from "../services/geminiAi.service";
+import { invalidateCatalogCache } from "../../../services/api/catalogService";
 
 const initial = {
   category_id: "",
@@ -38,6 +46,20 @@ const initial = {
   is_active: true,
   target_gender: "hombre",
 };
+
+const GENDER_CATEGORIES = {
+  hombre: ["boxer", "calzoncillo", "media", "calcetin", "promocion"],
+  mujer: ["brasier", "calzon", "top", "panty", "media", "calcetin", "promocion"],
+  nino: ["boxer", "calzoncillo", "media", "calcetin", "promocion"],
+  nina: ["calzon", "panty", "top", "media", "calcetin", "promocion"],
+};
+
+function normalizeStr(s = "") {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
 
 function slugify(value) {
   return value
@@ -75,6 +97,11 @@ export default function ProductFormView() {
 
   // Estados para Estudio Fotográfico IA y Asistencia de Redacción
   const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancingMode, setEnhancingMode] = useState(null);
+  const [previousDescription, setPreviousDescription] = useState(null);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [deleteImageModalOpen, setDeleteImageModalOpen] = useState(false);
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [studioFile, setStudioFile] = useState(null);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
 
@@ -212,24 +239,80 @@ export default function ProductFormView() {
     }
   }, [activeColor, colorImages]);
 
-  // Jerarquía ordenada de categorías para el selector
+  // Jerarquía ordenada y filtrada por Público Objetivo
   const categorizedOptions = useMemo(() => {
+    const allowedKeywords = GENDER_CATEGORIES[form.target_gender] || [];
+
+    const isCatCompatible = (catName = "") => {
+      if (allowedKeywords.length === 0) return true;
+      const norm = normalizeStr(catName);
+      return allowedKeywords.some((kw) => norm.includes(kw));
+    };
+
     const roots = deps.categories.filter((c) => c.parent_id == null);
     const options = [];
 
     roots.forEach((root) => {
-      options.push({ id: root.id, name: root.name, isChild: false });
-      const children = deps.categories.filter((c) => c.parent_id === root.id);
-      children.forEach((child) => {
-        options.push({ id: child.id, name: `— ${child.name}`, isChild: true });
-      });
+      const children = deps.categories.filter(
+        (c) => c.parent_id === root.id && isCatCompatible(c.name),
+      );
+      const rootCompatible = isCatCompatible(root.name);
+
+      if (rootCompatible || children.length > 0) {
+        if (rootCompatible) {
+          options.push({ id: root.id, name: root.name, isChild: false });
+        }
+        children.forEach((child) => {
+          options.push({
+            id: child.id,
+            name: rootCompatible ? `— ${child.name}` : child.name,
+            isChild: true,
+          });
+        });
+      }
     });
 
-    return options.length > 0 ? options : deps.categories;
-  }, [deps.categories]);
+    if (options.length > 0) return options;
+    const filteredFlat = deps.categories.filter((c) => isCatCompatible(c.name));
+    return filteredFlat.length > 0 ? filteredFlat : deps.categories;
+  }, [deps.categories, form.target_gender]);
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function handleGenderChange(newGender) {
+    update("target_gender", newGender);
+    const allowedKeywords = GENDER_CATEGORIES[newGender] || [];
+    const currentCat = deps.categories.find(
+      (c) => String(c.id) === String(form.category_id),
+    );
+    if (currentCat) {
+      const nameNorm = normalizeStr(currentCat.name);
+      const isCompatible = allowedKeywords.some((kw) => nameNorm.includes(kw));
+      if (!isCompatible) {
+        update("category_id", "");
+      }
+    }
+  }
+
+  async function handleDownloadImage(url, filename) {
+    if (!url) return;
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download =
+        filename || `erxidi-${form.slug || "prenda"}-${Date.now()}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(url, "_blank");
+    }
   }
 
   function handleNameChange(value) {
@@ -255,18 +338,21 @@ export default function ProductFormView() {
 
   async function handleEnhanceText(mode) {
     setIsEnhancing(true);
+    setEnhancingMode(mode);
     try {
       const selectedCategory =
         deps.categories.find((c) => String(c.id) === String(form.category_id))
           ?.name || "";
 
+      const currentText = form.description;
       const enhanced = await enhanceDescriptionWithAi({
-        rawText: form.description,
+        rawText: currentText,
         mode,
         productName: form.name,
         category: selectedCategory,
       });
 
+      setPreviousDescription(currentText);
       update("description", enhanced);
       showToast(
         mode === "redaccion"
@@ -277,6 +363,7 @@ export default function ProductFormView() {
       showToast(err.message || "Error al conectar con el Asistente IA.");
     } finally {
       setIsEnhancing(false);
+      setEnhancingMode(null);
     }
   }
 
@@ -343,46 +430,106 @@ export default function ProductFormView() {
     }
   }
 
-  async function handleStudioApprove(fileToUpload) {
+  async function handleStudioApprove(payloadFiles) {
     setUploadingImages(true);
     setError("");
     try {
-      const uploaded = await uploadProductImage(fileToUpload);
-      const targetColor = activeColor || availableColors[0] || "Blanco";
+      const filesArray = Array.isArray(payloadFiles)
+        ? payloadFiles
+        : [payloadFiles];
+      if (filesArray.length === 0) return;
 
+      const targetColor = activeColor || availableColors[0] || "Blanco";
+      const uploadedEntries = [];
+
+      for (let i = 0; i < filesArray.length; i++) {
+        const fileToUpload = filesArray[i];
+        const uploaded = await uploadProductImage(fileToUpload);
+        uploadedEntries.push({
+          color: targetColor,
+          image_url: uploaded.url,
+          is_cover: false,
+          display_order: colorImages.length + i,
+        });
+      }
+
+      // Si este color no tenía portada, asignar la primera subida como portada
       const hasCover = colorImages.some(
         (ci) =>
           ci.color.toLowerCase() === targetColor.toLowerCase() && ci.is_cover,
       );
 
-      const newEntry = {
-        color: targetColor,
-        image_url: uploaded.url,
-        is_cover: !hasCover,
-        display_order: colorImages.length,
-      };
-
-      setColorImages((prev) => [...prev, newEntry]);
-      setActiveImage(uploaded.url);
-
-      if (!form.main_image_url) {
-        setForm((prev) => ({ ...prev, main_image_url: uploaded.url }));
+      if (!hasCover && uploadedEntries.length > 0) {
+        uploadedEntries[0].is_cover = true;
       }
 
-      showToast(`Fotografía asignada a la variante ${targetColor}.`);
+      const firstUploadedUrl = uploadedEntries[0]?.image_url;
+
+      setColorImages((prev) => [...prev, ...uploadedEntries]);
+      if (firstUploadedUrl) {
+        setActiveImage(firstUploadedUrl);
+      }
+
+      // Actualizar main_image_url si el producto carecía de imagen
+      if (!form.main_image_url && firstUploadedUrl) {
+        setForm((prev) => ({ ...prev, main_image_url: firstUploadedUrl }));
+      }
+
+      // Sincronizar variantes locales del color activo
+      if (firstUploadedUrl) {
+        setVariants((prev) =>
+          prev.map((v) =>
+            v.color.toLowerCase() === targetColor.toLowerCase()
+              ? { ...v, image_url: v.image_url || firstUploadedUrl }
+              : v,
+          ),
+        );
+      }
+
+      showToast(
+        filesArray.length > 1
+          ? `${filesArray.length} fotografías sincronizadas en la variante ${targetColor}.`
+          : `Fotografía sincronizada en la variante ${targetColor}.`,
+      );
     } catch (err) {
-      setError(err.message || "Error al subir la fotografía.");
+      setError(err.message || "Error al subir las fotografías.");
       throw err;
     } finally {
       setUploadingImages(false);
     }
   }
 
-  // Dual-Cover 1: Portada Global de Catálogo
+  // Dual-Cover 1: Portada Global de Catálogo con Reordenamiento Dinámico
   function handleSetGlobalCover(targetImageUrl) {
     if (!targetImageUrl) return;
     setForm((prev) => ({ ...prev, main_image_url: targetImageUrl }));
-    showToast("Foto establecida como Portada de Catálogo.");
+
+    const foundImage = colorImages.find(
+      (img) => img.image_url === targetImageUrl,
+    );
+    const targetColor = foundImage?.color || activeColor;
+
+    if (targetColor) {
+      setActiveColor(targetColor);
+
+      // Reordenar variants para que targetColor esté en el índice 0
+      setVariants((prev) => {
+        const matching = prev.filter(
+          (v) => v.color.toLowerCase() === targetColor.toLowerCase(),
+        );
+        const others = prev.filter(
+          (v) => v.color.toLowerCase() !== targetColor.toLowerCase(),
+        );
+        return [...matching, ...others];
+      });
+    }
+
+    showToast("Foto establecida como Portada de Catálogo y variantes reordenadas.");
+  }
+
+  function confirmDeleteActiveImage() {
+    handleRemoveColorImage(activeImage);
+    setDeleteImageModalOpen(false);
   }
 
   // Dual-Cover 2: Portada del Color Activo
@@ -554,10 +701,9 @@ export default function ProductFormView() {
       const payload = buildPayload();
       if (editing) await updateProduct(id, payload);
       else await createProduct(payload);
-      window.alert(
-        `Producto ${editing ? "actualizado" : "creado"} correctamente.`,
-      );
-      navigate("/admin/productos", { replace: true });
+
+      invalidateCatalogCache();
+      setIsSuccessModalOpen(true);
     } catch (err) {
       setError(err.message || "No se pudo guardar el producto.");
     } finally {
@@ -623,12 +769,12 @@ export default function ProductFormView() {
             Cancelar
           </Button>
           <Button
-            className="bg-brand-primary text-white font-bold"
-            isLoading={saving}
-            size="sm"
             type="submit"
+            isLoading={saving}
+            className="bg-accent hover:bg-accent-hover text-white font-bold shadow-sm px-4 py-2 text-xs flex items-center gap-1.5"
           >
-            <Save className="h-4 w-4 mr-1.5" /> Guardar producto
+            <Save className="w-4 h-4 mr-1" />
+            Guardar producto
           </Button>
         </div>
       </div>
@@ -716,15 +862,30 @@ export default function ProductFormView() {
                         </button>
                       </div>
 
-                      {/* Botón Eliminar Foto */}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveColorImage(activeImage)}
-                        title="Eliminar esta fotografía"
-                        className="p-1.5 rounded bg-black/50 hover:bg-rose-600 text-white transition-colors backdrop-blur-xs shadow-xs"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {/* Barra de Herramientas: Descargar y Eliminar */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDownloadImage(
+                              activeImage,
+                              `erxidi-${form.slug || "producto"}-${activeColor}.jpg`,
+                            )
+                          }
+                          className="w-8 h-8 rounded bg-black/50 hover:bg-black/75 text-white flex items-center justify-center transition-colors backdrop-blur-xs"
+                          title="Descargar imagen en resolución original"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteImageModalOpen(true)}
+                          title="Eliminar esta fotografía"
+                          className="w-8 h-8 rounded bg-black/50 hover:bg-rose-600 text-white flex items-center justify-center transition-colors backdrop-blur-xs shadow-xs"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </>
                 ) : (
@@ -819,8 +980,30 @@ export default function ProductFormView() {
 
         {/* 2. Columna Derecha - Información y Controles */}
         <div className="lg:col-span-7 space-y-5 bg-surface-card border border-border rounded-card p-5 shadow-xs">
-          {/* Fila de Selectores Estilo Píldora */}
+          {/* Fila de Selectores: 1. Público Objetivo | 2. Categoría / Tipo | 3. Material | 4. Marca */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">
+                Público Objetivo
+              </span>
+              <select
+                value={form.target_gender}
+                onChange={(e) => handleGenderChange(e.target.value)}
+                className="w-full h-9 px-2.5 border border-border rounded-button bg-surface-subtle text-xs font-semibold text-brand-primary focus:outline-none focus:border-brand-primary"
+              >
+                {[
+                  { value: "hombre", label: "Hombres" },
+                  { value: "mujer", label: "Mujeres" },
+                  { value: "nino", label: "Niños" },
+                  { value: "nina", label: "Niñas" },
+                ].map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <span className="block text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">
                 Categoría / Tipo
@@ -873,28 +1056,6 @@ export default function ProductFormView() {
                 {(deps.brands || []).map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">
-                Público Objetivo
-              </span>
-              <select
-                value={form.target_gender}
-                onChange={(e) => update("target_gender", e.target.value)}
-                className="w-full h-9 px-2.5 border border-border rounded-button bg-surface-subtle text-xs font-semibold text-brand-primary focus:outline-none focus:border-brand-primary"
-              >
-                {[
-                  { value: "hombre", label: "Hombres" },
-                  { value: "mujer", label: "Mujeres" },
-                  { value: "nino", label: "Niños" },
-                  { value: "nina", label: "Niñas" },
-                ].map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
                   </option>
                 ))}
               </select>
@@ -959,43 +1120,124 @@ export default function ProductFormView() {
             />
           </div>
 
-          {/* Descripción con Asistencia IA y Textarea Auto-Expandible */}
+          {/* Descripción con Asistencia IA, Modo Vista Previa y Textarea Auto-Expandible */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
               <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Descripción de la prenda
               </label>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   disabled={isEnhancing}
                   onClick={() => handleEnhanceText("redaccion")}
-                  className="text-xs font-semibold text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 transition-colors"
+                  className="border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 transition-colors"
                   title="Mejora la ortografía y persuasión del texto"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Mejorar redacción</span>
+                  {isEnhancing && enhancingMode === "redaccion" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                      <span>Mejorando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Mejorar redacción</span>
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
                   disabled={isEnhancing}
                   onClick={() => handleEnhanceText("estructura")}
-                  className="text-xs font-semibold text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 transition-colors"
+                  className="border border-border bg-surface-subtle text-brand-primary hover:border-brand-primary/40 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 transition-colors"
                   title="Convierte la descripción en lista de características comerciales"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Mejorar estructura</span>
+                  {isEnhancing && enhancingMode === "estructura" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                      <span>Mejorando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Mejorar estructura</span>
+                    </>
+                  )}
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewMode((prev) => !prev)}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1 transition-colors px-2 py-1 rounded border border-border bg-white"
+                  title="Alternar entre edición y vista previa de catálogo"
+                >
+                  {isPreviewMode ? (
+                    <Pencil className="w-3.5 h-3.5" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isPreviewMode ? "Editar texto" : "Vista previa"}</span>
+                </button>
+
+                {previousDescription !== null &&
+                  previousDescription !== form.description && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        update("description", previousDescription);
+                        setPreviousDescription(null);
+                      }}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1 transition-colors ml-1"
+                      title="Revertir al texto anterior a la mejora de IA"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Deshacer</span>
+                    </button>
+                  )}
               </div>
             </div>
-            <textarea
-              ref={textareaRef}
-              rows={3}
-              value={form.description}
-              onChange={(e) => update("description", e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed overflow-hidden resize-none transition-all focus:border-brand-primary focus:outline-none"
-              placeholder="Detalles de confección, suavidad y calce..."
-            />
+
+            {!isPreviewMode ? (
+              <textarea
+                ref={textareaRef}
+                rows={3}
+                value={form.description}
+                onChange={(e) => update("description", e.target.value)}
+                className={`w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed overflow-hidden resize-none transition-all focus:border-brand-primary focus:outline-none ${
+                  isEnhancing
+                    ? "ring-2 ring-accent/30 bg-amber-50/20 animate-pulse border-accent"
+                    : ""
+                }`}
+                placeholder="Detalles de confección, suavidad y calce..."
+              />
+            ) : (
+              <div className="min-h-[90px] p-3.5 bg-slate-50 border border-border rounded-button text-xs leading-relaxed text-brand-secondary space-y-1.5">
+                {form.description ? (
+                  form.description.split("\n").map((line, idx) => {
+                    const trimmed = line.trim();
+                    if (!trimmed) return null;
+                    if (trimmed.startsWith("•") || trimmed.startsWith("*")) {
+                      return (
+                        <div key={idx} className="flex items-start gap-2 pl-1">
+                          <span className="text-accent font-bold">•</span>
+                          <span>
+                            {trimmed
+                              .replace(/^[•*]\s*/, "")
+                              .replace(/\*\*/g, "")}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return <p key={idx}>{trimmed.replace(/\*\*/g, "")}</p>;
+                  })
+                ) : (
+                  <p className="text-slate-400 italic">
+                    Sin descripción redactada...
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Divisor y Módulo de Variantes */}
@@ -1013,11 +1255,84 @@ export default function ProductFormView() {
         </div>
       </div>
 
+      {/* Modal de Confirmación: Desvincular Fotografía */}
+      {deleteImageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="max-w-md w-full bg-white rounded-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-full bg-rose-50 text-rose-600 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-bold text-brand-primary">
+                  ¿Desvincular fotografía de la variante?
+                </h3>
+                <p className="text-xs text-brand-secondary mt-1 leading-relaxed">
+                  Esta imagen se retirará de la galería del color {activeColor} y
+                  no estará disponible para sus variantes.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeleteImageModalOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                onClick={confirmDeleteActiveImage}
+              >
+                Eliminar fotografía
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal B2B de Éxito al Guardar */}
+      {isSuccessModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="max-w-md w-full bg-white rounded-card p-6 shadow-2xl text-center space-y-2">
+            <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
+            <h3 className="text-base font-bold text-brand-primary">
+              Producto guardado exitosamente
+            </h3>
+            <p className="text-xs text-brand-secondary leading-relaxed">
+              Las variantes, stock y galería por color se sincronizaron con la base de datos.
+            </p>
+            <div className="flex items-center justify-center gap-3 pt-4 mt-2 border-t border-border">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsSuccessModalOpen(false)}
+              >
+                Seguir editando
+              </Button>
+              <Button
+                type="button"
+                className="bg-brand-primary text-white font-bold"
+                onClick={() => navigate("/admin/productos")}
+              >
+                Volver a productos
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal de Estudio Fotográfico IA (2 Etapas con Imagen 3) */}
       <AiPhotoStudioModal
         isOpen={isStudioOpen}
         file={studioFile}
-        productName={form.name}
+        categoryName={
+          deps.categories.find(
+            (c) => String(c.id) === String(form.category_id),
+          )?.name || ""
+        }
         colorName={activeColor}
         onClose={() => {
           setIsStudioOpen(false);

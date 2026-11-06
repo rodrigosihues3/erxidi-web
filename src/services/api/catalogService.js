@@ -5,14 +5,31 @@ const PRODUCT_RELATIONAL_FIELDS = [
   "categories!inner(id, name, slug, parent_id, is_active),",
   "materials(id, name, is_active),",
   "brands(id, name, slug, is_active),",
-  "product_variants(id, size_id, color, color_hex, stock, sku, is_active, sizes(id, name, display_order)),",
+  "product_variants(id, size_id, color, color_hex, stock, sku, image_url, is_active, sizes(id, name, display_order)),",
+  "product_color_images(id, product_id, color, image_url, is_cover, display_order),",
   "size_guides(id, size_id, measurements, sizes(id, name, display_order))",
 ].join(" ");
+
+export const CATALOG_INVALIDATE_EVENT = "erxidi:catalog:invalidate";
+
+/**
+ * Emite evento de invalidación para forzar la recarga reactiva del catálogo
+ * en todas las vistas y hooks activos.
+ */
+export function invalidateCatalogCache() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(CATALOG_INVALIDATE_EVENT, {
+        detail: { timestamp: Date.now() },
+      }),
+    );
+  }
+}
 
 function sanitizeProductVariants(product) {
   if (!product) return null;
   const activeVariants = (product.product_variants || []).filter(
-    (variant) => variant.is_active !== false
+    (variant) => variant.is_active !== false,
   );
   return {
     ...product,
@@ -127,7 +144,7 @@ export async function getProductBySlug(slug) {
   } catch (error) {
     console.error(
       'Error al obtener producto con slug "' + slug + '":',
-      error.message || error
+      error.message || error,
     );
     throw error;
   }

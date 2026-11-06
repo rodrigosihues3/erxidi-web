@@ -147,6 +147,13 @@ export default function ProductDetailView({
         }
       });
     }
+    if (Array.isArray(currentProduct?.product_color_images)) {
+      currentProduct.product_color_images.forEach((ci) => {
+        if (ci.image_url && !list.includes(ci.image_url)) {
+          list.push(ci.image_url);
+        }
+      });
+    }
     return list;
   }, [currentProduct]);
 
@@ -279,6 +286,23 @@ export default function ProductDetailView({
   const handleVariantChange = (newVariant) => {
     setSelectedVariant(newVariant);
     setQuantity(1);
+    if (newVariant?.image_url) {
+      setSelectedImage(newVariant.image_url);
+    } else if (currentProduct?.product_color_images?.length) {
+      const colorCover =
+        currentProduct.product_color_images.find(
+          (ci) =>
+            ci.color?.toLowerCase() === newVariant?.color?.toLowerCase() &&
+            ci.is_cover,
+        ) ||
+        currentProduct.product_color_images.find(
+          (ci) =>
+            ci.color?.toLowerCase() === newVariant?.color?.toLowerCase(),
+        );
+      if (colorCover?.image_url) {
+        setSelectedImage(colorCover.image_url);
+      }
+    }
   };
 
   const handleAddToCartClick = () => {
@@ -303,7 +327,7 @@ export default function ProductDetailView({
             colorHex: selectedVariant.color_hex || "#111827",
             price: currentProduct.price,
             stock: selectedVariant.stock,
-            imageUrl: currentProduct.main_image_url,
+            imageUrl: selectedVariant.image_url || currentProduct.main_image_url,
           },
           qtyToAdd
         );
@@ -424,16 +448,20 @@ export default function ProductDetailView({
                   if (!trimmed) return null;
 
                   if (trimmed.startsWith("•") || trimmed.startsWith("*")) {
-                    const itemText = trimmed.replace(/^[•*]\s*/, "");
+                    const itemText = trimmed
+                      .replace(/^[•*]\s*/, "")
+                      .replace(/\*\*/g, "");
                     return (
                       <div key={idx} className="flex items-start gap-2 pl-1">
-                        <span className="text-accent font-black text-sm leading-none">•</span>
+                        <span className="text-accent font-black text-sm leading-none">
+                          •
+                        </span>
                         <span className="flex-1">{itemText}</span>
                       </div>
                     );
                   }
 
-                  return <p key={idx}>{trimmed}</p>;
+                  return <p key={idx}>{trimmed.replace(/\*\*/g, "")}</p>;
                 })}
               </div>
             )}

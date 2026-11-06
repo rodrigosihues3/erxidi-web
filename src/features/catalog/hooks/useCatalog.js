@@ -4,6 +4,7 @@ import {
   getMaterials,
   getBrands,
   getProducts,
+  CATALOG_INVALIDATE_EVENT,
 } from "../../../services/api/catalogService";
 
 /**
@@ -45,6 +46,17 @@ export function useCatalog(filterOptions = {}) {
 
   useEffect(() => {
     fetchData();
+
+    function handleInvalidate() {
+      fetchData();
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(CATALOG_INVALIDATE_EVENT, handleInvalidate);
+      return () => {
+        window.removeEventListener(CATALOG_INVALIDATE_EVENT, handleInvalidate);
+      };
+    }
   }, [fetchData]);
 
   return {
