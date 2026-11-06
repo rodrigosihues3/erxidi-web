@@ -50,7 +50,7 @@ export async function getProductDependencies() {
   const [categories, materials, sizes, brands] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, parent_id")
+      .select("id, name, parent_id, target_genders")
       .eq("is_active", true)
       .order("display_order"),
     supabase

@@ -8,7 +8,7 @@ export async function listCategories() {
   const { data, error } = await supabase
     .from("categories")
     .select(
-      "id, name, slug, description, image_url, parent_id, is_active, display_order, created_at, updated_at",
+      "id, name, slug, description, image_url, parent_id, is_active, display_order, target_genders, created_at, updated_at",
     )
     .order("display_order", { ascending: true })
     .order("name", { ascending: true });

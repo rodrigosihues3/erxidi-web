@@ -47,20 +47,6 @@ const initial = {
   target_gender: "hombre",
 };
 
-const GENDER_CATEGORIES = {
-  hombre: ["boxer", "calzoncillo", "media", "calcetin", "promocion"],
-  mujer: ["brasier", "calzon", "top", "panty", "media", "calcetin", "promocion"],
-  nino: ["boxer", "calzoncillo", "media", "calcetin", "promocion"],
-  nina: ["calzon", "panty", "top", "media", "calcetin", "promocion"],
-};
-
-function normalizeStr(s = "") {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
 function slugify(value) {
   return value
     .toLowerCase()
@@ -112,13 +98,14 @@ export default function ProductFormView() {
     }, 4000);
   }
 
-  // Textarea con Altura Dinámica Auto-Expandible
+  // Textarea con Altura Dinámica Auto-Expandible sensible a isPreviewMode
   useEffect(() => {
-    if (textareaRef.current) {
+    if (!isPreviewMode && textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.max(90, textareaRef.current.scrollHeight)}px`;
+      const nextHeight = Math.max(140, textareaRef.current.scrollHeight);
+      textareaRef.current.style.height = `${nextHeight}px`;
     }
-  }, [form.description]);
+  }, [form.description, isPreviewMode]);
 
   useEffect(() => {
     let active = true;
@@ -239,43 +226,33 @@ export default function ProductFormView() {
     }
   }, [activeColor, colorImages]);
 
-  // Jerarquía ordenada y filtrada por Público Objetivo
+  // Jerarquía ordenada de categorías
   const categorizedOptions = useMemo(() => {
-    const allowedKeywords = GENDER_CATEGORIES[form.target_gender] || [];
-
-    const isCatCompatible = (catName = "") => {
-      if (allowedKeywords.length === 0) return true;
-      const norm = normalizeStr(catName);
-      return allowedKeywords.some((kw) => norm.includes(kw));
-    };
-
     const roots = deps.categories.filter((c) => c.parent_id == null);
     const options = [];
 
     roots.forEach((root) => {
-      const children = deps.categories.filter(
-        (c) => c.parent_id === root.id && isCatCompatible(c.name),
-      );
-      const rootCompatible = isCatCompatible(root.name);
-
-      if (rootCompatible || children.length > 0) {
-        if (rootCompatible) {
-          options.push({ id: root.id, name: root.name, isChild: false });
-        }
-        children.forEach((child) => {
-          options.push({
-            id: child.id,
-            name: rootCompatible ? `— ${child.name}` : child.name,
-            isChild: true,
-          });
-        });
-      }
+      options.push({ id: root.id, name: root.name, isChild: false });
+      const children = deps.categories.filter((c) => c.parent_id === root.id);
+      children.forEach((child) => {
+        options.push({ id: child.id, name: `— ${child.name}`, isChild: true });
+      });
     });
 
-    if (options.length > 0) return options;
-    const filteredFlat = deps.categories.filter((c) => isCatCompatible(c.name));
-    return filteredFlat.length > 0 ? filteredFlat : deps.categories;
-  }, [deps.categories, form.target_gender]);
+    return options.length > 0 ? options : deps.categories;
+  }, [deps.categories]);
+
+  // Filtrado reactivo de categorías desde target_genders de base de datos
+  const filteredCategoryOptions = useMemo(() => {
+    if (!form.target_gender) return categorizedOptions;
+    return categorizedOptions.filter((cat) => {
+      const rawCat = deps.categories.find(
+        (c) => String(c.id) === String(cat.id),
+      );
+      if (!rawCat || !rawCat.target_genders) return true;
+      return rawCat.target_genders.includes(form.target_gender);
+    });
+  }, [categorizedOptions, deps.categories, form.target_gender]);
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -283,14 +260,11 @@ export default function ProductFormView() {
 
   function handleGenderChange(newGender) {
     update("target_gender", newGender);
-    const allowedKeywords = GENDER_CATEGORIES[newGender] || [];
     const currentCat = deps.categories.find(
       (c) => String(c.id) === String(form.category_id),
     );
-    if (currentCat) {
-      const nameNorm = normalizeStr(currentCat.name);
-      const isCompatible = allowedKeywords.some((kw) => nameNorm.includes(kw));
-      if (!isCompatible) {
+    if (currentCat && currentCat.target_genders) {
+      if (!currentCat.target_genders.includes(newGender)) {
         update("category_id", "");
       }
     }
@@ -1015,7 +989,7 @@ export default function ProductFormView() {
                 className="w-full h-9 px-2.5 border border-border rounded-button bg-surface-subtle text-xs font-semibold text-brand-primary focus:outline-none focus:border-brand-primary"
               >
                 <option value="">Categoría...</option>
-                {categorizedOptions.map((item) => (
+                {filteredCategoryOptions.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
@@ -1201,10 +1175,10 @@ export default function ProductFormView() {
             {!isPreviewMode ? (
               <textarea
                 ref={textareaRef}
-                rows={3}
+                rows={4}
                 value={form.description}
                 onChange={(e) => update("description", e.target.value)}
-                className={`w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed overflow-hidden resize-none transition-all focus:border-brand-primary focus:outline-none ${
+                className={`w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed min-h-[140px] resize-y transition-colors focus:border-brand-primary focus:outline-none ${
                   isEnhancing
                     ? "ring-2 ring-accent/30 bg-amber-50/20 animate-pulse border-accent"
                     : ""

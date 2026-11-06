@@ -46,13 +46,14 @@ export default function CategoriesView() {
 
   // Estados de formularios y edición
   const [editingId, setEditingId] = useState(null);
-  const [catForm, setCatForm] = useState({
+    const [catForm, setCatForm] = useState({
     name: "",
     slug: "",
     parent_id: "",
     display_order: 0,
     description: "",
     is_active: true,
+    target_genders: ["hombre", "mujer", "nino", "nina"],
   });
   const [brandForm, setBrandForm] = useState({
     name: "",
@@ -104,6 +105,7 @@ export default function CategoriesView() {
       display_order: 0,
       description: "",
       is_active: true,
+      target_genders: ["hombre", "mujer", "nino", "nina"],
     });
     setBrandForm({ name: "", slug: "", display_order: 0, is_active: true });
     setMaterialForm({ name: "", is_active: true });
@@ -131,6 +133,9 @@ export default function CategoriesView() {
     setSaving(true);
     setError("");
     try {
+            if (!catForm.target_genders || catForm.target_genders.length === 0) {
+        throw new Error("Selecciona al menos un público objetivo.");
+      }
       const payload = {
         name: catForm.name.trim(),
         slug: slugify(catForm.slug || catForm.name),
@@ -138,6 +143,7 @@ export default function CategoriesView() {
         display_order: Number(catForm.display_order) || 0,
         description: catForm.description.trim() || null,
         is_active: catForm.is_active,
+        target_genders: catForm.target_genders,
       };
       if (!payload.name) throw new Error("El nombre de la prenda es obligatorio.");
       if (editingId) await updateCategory(editingId, payload);
@@ -229,18 +235,6 @@ export default function CategoriesView() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-wider text-brand-secondary font-bold">
-          Catálogo Maestro
-        </p>
-        <h1 className="text-2xl font-black text-brand-primary">
-          Taxonomía y Atributos
-        </h1>
-        <p className="text-sm text-brand-secondary mt-1">
-          Administra las dimensiones independientes del catálogo: prendas, marcas, composiciones textiles y tallas.
-        </p>
-      </div>
-
       {/* Selector de Pestañas */}
       <div className="flex flex-wrap border-b border-border gap-2">
         <button
@@ -370,6 +364,46 @@ export default function CategoriesView() {
                     }))
                   }
                 />
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    Público Objetivo *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 p-3 bg-surface-subtle border border-border rounded-button">
+                    {[
+                      { id: "hombre", label: "Hombre" },
+                      { id: "mujer", label: "Mujer" },
+                      { id: "nino", label: "Niño" },
+                      { id: "nina", label: "Niña" },
+                    ].map((gender) => {
+                      const isChecked = (catForm.target_genders || []).includes(
+                        gender.id,
+                      );
+                      return (
+                        <label
+                          key={gender.id}
+                          className="inline-flex items-center gap-2 text-xs font-semibold text-brand-primary cursor-pointer select-none"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const current = catForm.target_genders || [];
+                              const updated = e.target.checked
+                                ? [...current, gender.id]
+                                : current.filter((g) => g !== gender.id);
+                              setCatForm((prev) => ({
+                                ...prev,
+                                target_genders: updated,
+                              }));
+                            }}
+                            className="h-4 w-4 rounded border-border accent-brand-primary cursor-pointer"
+                          />
+                          <span>{gender.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary">
                   Descripción
                   <textarea
@@ -413,6 +447,7 @@ export default function CategoriesView() {
                     <tr>
                       <th className="p-4">Prenda / Tipo</th>
                       <th className="p-4">Jerarquía</th>
+                      <th className="p-4">Público</th>
                       <th className="p-4">Slug</th>
                       <th className="p-4 text-center">Estado</th>
                       <th className="p-4 text-right">Acciones</th>
@@ -438,6 +473,26 @@ export default function CategoriesView() {
                                 Raíz
                               </span>
                             )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {(item.target_genders || []).map((g) => {
+                                const labels = {
+                                  hombre: "Hombre",
+                                  mujer: "Mujer",
+                                  nino: "Niño",
+                                  nina: "Niña",
+                                };
+                                return (
+                                  <span
+                                    key={g}
+                                    className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200"
+                                  >
+                                    {labels[g] || g}
+                                  </span>
+                                );
+                              })}
+                            </div>
                           </td>
                           <td className="p-4 text-xs font-mono text-brand-muted">
                             {item.slug}
@@ -466,6 +521,11 @@ export default function CategoriesView() {
                                     display_order: item.display_order || 0,
                                     description: item.description || "",
                                     is_active: item.is_active,
+                                    target_genders:
+                                      Array.isArray(item.target_genders) &&
+                                      item.target_genders.length > 0
+                                        ? item.target_genders
+                                        : ["hombre", "mujer", "nino", "nina"],
                                   });
                                 }}
                               >
