@@ -49,6 +49,11 @@ export default {
             text: '#C2410C',   // Orange 700
             border: '#FED7AA', // Orange 200
           },
+          pickup: {
+            bg: '#F5F3FF',     // Violet 50
+            text: '#6D28D9',   // Violet 700
+            border: '#DDD6FE', // Violet 200
+          },
         },
         status: {
           success: {
