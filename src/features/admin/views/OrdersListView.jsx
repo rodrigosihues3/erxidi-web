@@ -47,6 +47,7 @@ const STATUS_OPTIONS = [
   { value: "pendiente_pago", label: "Pendiente de Pago" },
   { value: "en_preparacion", label: "En Preparación" },
   { value: "por_asignar_repartidor", label: "En Bolsa" },
+  { value: "listo_recojo", label: "Listo para Recojo" },
   { value: "en_camino", label: "En Camino" },
   { value: "cerca", label: "Cerca" },
   { value: "en_destino", label: "En Destino" },
@@ -141,6 +142,7 @@ export default function OrdersListView() {
         "nearby",
         "en_destino",
         "arrived",
+        "listo_recojo",
       ];
     if (statusFilter === "finalizado")
       return ["entregado", "delivered"];
@@ -407,17 +409,66 @@ export default function OrdersListView() {
 
   async function handleSendToPool(order) {
     setUpdatingOrderId(order.id);
+    const isPickup =
+      order.delivery_type === "pickup" ||
+      order.delivery_type === "recojo" ||
+      order.shipping_type === "recojo_tienda" ||
+      order.shipping_type === "recojo" ||
+      order.shipping_type === "pickup";
+
+    const targetStatus = isPickup ? "listo_recojo" : "por_asignar_repartidor";
+
     try {
-      const updated = await markOrderReadyForDelivery(order.id);
+      const updated = await markOrderReadyForDelivery(order.id, targetStatus);
       setLocalOrders((prev) =>
         prev.map((o) =>
           o.id === order.id
-            ? { ...o, ...updated, status: "por_asignar_repartidor" }
+            ? { ...o, ...updated, status: targetStatus }
             : o,
         ),
       );
+
+      // Despacho de notificación por correo transaccional
+      const customerEmail =
+        order.customer_email || order.client_email || order.profiles?.email;
+
+      let fullOrder = order;
+      if (!customerEmail || !order.order_number) {
+        const fetched = await getOrderDetail(order.id);
+        if (fetched) {
+          fullOrder = { ...fetched, ...updated, status: targetStatus };
+        }
+      } else {
+        fullOrder = { ...order, ...updated, status: targetStatus };
+      }
+
+      const emailResult = await sendOrderNotificationEmail({
+        orderId: order.id,
+        status: targetStatus,
+        customerEmail: customerEmail || fullOrder.customer_email,
+        order: fullOrder,
+      });
+
+      if (emailResult?.success === false) {
+        showToast(
+          isPickup
+            ? `Listo para recojo. Aviso de correo: ${emailResult.error}`
+            : `Enviado a bolsa. Aviso de correo: ${emailResult.error}`,
+        );
+      } else {
+        showToast(
+          isPickup
+            ? "Pedido marcado como listo para recojo y cliente notificado."
+            : "Pedido trasladado a bolsa y cliente notificado.",
+        );
+      }
     } catch (err) {
-      window.alert(err.message || "Error al enviar pedido a la bolsa.");
+      window.alert(
+        err.message ||
+          (isPickup
+            ? "Error al marcar listo para recojo."
+            : "Error al enviar pedido a la bolsa."),
+      );
     } finally {
       setUpdatingOrderId(null);
     }
@@ -677,7 +728,21 @@ export default function OrdersListView() {
       );
     }
 
-    if (isEnPreparacion && !isPickup) {
+    if (isEnPreparacion) {
+      if (isPickup) {
+        return (
+          <Button
+            size="sm"
+            disabled={isUpdating}
+            onClick={() => handleSendToPool(order)}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
+          >
+            <Store className="w-3.5 h-3.5 mr-1" />
+            <span>Listo Recojo</span>
+            <ArrowRight className="w-3.5 h-3.5 ml-1" />
+          </Button>
+        );
+      }
       return (
         <Button
           size="sm"

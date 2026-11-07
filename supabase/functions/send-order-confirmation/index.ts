@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,6 +21,16 @@ const DELIVERY_LABELS: Record<string, string> = {
   pickup: "Recojo en Tienda ERXIDI",
 };
 
+function escapeHtml(unsafe: any): string {
+  if (unsafe === null || unsafe === undefined) return "";
+  return String(unsafe)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -39,25 +50,170 @@ serve(async (req) => {
     // 1. DISCRIMINADOR ESTRICTO: Notificaciones de Cambio de Estado (Backoffice)
     // =========================================================================
     if (body.is_status_update === true) {
+      // 1.1 Validación de Sesión y Rol (Bearer Token obligatorio)
+      const authHeader =
+        req.headers.get("authorization") || req.headers.get("Authorization") || "";
+      const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+      if (!token) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error: "Token de autorización requerido en cabecera Authorization.",
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+      const supabaseServiceKey =
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+        Deno.env.get("SERVICE_ROLE_KEY") ||
+        "";
+
+      if (!supabaseUrl || !supabaseServiceKey) {
+        throw new Error(
+          "Configuración incompleta: SUPABASE_URL o SERVICE_ROLE_KEY no configuradas."
+        );
+      }
+
+      const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (userError || !user) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error: "Sesión de usuario inválida o expirada.",
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Validar rol de usuario administrativo u operativo (owner / delivery)
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (
+        profileError ||
+        !profile ||
+        !["owner", "delivery"].includes(profile.role)
+      ) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error: "Acceso denegado: se requiere rol 'owner' o 'delivery'.",
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // 1.2 Validación y Coincidencia de Destinatario con la Base de Datos
       const targetEmail = (
         body.customerEmail ||
         body.recipient ||
         body.order?.customer_email ||
         ""
       ).trim();
-      const targetName =
-        body.customerName || body.order?.customer_name || "Cliente ERXIDI";
-      const subject =
-        body.subject ||
-        `Actualización de tu pedido #${body.order_number || ""} - ERXIDI`;
-      const html = body.html || "";
+      const rawOrderNumber =
+        body.order_number || body.order?.order_number || "";
+      const cleanOrderNumber = String(rawOrderNumber).replace(/^#/, "").trim();
 
-      if (!targetEmail || !html) {
+      if (!targetEmail || !cleanOrderNumber) {
         return new Response(
           JSON.stringify({
             sent: false,
             mode: "status_update",
-            reason: "missing_email_or_html",
+            error: "Parámetros incompletos: se requiere order_number y customerEmail.",
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const { data: dbOrder, error: orderLookupError } = await supabaseAdmin
+        .from("orders")
+        .select(
+          "id, order_number, customer_email, customer_id, profiles:customer_id ( email )"
+        )
+        .eq("order_number", cleanOrderNumber)
+        .maybeSingle();
+
+      if (orderLookupError || !dbOrder) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error: `La orden #${cleanOrderNumber} no existe en la base de datos.`,
+          }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const expectedEmail = (
+        dbOrder.customer_email ||
+        (Array.isArray(dbOrder.profiles)
+          ? dbOrder.profiles[0]?.email
+          : dbOrder.profiles?.email) ||
+        ""
+      )
+        .toLowerCase()
+        .trim();
+
+      if (!expectedEmail || expectedEmail !== targetEmail.toLowerCase()) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error: "El destinatario no coincide con el cliente asignado a la orden.",
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const targetName = (
+        body.customerName || body.order?.customer_name || "Cliente ERXIDI"
+      ).trim();
+      const subject = (
+        body.subject || `Actualización de tu pedido #${cleanOrderNumber} - ERXIDI`
+      ).trim();
+      const html = body.html || "";
+
+      if (!html) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error: "Contenido HTML ausente.",
           }),
           {
             status: 400,
@@ -118,7 +274,7 @@ serve(async (req) => {
 
     if (!order?.customer_email) {
       return new Response(
-        JSON.stringify({ sent: false, reason: "missing_customer_email" }),
+        JSON.stringify({ sent: false, error: "Correo de cliente no especificado." }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -132,7 +288,7 @@ serve(async (req) => {
         ? rawUrl
         : "https://erxidi-web.vercel.app"
     ).replace(/\/$/, "");
-    const trackingUrl = `${baseUrl}/seguimiento/${order.order_number}`;
+    const trackingUrl = `${baseUrl}/seguimiento/${encodeURIComponent(order.order_number || "")}`;
 
     const invoice = order.invoice_data || {};
     const docTypeLabel =
@@ -152,23 +308,36 @@ serve(async (req) => {
     const scheduleLabel =
       order.scheduled_time_slot || "Horario comercial 09:00 - 18:00";
 
+    // Saneamiento HTML estricto para prevención de inyecciones y phishing
+    const safeCustomerName = escapeHtml(order.customer_name || "Cliente");
+    const safeOrderNumber = escapeHtml(order.order_number || "");
+    const safeDeliveryAddress = escapeHtml(
+      order.delivery_address || "Tienda Central ERXIDI"
+    );
+    const safeCustomerPhone = escapeHtml(order.customer_phone || "-");
+    const safeScheduleLabel = escapeHtml(scheduleLabel);
+    const safeDeliveryModality = escapeHtml(deliveryModality);
+    const safePaymentMethodLabel = escapeHtml(paymentMethodLabel);
+    const safeDocTypeLabel = escapeHtml(docTypeLabel);
+    const safePdfFilename = escapeHtml(pdf_filename || "Comprobante.pdf");
+
     const itemsRowsHtml = (items || [])
       .map(
         (i: any) => `
         <tr>
           <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;">
-            <strong>${i.name || i.title || "Prenda"}</strong><br/>
-            <span style="font-size:12px;color:#6b7280;">Talla: ${i.size || "-"} | Color: ${i.color || "-"}</span>
+            <strong>${escapeHtml(i.name || i.title || "Prenda")}</strong><br/>
+            <span style="font-size:12px;color:#6b7280;">Talla: ${escapeHtml(i.size || "-")} | Color: ${escapeHtml(i.color || "-")}</span>
           </td>
-          <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${i.quantity}</td>
-          <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">S/ ${Number(i.price * i.quantity).toFixed(2)}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${escapeHtml(i.quantity)}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">S/ ${Number((i.price || 0) * (i.quantity || 1)).toFixed(2)}</td>
         </tr>`
       )
       .join("");
 
     const attachmentNoticeHtml = pdf_base64
       ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1;color:#0f172a;">
-           <strong>Comprobante Adjunto:</strong> Hemos adjuntado tu <strong>${docTypeLabel} (${pdf_filename || "Comprobante.pdf"})</strong> directamente en este correo para tu descarga.
+           <strong>Comprobante Adjunto:</strong> Hemos adjuntado tu <strong>${safeDocTypeLabel} (${safePdfFilename})</strong> directamente en este correo para tu descarga.
          </div>`
       : "";
 
@@ -181,7 +350,7 @@ serve(async (req) => {
 
         <h2 style="font-size:16px;margin:0 0 8px 0;">¡Tu pedido ha sido confirmado!</h2>
         <p style="font-size:14px;color:#334155;margin:0 0 16px 0;">
-          Hola <strong>${order.customer_name}</strong>, hemos recibido tu compra con el código de seguimiento <strong>${order.order_number}</strong>.
+          Hola <strong>${safeCustomerName}</strong>, hemos recibido tu compra con el código de seguimiento <strong>${safeOrderNumber}</strong>.
         </p>
 
         <div style="text-align:center;margin:24px 0;">
@@ -197,11 +366,11 @@ serve(async (req) => {
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:6px;letter-spacing:0.05em;">
             Detalles de Entrega y Despacho
           </div>
-          <strong>Modalidad:</strong> ${deliveryModality}<br/>
-          <strong>Destino:</strong> ${order.delivery_address || "Tienda Central ERXIDI"}<br/>
-          <strong>Ventana Horaria:</strong> ${scheduleLabel}<br/>
-          <strong>Contacto / Recibe:</strong> ${order.customer_name} (${order.customer_phone || "-"})<br/>
-          <strong>Método de Pago:</strong> ${paymentMethodLabel}
+          <strong>Modalidad:</strong> ${safeDeliveryModality}<br/>
+          <strong>Destino:</strong> ${safeDeliveryAddress}<br/>
+          <strong>Ventana Horaria:</strong> ${safeScheduleLabel}<br/>
+          <strong>Contacto / Recibe:</strong> ${safeCustomerName} (${safeCustomerPhone})<br/>
+          <strong>Método de Pago:</strong> ${safePaymentMethodLabel}
           ${attachmentNoticeHtml}
         </div>
 

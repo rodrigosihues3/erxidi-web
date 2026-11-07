@@ -2,6 +2,8 @@ import { supabase } from "../../../services/supabase";
 
 export const AUTO_NOTIFICATION_STATUSES = [
   "en_preparacion",
+  "por_asignar",
+  "por_asignar_repartidor",
   "asignado",
   "en_bolsa",
   "en_camino",
@@ -26,15 +28,20 @@ const DELIVERY_MODALITY_LABELS = {
 export function normalizeNotificationStatus(rawStatus = "") {
   const s = String(rawStatus).toLowerCase().trim();
   if (["en_preparacion", "preparing"].includes(s)) return "en_preparacion";
-  if (["asignado", "assigned", "en_bolsa", "por_asignar", "por_asignar_repartidor"].includes(s)) {
+  if (["por_asignar", "por_asignar_repartidor", "en_bolsa"].includes(s)) {
+    return "por_asignar";
+  }
+  if (["asignado", "assigned"].includes(s)) {
     return "asignado";
+  }
+  if (["listo_recojo"].includes(s)) {
+    return "listo_recojo";
   }
   if (["en_camino", "dispatched"].includes(s)) return "en_camino";
   if (["cerca", "nearby"].includes(s)) return "cerca";
   if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
     return "en_ubicacion";
   }
-  if (["listo_recojo"].includes(s)) return "listo_recojo";
   if (["entregado", "delivered"].includes(s)) return "entregado";
   if (["incidente", "incidencia_transporte"].includes(s)) return "incidente";
   if (["cancelado", "cancelled"].includes(s)) return "cancelado";
@@ -102,7 +109,17 @@ export function createOrderStatusTemplate(
       messageHtml: `
         <p style="margin:0 0 12px 0;">Hola <strong>${customerName}</strong>,</p>
         <p style="margin:0 0 12px 0;">Te informamos que el pago de tu pedido <strong>#${cleanCode}</strong> ha sido validado correctamente. Nuestro personal de almacén ya se encuentra seleccionando y empaquetando tus prendas.</p>
-        <p style="margin:0;">Te notificaremos por este medio tan pronto tu paquete sea asignado a reparto.</p>
+        <p style="margin:0;">Te notificaremos por este medio tan pronto tu paquete avance a la siguiente etapa de despacho.</p>
+      `,
+    },
+    por_asignar: {
+      subject: `Tu pedido #${cleanCode} está empacado en nuestro taller - ERXIDI`,
+      badge: "POR ASIGNAR",
+      heading: "Paquete embalado en nuestro taller",
+      messageHtml: `
+        <p style="margin:0 0 12px 0;">Hola <strong>${customerName}</strong>,</p>
+        <p style="margin:0 0 12px 0;">Tu pedido está empacado en nuestro taller. En breve será asignado a un repartidor.</p>
+        <p style="margin:0;">Te notificaremos por este medio tan pronto la unidad asignada inicie su recorrido hacia tu dirección.</p>
       `,
     },
     asignado: {
@@ -150,13 +167,13 @@ export function createOrderStatusTemplate(
       `,
     },
     listo_recojo: {
-      subject: `Tu pedido #${cleanCode} está listo para recojo en tienda - ERXIDI`,
+      subject: `¡Tu pedido #${cleanCode} está listo para ser recogido! - ERXIDI`,
       badge: "LISTO PARA RECOJO",
       heading: "Tu pedido está listo para recoger en tienda",
       messageHtml: `
         <p style="margin:0 0 12px 0;">Hola <strong>${customerName}</strong>,</p>
-        <p style="margin:0 0 12px 0;">Te informamos que tu pedido <strong>#${cleanCode}</strong> ya se encuentra embalado y listo para recojo en nuestra tienda física.</p>
-        <p style="margin:0;">Recuerda acercarte portando tu documento de identidad (DNI) e indicando el número de tu pedido.</p>
+        <p style="margin:0 0 12px 0;">Tu pedido está listo para ser recogido en nuestra tienda central ERXIDI.</p>
+        <p style="margin:0;">Recuerda acercarte portando tu documento de identidad (DNI) e indicando tu código de pedido <strong>#${cleanCode}</strong>.</p>
       `,
     },
     entregado: {
@@ -327,9 +344,13 @@ export async function sendOrderNotificationEmail({
   );
 
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+
     const { data, error } = await supabase.functions.invoke(
       "send-order-confirmation",
       {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: {
           is_status_update: true,
           customerEmail: resolvedEmail,
@@ -341,7 +362,39 @@ export async function sendOrderNotificationEmail({
       },
     );
 
-    if (error) throw error;
+    if (error) {
+      let descriptiveMessage = error.message || "Error al enviar notificación";
+      const status = error.context?.status;
+      try {
+        if (error.context && typeof error.context.json === "function") {
+          const body = await error.context.json();
+          if (body?.error) {
+            descriptiveMessage =
+              typeof body.error === "string"
+                ? body.error
+                : body.error.message || JSON.stringify(body.error);
+          }
+        }
+      } catch (_) {}
+
+      if (status === 401 || status === 403) {
+        descriptiveMessage = "No autorizado: se requiere sesión activa con permisos operativos (owner o delivery).";
+      } else if (status === 400) {
+        descriptiveMessage = `Parámetros de correo incorrectos o inválidos: ${descriptiveMessage}`;
+      } else if (status === 404) {
+        descriptiveMessage = "Orden o cliente no encontrado en el sistema.";
+      } else if (status >= 500) {
+        descriptiveMessage = "Servicio de correo temporalmente no disponible (caída del proveedor).";
+      }
+
+      return {
+        success: false,
+        subject: template.subject,
+        statusCode: status,
+        error: descriptiveMessage,
+      };
+    }
+
     return {
       success: true,
       subject: template.subject,
@@ -352,10 +405,35 @@ export async function sendOrderNotificationEmail({
       "Fallo en servicio de email transaccional:",
       err?.message || err,
     );
+    let descriptiveMessage = err?.message || "Error al enviar correo";
+    const status = err?.context?.status;
+    try {
+      if (err?.context && typeof err.context.json === "function") {
+        const body = await err.context.json();
+        if (body?.error) {
+          descriptiveMessage =
+            typeof body.error === "string"
+              ? body.error
+              : body.error.message || JSON.stringify(body.error);
+        }
+      }
+    } catch (_) {}
+
+    if (status === 401 || status === 403) {
+      descriptiveMessage = "No autorizado: se requiere sesión activa con permisos operativos (owner o delivery).";
+    } else if (status === 400) {
+      descriptiveMessage = `Parámetros de correo incorrectos o inválidos: ${descriptiveMessage}`;
+    } else if (status === 404) {
+      descriptiveMessage = "Orden o cliente no encontrado en el sistema.";
+    } else if (status >= 500) {
+      descriptiveMessage = "Servicio de correo temporalmente no disponible (caída del proveedor).";
+    }
+
     return {
       success: false,
       subject: template.subject,
-      error: err?.message || "Error al enviar correo",
+      statusCode: status,
+      error: descriptiveMessage,
     };
   }
 }

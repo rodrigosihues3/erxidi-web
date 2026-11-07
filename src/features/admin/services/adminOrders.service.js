@@ -4,6 +4,7 @@ export const ORDER_STATUS = {
   RECEIVED: "received",
   PREPARING: "en_preparacion",
   READY_FOR_DELIVERY: "por_asignar_repartidor",
+  READY_FOR_PICKUP: "listo_recojo",
   ASSIGNED: "asignado",
   DISPATCHED: "en_camino",
   NEARBY: "cerca",
@@ -37,7 +38,7 @@ const STEP_KEY_TO_DB_STATUS = {
   recibido: "recibido",
   en_preparacion: "en_preparacion",
   por_asignar: "por_asignar_repartidor",
-  listo_recojo: "por_asignar_repartidor",
+  listo_recojo: "listo_recojo",
   asignado: "asignado",
   en_camino: "en_camino",
   cerca: "cerca",
@@ -404,13 +405,14 @@ export async function rejectOrderPayment(orderId, reasonComment) {
 }
 
 /**
- * Marca el empaque como listo y traslada la orden a la bolsa de repartidores ('por_asignar_repartidor').
+ * Marca el empaque como listo y traslada la orden a la bolsa de repartidores ('por_asignar_repartidor')
+ * o a 'listo_recojo' en caso de recojo en tienda física.
  */
-export async function markOrderReadyForDelivery(orderId) {
+export async function markOrderReadyForDelivery(orderId, targetStatus = "por_asignar_repartidor") {
   const { data, error } = await supabase
     .from("orders")
     .update({
-      status: "por_asignar_repartidor",
+      status: targetStatus,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)

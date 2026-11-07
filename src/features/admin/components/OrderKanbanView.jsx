@@ -43,7 +43,7 @@ const KANBAN_COLUMNS = [
   },
   {
     id: "en_ruta",
-    title: "En Ruta",
+    title: "En Ruta / Por Recoger",
     statuses: [
       "en_camino",
       "dispatched",
@@ -51,6 +51,7 @@ const KANBAN_COLUMNS = [
       "nearby",
       "en_destino",
       "arrived",
+      "listo_recojo",
     ],
     bar: "bg-stage-route-dot",
     headerBg: "bg-stage-route-bg",
@@ -334,6 +335,8 @@ export default function OrderKanbanView({
     }
 
     if (col.id === "en_preparacion") {
+      const isPickup =
+        order.delivery_type === "pickup" || order.delivery_type === "recojo";
       return (
         <Button
           type="button"
@@ -346,7 +349,7 @@ export default function OrderKanbanView({
           }}
           className="h-8 px-3 text-xs"
         >
-          <span>A Bolsa</span>
+          <span>{isPickup ? "A Recojo" : "A Bolsa"}</span>
           <ArrowRight className="w-3.5 h-3.5 ml-1" />
         </Button>
       );
@@ -508,24 +511,36 @@ export default function OrderKanbanView({
                           </div>
 
                           {showDeliverySection && (
-                            <div className="flex items-center justify-between gap-2 text-xs">
-                              <span className="text-brand-secondary">
-                                Repartidor
-                              </span>
-                              {order.assigned_delivery_id ? (
-                                <span className="text-brand-primary">
-                                  {driverName || "Asignado"}
+                            order.delivery_type === "pickup" ||
+                            order.delivery_type === "recojo" ? (
+                              <div className="flex items-center justify-between gap-2 text-xs">
+                                <span className="text-brand-secondary">
+                                  Entrega
                                 </span>
-                              ) : (
-                                <Badge
-                                  variant="warning"
-                                  icon={UserX}
-                                  className="rounded-sm text-[11px] px-2 py-0.5 font-medium cursor-default"
-                                >
-                                  Sin asignar
-                                </Badge>
-                              )}
-                            </div>
+                                <span className="text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-sm text-[11px] font-medium">
+                                  Esperando al cliente
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between gap-2 text-xs">
+                                <span className="text-brand-secondary">
+                                  Repartidor
+                                </span>
+                                {order.assigned_delivery_id ? (
+                                  <span className="text-brand-primary">
+                                    {driverName || "Asignado"}
+                                  </span>
+                                ) : (
+                                  <Badge
+                                    variant="warning"
+                                    icon={UserX}
+                                    className="rounded-sm text-[11px] px-2 py-0.5 font-medium cursor-default"
+                                  >
+                                    Sin asignar
+                                  </Badge>
+                                )}
+                              </div>
+                            )
                           )}
 
                           <div className="flex items-center justify-between gap-2 pt-1">
