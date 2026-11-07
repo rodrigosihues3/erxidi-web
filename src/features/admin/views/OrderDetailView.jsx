@@ -2,20 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUpRight,
   CheckCircle2,
   Clock,
   Truck,
+  Store,
   Package,
-  MapPin,
-  RotateCcw,
+  Copy,
+  Check,
+  FileText,
+  Download,
   Send,
+  MessageCircle,
   AlertTriangle,
   Ban,
   RefreshCw,
-  ExternalLink,
-  MessageCircle,
-  UserCheck,
   X,
+  ExternalLink,
+  UserCheck,
+  Users,
+  RotateCcw,
+  Loader2,
+  MapPin,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../../../services/supabase";
@@ -29,8 +37,16 @@ import {
   CardContent,
 } from "../../../components/ui/Card";
 import OrderPaymentModal from "../components/OrderPaymentModal";
+import AssignCourierModal from "../components/AssignCourierModal";
+import { handleDownloadFiscalReceipt } from "../services/fiscalReceipt.service";
+import {
+  sendOrderNotificationEmail,
+  AUTO_NOTIFICATION_STATUSES,
+} from "../services/orderNotification.service";
 import {
   getOrderDetail,
+  DELIVERY_STEPS,
+  PICKUP_STEPS,
   ORDER_LIFECYCLE_STEPS,
   normalizeStatusToStepKey,
   updateOrderStatus,
@@ -42,7 +58,7 @@ import {
   resolveOrderIncident,
 } from "../services/adminOrders.service";
 
-export { ORDER_LIFECYCLE_STEPS };
+export { DELIVERY_STEPS, PICKUP_STEPS, ORDER_LIFECYCLE_STEPS };
 
 const CANCEL_REASONS = [
   "Solicitud directa del cliente (dentro del plazo).",
@@ -66,14 +82,6 @@ const PAYMENT_METHOD_LABELS = {
   tarjeta: "Tarjeta",
   contraentrega: "Contraentrega",
   efectivo: "Contraentrega (Efectivo)",
-};
-
-const DELIVERY_TYPE_LABELS = {
-  express: "Express",
-  programado: "Programado",
-  scheduled: "Programado",
-  recojo: "Recojo en tienda",
-  pickup: "Recojo en tienda",
 };
 
 function money(value) {
@@ -114,6 +122,7 @@ function getStatusBadgeClass(status) {
       "en_destino",
       "arrived",
       "asignado",
+      "listo_recojo",
     ].includes(s)
   ) {
     return "bg-stage-route-bg text-stage-route-dot border border-stage-route-border";
@@ -425,90 +434,6 @@ function ReportIncidentModal({ isOpen, loading, onClose, onConfirm }) {
   );
 }
 
-function ReassignDriverModal({
-  isOpen,
-  currentDriverId,
-  deliveryStaff,
-  loading,
-  onClose,
-  onConfirm,
-}) {
-  const [selectedId, setSelectedId] = useState(currentDriverId || "");
-
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedId(currentDriverId || "");
-    }
-  }, [isOpen, currentDriverId]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <UserCheck className="w-4 h-4 text-brand-primary" />
-            <h3 className="text-sm font-bold text-brand-primary">
-              Cambiar / Reasignar Repartidor
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 rounded-button text-brand-muted hover:text-brand-primary hover:bg-surface-subtle transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <p className="text-xs text-brand-secondary">
-            Selecciona el repartidor disponible para asignar el paquete por
-            contingencia operativa:
-          </p>
-
-          <select
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="w-full h-10 px-3 text-xs font-semibold bg-white border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary"
-          >
-            <option value="">-- Sin asignar (En bolsa común) --</option>
-            {deliveryStaff.map((staff) => (
-              <option key={staff.id} value={staff.id}>
-                {staff.first_name} {staff.paternal_surname || ""} (
-                {staff.phone || "Sin tel."})
-              </option>
-            ))}
-          </select>
-
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={loading}
-              onClick={onClose}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              isLoading={loading}
-              disabled={loading}
-              onClick={() => onConfirm(selectedId)}
-            >
-              Guardar Asignación
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function OrderDetailView() {
   const { orderNumber } = useParams();
   const navigate = useNavigate();
@@ -517,6 +442,8 @@ export default function OrderDetailView() {
   const [deliveryStaff, setDeliveryStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [toastMessage, setToastMessage] = useState("");
@@ -528,7 +455,7 @@ export default function OrderDetailView() {
   });
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [incidentModalOpen, setIncidentModalOpen] = useState(false);
-  const [driverModalOpen, setDriverModalOpen] = useState(false);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 
   function showToast(msg) {
@@ -625,17 +552,32 @@ export default function OrderDetailView() {
     return () => supabase.removeChannel(channel);
   }, [order?.id]);
 
-  const currentStepKey = useMemo(
-    () => normalizeStatusToStepKey(order?.status),
-    [order?.status],
-  );
+  const isPickup = useMemo(() => {
+    if (!order) return false;
+    const sType = (order.shipping_type || "").toLowerCase();
+    const dType = (order.delivery_type || "").toLowerCase();
+    return (
+      sType === "recojo_tienda" ||
+      dType === "pickup" ||
+      dType === "recojo" ||
+      sType === "recojo" ||
+      sType === "pickup"
+    );
+  }, [order]);
+
+  const currentSteps = useMemo(() => {
+    return isPickup ? PICKUP_STEPS : DELIVERY_STEPS;
+  }, [isPickup]);
+
+  const currentStepKey = useMemo(() => {
+    if (!order) return "recibido";
+    return normalizeStatusToStepKey(order.status, isPickup);
+  }, [order, isPickup]);
 
   const currentStepIndex = useMemo(() => {
-    const idx = ORDER_LIFECYCLE_STEPS.findIndex(
-      (s) => s.key === currentStepKey,
-    );
+    const idx = currentSteps.findIndex((s) => s.key === currentStepKey);
     return idx >= 0 ? idx : 0;
-  }, [currentStepKey]);
+  }, [currentSteps, currentStepKey]);
 
   const currentStepMeta = useMemo(() => {
     if (currentStepKey === "cancelado") {
@@ -652,24 +594,34 @@ export default function OrderDetailView() {
         sublabel: "Contingencia en ruta",
       };
     }
-    return (
-      ORDER_LIFECYCLE_STEPS[currentStepIndex] || ORDER_LIFECYCLE_STEPS[0]
-    );
-  }, [currentStepKey, currentStepIndex]);
+    return currentSteps[currentStepIndex] || currentSteps[0];
+  }, [currentStepKey, currentSteps, currentStepIndex]);
+
+  const isCancelled = currentStepKey === "cancelado";
+  const isFinishedOrCancelled =
+    isCancelled ||
+    currentStepKey === "entregado" ||
+    order?.status === "entregado" ||
+    order?.status === "delivered";
 
   const nextStep = useMemo(() => {
-    if (
-      currentStepKey === "cancelado" ||
-      currentStepKey === "incidencia_transporte"
-    ) {
+    if (isFinishedOrCancelled || currentStepKey === "incidencia_transporte") {
       return null;
     }
-    return ORDER_LIFECYCLE_STEPS[currentStepIndex + 1] || null;
-  }, [currentStepKey, currentStepIndex]);
+    return currentSteps[currentStepIndex + 1] || null;
+  }, [isFinishedOrCancelled, currentStepKey, currentSteps, currentStepIndex]);
+
+  const canToggleBolsa = useMemo(() => {
+    if (!order || isPickup) return false;
+    return (
+      currentStepIndex >= 2 ||
+      Boolean(order.has_incident || order.status === "incidencia_transporte")
+    );
+  }, [order, isPickup, currentStepIndex]);
 
   function handleRequestJump(stepKey) {
-    const targetIdx = ORDER_LIFECYCLE_STEPS.findIndex((s) => s.key === stepKey);
-    const targetStep = ORDER_LIFECYCLE_STEPS[targetIdx];
+    const targetIdx = currentSteps.findIndex((s) => s.key === stepKey);
+    const targetStep = currentSteps[targetIdx];
     if (!targetStep) return;
     setJumpModal({
       isOpen: true,
@@ -678,17 +630,98 @@ export default function OrderDetailView() {
     });
   }
 
+  function buildEmailPayload(
+    targetOrder,
+    statusOverride,
+    driverOverride = null,
+    reasonOverride = null,
+  ) {
+    const prof = targetOrder?.profiles || order?.profiles;
+    const email =
+      targetOrder?.customer_email ||
+      targetOrder?.client_email ||
+      prof?.email ||
+      "";
+    const resolvedName =
+      targetOrder?.customer_name ||
+      [prof?.first_name, prof?.paternal_surname, prof?.maternal_surname]
+        .filter(Boolean)
+        .join(" ") ||
+      "Cliente ERXIDI";
+
+    const driverObj =
+      driverOverride ||
+      deliveryStaff.find((s) => s.id === targetOrder?.assigned_delivery_id) ||
+      targetOrder?.delivery_profile ||
+      null;
+
+    const cleanDriverName = driverObj
+      ? `${driverObj.first_name || ""} ${String(driverObj.paternal_surname || "").replace(/\[.*?\]/g, "").trim()}`.trim()
+      : null;
+
+    const addressObj =
+      typeof targetOrder?.delivery_address === "object" &&
+      targetOrder?.delivery_address !== null
+        ? targetOrder.delivery_address
+        : null;
+    const formattedAddress = addressObj
+      ? [
+          addressObj.street || addressObj.address,
+          addressObj.district,
+          addressObj.city,
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : targetOrder?.delivery_address ||
+        targetOrder?.shipping_address ||
+        "—";
+
+    return {
+      orderId: targetOrder?.id,
+      orderNumber:
+        targetOrder?.order_number ||
+        `ERX-${String(targetOrder?.id || "").slice(0, 6)}`,
+      customerEmail: email,
+      customerName: resolvedName,
+      status: statusOverride || targetOrder?.status,
+      deliveryType:
+        targetOrder?.shipping_type ||
+        targetOrder?.delivery_type ||
+        "programado",
+      deliveryAddress: formattedAddress,
+      scheduledTimeSlot: targetOrder?.scheduled_time_slot || null,
+      order: targetOrder,
+      driverInfo: driverObj
+        ? {
+            name: cleanDriverName,
+            phone: driverObj.phone || "",
+            dni: driverObj.dni || "",
+          }
+        : null,
+      incidentReason:
+        reasonOverride ||
+        targetOrder?.incident_reason ||
+        targetOrder?.incident_comment ||
+        null,
+    };
+  }
+
   async function handleConfirmJump() {
     if (!order || !jumpModal.targetStep) return;
     setSaving(true);
     try {
-      const updated = await updateOrderStatus(
-        order.id,
-        jumpModal.targetStep.key,
-      );
-      setOrder((curr) => ({ ...curr, ...updated }));
+      const targetKey = jumpModal.targetStep.key;
+      const updated = await updateOrderStatus(order.id, targetKey);
+      const nextOrderState = { ...order, ...updated };
+      setOrder(nextOrderState);
+      const targetStepLabel = jumpModal.targetStep.label;
       setJumpModal({ isOpen: false, targetStep: null, isRevert: false });
-      showToast(`Estado actualizado a ${jumpModal.targetStep.label}.`);
+      showToast(`Estado actualizado a ${targetStepLabel}.`);
+
+      const payload = buildEmailPayload(nextOrderState, targetKey);
+      if (payload.customerEmail && AUTO_NOTIFICATION_STATUSES.includes(targetKey)) {
+        sendOrderNotificationEmail(payload);
+      }
     } catch (err) {
       showToast(err.message || "Error al cambiar el estado.");
     } finally {
@@ -729,9 +762,20 @@ export default function OrderDetailView() {
         items: order.items || [],
         previousStatus: order.status,
       });
-      setOrder((curr) => ({ ...curr, ...updated }));
+      const nextOrderState = { ...order, ...updated };
+      setOrder(nextOrderState);
       setCancelModalOpen(false);
       showToast("Pedido cancelado y stock restituido.");
+
+      const payload = buildEmailPayload(
+        nextOrderState,
+        "cancelado",
+        null,
+        reason,
+      );
+      if (payload.customerEmail) {
+        sendOrderNotificationEmail(payload);
+      }
     } catch (err) {
       showToast(err.message || "Error al cancelar el pedido.");
     } finally {
@@ -748,9 +792,20 @@ export default function OrderDetailView() {
         comment,
         returnToPool,
       });
-      setOrder((curr) => ({ ...curr, ...updated }));
+      const nextOrderState = { ...order, ...updated };
+      setOrder(nextOrderState);
       setIncidentModalOpen(false);
       showToast("Incidente operativo registrado.");
+
+      const payload = buildEmailPayload(
+        nextOrderState,
+        "incidente",
+        null,
+        reason,
+      );
+      if (payload.customerEmail) {
+        sendOrderNotificationEmail(payload);
+      }
     } catch (err) {
       showToast(err.message || "Error al reportar incidente.");
     } finally {
@@ -768,18 +823,38 @@ export default function OrderDetailView() {
         order.status,
       );
       const selectedStaff = deliveryStaff.find((s) => s.id === deliveryId);
-      setOrder((curr) => ({
-        ...curr,
+      const courierName = selectedStaff
+        ? `${selectedStaff.first_name || ""} ${String(selectedStaff.paternal_surname || "").replace(/\[.*?\]/g, "").trim()}`.trim()
+        : null;
+
+      const nextOrderState = {
+        ...order,
         ...updated,
         assigned_delivery_id: deliveryId || null,
         delivery_profile: selectedStaff || null,
-      }));
-      setDriverModalOpen(false);
-      showToast(
-        deliveryId
-          ? "Repartidor asignado correctamente."
-          : "Repartidor desvinculado.",
-      );
+      };
+      setOrder(nextOrderState);
+      setAssignModalOpen(false);
+
+      if (deliveryId) {
+        if (currentStepKey === "por_asignar") {
+          showToast(
+            `Pedido asignado a ${courierName}. Fase actualizada a Asignado.`,
+          );
+        } else {
+          showToast(`Repartidor reasignado a ${courierName}.`);
+        }
+        const payload = buildEmailPayload(
+          nextOrderState,
+          "asignado",
+          selectedStaff,
+        );
+        if (payload.customerEmail) {
+          sendOrderNotificationEmail(payload);
+        }
+      } else {
+        showToast("Repartidor desvinculado. Pedido en bolsa común.");
+      }
     } catch (err) {
       showToast(err.message || "Error al asignar repartidor.");
     } finally {
@@ -807,16 +882,38 @@ export default function OrderDetailView() {
     }
   }
 
-  function handleSendCustomerEmail(status) {
-    const email = order?.customer_email || order?.profiles?.email;
-    const stepLabel = currentStepMeta.label;
-    if (!email) {
-      showToast(
-        `Notificación de estado (${stepLabel}) registrada en el sistema.`,
-      );
+  async function handleSendCustomerEmail(targetStatus) {
+    const payload = buildEmailPayload(order, targetStatus || currentStepKey);
+    if (!payload.customerEmail) {
+      showToast("El pedido no tiene un correo electrónico asociado.");
       return;
     }
-    showToast(`Notificación de estado "${stepLabel}" enviada a ${email}.`);
+    setIsSendingEmail(true);
+    try {
+      const res = await sendOrderNotificationEmail(payload);
+      if (res && res.success === false) {
+        showToast(res.error || "Error al enviar el correo.");
+        return;
+      }
+      showToast("Notificación enviada al cliente para el estado actual.");
+    } catch (err) {
+      showToast(err.message || "Error al enviar el correo.");
+    } finally {
+      setIsSendingEmail(false);
+    }
+  }
+
+  async function handleDownloadReceipt() {
+    if (!order) return;
+    setIsDownloadingPdf(true);
+    try {
+      await handleDownloadFiscalReceipt(order);
+      showToast("Comprobante fiscal (PDF) descargado.");
+    } catch (err) {
+      showToast(err.message || "No se pudo sintetizar el comprobante fiscal.");
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   }
 
   if (loading) {
@@ -849,9 +946,6 @@ export default function OrderDetailView() {
   const profile = order.profiles;
   const address = order.addresses;
   const fiscal = order.invoice_data || {};
-  const isPickup = ["pickup", "recojo"].includes(
-    (order.delivery_type || "").toLowerCase(),
-  );
   const customerName =
     order.customer_name ||
     [profile?.first_name, profile?.paternal_surname, profile?.maternal_surname]
@@ -870,11 +964,11 @@ export default function OrderDetailView() {
     : null;
 
   const isPaid = order.payment_status === "paid";
-  const isCancelled = currentStepKey === "cancelado";
   const hasIncident = Boolean(
     order.incident_reason ||
       order.incident_comment ||
-      order.status === "incidencia_transporte",
+      order.status === "incidencia_transporte" ||
+      order.has_incident,
   );
 
   const invoiceTypeLabel =
@@ -883,6 +977,12 @@ export default function OrderDetailView() {
       : order.invoice_type === "boleta"
         ? "Boleta de Venta"
         : "Sin comprobante";
+
+  const operationNumber =
+    order.operation_number ||
+    order.payment_reference ||
+    order.payment_gateway_tx_id ||
+    "";
 
   return (
     <div className="space-y-6">
@@ -916,28 +1016,32 @@ export default function OrderDetailView() {
 
         {/* Derecha: Botonera de Acción */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Quitar / Reintegrar Bolsa */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={saving || isCancelled || isPickup}
-            onClick={() => handleToggleBolsa()}
-            className="text-xs font-semibold text-slate-600 hover:text-brand-primary"
-            title="Oculta este pedido de la bolsa común de repartidores"
-          >
-            <Package className="w-3.5 h-3.5 mr-1" />
-            {order.in_pool === false ? "Reintegrar a bolsa" : "Quitar de bolsa"}
-          </Button>
+          {/* Quitar / Reintegrar Bolsa (Solo delivery con step >= 3 o incidente) */}
+          {canToggleBolsa && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={saving || isCancelled}
+              onClick={() => handleToggleBolsa()}
+              className="text-xs font-semibold text-slate-600 hover:text-brand-primary"
+              title="Oculta este pedido de la bolsa común de repartidores"
+            >
+              <Package className="w-3.5 h-3.5 mr-1" />
+              {order.in_pool === false
+                ? "Reintegrar a bolsa"
+                : "Quitar de bolsa"}
+            </Button>
+          )}
 
           {/* Reportar Incidencia Operativa */}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={saving || isCancelled}
+            disabled={saving || isFinishedOrCancelled}
             onClick={() => setIncidentModalOpen(true)}
-            className="text-xs font-semibold text-amber-700 border-amber-200 hover:bg-amber-50"
+            className="text-xs font-semibold text-amber-700 border-amber-200 hover:bg-amber-50 disabled:opacity-50"
           >
             <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600" />
             Reportar incidente
@@ -948,9 +1052,9 @@ export default function OrderDetailView() {
             type="button"
             variant="outline"
             size="sm"
-            disabled={saving || isCancelled}
+            disabled={saving || isFinishedOrCancelled}
             onClick={() => setCancelModalOpen(true)}
-            className="text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50"
+            className="text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 disabled:opacity-50"
           >
             <Ban className="w-3.5 h-3.5 mr-1 text-rose-600" />
             Cancelar pedido
@@ -974,7 +1078,7 @@ export default function OrderDetailView() {
       </div>
 
       {/* =====================================================================
-          4. DISTRIBUCIÓN DEL LAYOUT EN DOS COLUMNAS (65% / 35%)
+          DISTRIBUCIÓN DEL LAYOUT EN DOS COLUMNAS (65% / 35%)
          ===================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-[65fr_35fr] gap-6 items-start">
         {/* ===================================================================
@@ -982,10 +1086,14 @@ export default function OrderDetailView() {
            =================================================================== */}
         <div className="space-y-6 min-w-0">
           {/* 1. Stepper Operativo & Controles de Transición */}
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <Card className="bg-white shadow-xs border border-border">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/80 pb-3">
               <div>
-                <CardTitle>Progreso y Máquina de Estados Operativa</CardTitle>
+                <CardTitle className="text-sm font-bold text-brand-primary">
+                  {isPickup
+                    ? "Progreso de Recojo en Tienda"
+                    : "Progreso de Despacho y Entrega"}
+                </CardTitle>
                 <p className="text-xs text-brand-secondary mt-0.5">
                   Fase actual:{" "}
                   <span className="font-bold text-brand-primary">
@@ -998,17 +1106,32 @@ export default function OrderDetailView() {
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={isSendingEmail || saving}
                 onClick={() => handleSendCustomerEmail(order.status)}
               >
-                <Send className="w-3 h-3 mr-1" /> Notificar por email
+                {isSendingEmail ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-accent" />
+                    <span>Enviando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5 mr-1 text-slate-500" />
+                    <span>Notificar por email</span>
+                  </>
+                )}
               </Button>
             </CardHeader>
 
-            <CardContent className="space-y-5">
-              {/* Barra Horizontal Conectada con los 8 Pasos */}
+            <CardContent className="space-y-5 pt-4">
+              {/* Barra Horizontal Conectada con los Pasos Dinámicos */}
               <div className="overflow-x-auto pb-2">
-                <div className="min-w-[720px] grid grid-cols-8 gap-2 relative">
-                  {ORDER_LIFECYCLE_STEPS.map((step, idx) => {
+                <div
+                  className={`min-w-[600px] grid ${
+                    isPickup ? "grid-cols-4" : "grid-cols-8"
+                  } gap-2 relative`}
+                >
+                  {currentSteps.map((step, idx) => {
                     const isCompleted =
                       !isCancelled && idx < currentStepIndex;
                     const isCurrent =
@@ -1024,12 +1147,14 @@ export default function OrderDetailView() {
                       ? "bg-emerald-500"
                       : "bg-slate-200";
 
+                    const canRevertToThisStep = idx < currentStepIndex;
+
                     return (
                       <div
                         key={step.key}
                         className="relative flex flex-col items-center text-center"
                       >
-                        {idx < ORDER_LIFECYCLE_STEPS.length - 1 && (
+                        {idx < currentSteps.length - 1 && (
                           <div
                             className={`absolute top-4 left-1/2 w-full h-0.5 ${connectorClass}`}
                             aria-hidden="true"
@@ -1038,17 +1163,29 @@ export default function OrderDetailView() {
 
                         <button
                           type="button"
-                          disabled={saving || isCancelled || isCurrent}
-                          onClick={() => handleRequestJump(step.key)}
-                          title={`Cambiar a ${step.label}`}
-                          className={`relative z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-mono font-bold transition-transform hover:scale-105 disabled:hover:scale-100 ${circleClass}`}
+                          disabled={saving || isCancelled || !canRevertToThisStep}
+                          onClick={() =>
+                            canRevertToThisStep && handleRequestJump(step.key)
+                          }
+                          title={
+                            canRevertToThisStep
+                              ? `Regresar a ${step.label}`
+                              : isCurrent
+                                ? `Fase actual: ${step.label}`
+                                : `Fase pendiente: ${step.label}`
+                          }
+                          className={`relative z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-mono font-bold transition-transform ${
+                            canRevertToThisStep
+                              ? "hover:scale-105 cursor-pointer"
+                              : "cursor-default"
+                          } ${circleClass}`}
                         >
                           {isCompleted ? (
                             <CheckCircle2 className="w-4 h-4" />
                           ) : isCurrent ? (
                             <Clock className="w-4 h-4" />
                           ) : (
-                            <span>{idx + 1}</span>
+                            <span>{step.stepNumber || idx + 1}</span>
                           )}
                         </button>
 
@@ -1067,7 +1204,8 @@ export default function OrderDetailView() {
                           {step.sublabel}
                         </span>
 
-                        {isCompleted && (
+                        {/* Botón Volver Aquí: estrictamente stepIndex < currentStepIndex */}
+                        {canRevertToThisStep && (
                           <button
                             type="button"
                             onClick={() => handleRequestJump(step.key)}
@@ -1091,43 +1229,62 @@ export default function OrderDetailView() {
                   <p className="text-xs text-brand-secondary">
                     {isCancelled
                       ? "Este pedido fue cancelado y su flujo operativo se encuentra cerrado."
-                      : nextStep
-                        ? `Siguiente etapa recomendada: ${nextStep.label} (${nextStep.sublabel}).`
-                        : "El pedido ha completado todas las etapas de entrega."}
+                      : !isPickup && currentStepKey === "por_asignar"
+                        ? "Asigna un repartidor especializado para pasar a la fase de entrega."
+                        : nextStep
+                          ? `Siguiente etapa recomendada: ${nextStep.label} (${nextStep.sublabel}).`
+                          : "El pedido ha completado todas las etapas del flujo."}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* Botón secundario para reasignar repartidor en fases posteriores (Paso 4 en adelante) */}
                   {!isPickup &&
                     !isCancelled &&
-                    (currentStepKey === "asignado" ||
-                      currentStepKey === "por_asignar" ||
-                      Boolean(order.assigned_delivery_id)) && (
+                    currentStepIndex >= 3 &&
+                    !isFinishedOrCancelled && (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         disabled={saving}
-                        onClick={() => setDriverModalOpen(true)}
-                        className="text-xs"
+                        onClick={() => setAssignModalOpen(true)}
+                        className="text-xs border-border text-brand-primary font-semibold flex items-center gap-1.5"
                       >
-                        <UserCheck className="w-3.5 h-3.5 mr-1.5" />
-                        <span>Cambiar / Reasignar Repartidor</span>
+                        <Users className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Reasignar Repartidor</span>
                       </Button>
                     )}
 
-                  {nextStep && !isCancelled && (
+                  {/* En Fase 3 (Por Asignar) para despacho a domicilio: botón primario especializado */}
+                  {!isPickup &&
+                  !isCancelled &&
+                  currentStepKey === "por_asignar" ? (
                     <Button
                       type="button"
-                      variant="primary"
-                      size="sm"
+                      onClick={() => setAssignModalOpen(true)}
                       disabled={saving}
-                      onClick={() => handleRequestJump(nextStep.key)}
-                      className="text-xs font-bold"
+                      className="bg-accent hover:bg-accent-hover text-white font-bold px-4 py-2 text-xs flex items-center gap-1.5 shadow-sm"
                     >
-                      <span>Pasar a: {nextStep.label}</span>
-                      <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                      <UserCheck className="w-4 h-4" />
+                      <span>Seleccionar Repartidor y Asignar</span>
                     </Button>
+                  ) : (
+                    /* En cualquier otra etapa con nextStep */
+                    nextStep &&
+                    !isCancelled && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => handleRequestJump(nextStep.key)}
+                        className="text-xs font-bold"
+                      >
+                        <span>Pasar a: {nextStep.label}</span>
+                        <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                      </Button>
+                    )
                   )}
                 </div>
               </div>
@@ -1328,8 +1485,10 @@ export default function OrderDetailView() {
         <div className="space-y-6 min-w-0">
           {/* 1. Resumen Financiero & Pagos */}
           <Card>
-            <CardHeader className="flex items-center justify-between">
-              <CardTitle>Resumen Financiero y Pagos</CardTitle>
+            <CardHeader className="border-b border-border/80 pb-2.5 mb-3.5 flex items-center justify-between">
+              <CardTitle className="text-xs font-black uppercase tracking-wider text-brand-primary">
+                Resumen Financiero & Pagos
+              </CardTitle>
               <Badge variant={isPaid ? "success" : "warning"}>
                 {isPaid ? "Pagado" : "Pendiente"}
               </Badge>
@@ -1359,6 +1518,7 @@ export default function OrderDetailView() {
                 </div>
               </div>
 
+              {/* Método de pago */}
               <div className="p-3 rounded-button bg-surface-subtle border border-border space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-brand-muted">Método de pago:</span>
@@ -1368,28 +1528,62 @@ export default function OrderDetailView() {
                       "—"}
                   </span>
                 </div>
-                {order.payment_gateway_tx_id && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-brand-muted">N° Operación:</span>
-                    <span className="font-mono font-bold text-brand-primary">
-                      {order.payment_gateway_tx_id}
-                    </span>
+
+                {/* Número de Operación con Copiado Rápido */}
+                <div className="flex items-center justify-between py-1.5 px-2.5 bg-white border border-border rounded-button text-xs">
+                  <span className="text-slate-500 font-medium">
+                    N° Operación:
+                  </span>
+                  <div className="flex items-center gap-1.5 font-mono font-bold text-brand-primary">
+                    <span>{operationNumber || "—"}</span>
+                    {operationNumber && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(operationNumber);
+                          showToast("Número de operación copiado.");
+                        }}
+                        className="p-1 text-slate-400 hover:text-brand-primary rounded transition-colors"
+                        title="Copiar número de operación"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
 
-              {(order.payment_method === "yape_plin" ||
-                order.payment_method === "transferencia" ||
-                order.payment_status === "pending_verification") && (
+              {/* Botón Condicional: Validar Comprobante vs Descargar comprobante (PDF) */}
+              {order.payment_status !== "paid" && currentStepIndex === 0 ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setPaymentModalOpen(true)}
+                  className="w-full text-xs font-bold"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                  <span>Validar Comprobante / Voucher</span>
+                </Button>
+              ) : (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setPaymentModalOpen(true)}
-                  className="w-full text-xs font-semibold"
+                  disabled={isDownloadingPdf}
+                  onClick={handleDownloadReceipt}
+                  className="w-full text-xs font-semibold text-brand-primary hover:bg-surface-subtle"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                  <span>Ver comprobante / Voucher</span>
+                  {isDownloadingPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin text-brand-secondary" />
+                  ) : (
+                    <FileText className="w-3.5 h-3.5 mr-1.5 text-brand-secondary" />
+                  )}
+                  <span>
+                    {isDownloadingPdf
+                      ? "Generando comprobante (PDF)..."
+                      : "Descargar comprobante (PDF)"}
+                  </span>
                 </Button>
               )}
             </CardContent>
@@ -1397,8 +1591,10 @@ export default function OrderDetailView() {
 
           {/* 2. Ficha de Cliente & Despacho */}
           <Card>
-            <CardHeader>
-              <CardTitle>Cliente y Despacho</CardTitle>
+            <CardHeader className="border-b border-border/80 pb-2.5 mb-3.5">
+              <CardTitle className="text-xs font-black uppercase tracking-wider text-brand-primary">
+                Cliente & Despacho
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
               <div className="space-y-2">
@@ -1420,38 +1616,68 @@ export default function OrderDetailView() {
                       {customerDni}
                     </span>
                   </div>
+
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-brand-muted block">
                       Teléfono / WhatsApp
                     </span>
                     {cleanPhone ? (
-                      <a
-                        href={`https://wa.me/51${cleanPhone}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700 font-mono"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" /> +51{" "}
-                        {customerPhone}
-                      </a>
+                      <div className="mt-1">
+                        <a
+                          href={`https://wa.me/51${cleanPhone}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-button bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold transition-colors shadow-2xs"
+                        >
+                          <MessageCircle className="w-4 h-4 text-emerald-600 fill-emerald-600/10" />
+                          <span>Chat WhatsApp</span>
+                          <ArrowUpRight className="w-3.5 h-3.5 text-emerald-500" />
+                        </a>
+                      </div>
                     ) : (
                       <span className="text-brand-muted">—</span>
                     )}
                   </div>
                 </div>
+
+                {/* Correo Electrónico Formal */}
+                <div className="pt-2 border-t border-border/60">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Correo electrónico
+                  </span>
+                  <p className="text-xs font-medium text-brand-primary truncate mt-0.5">
+                    {order.customer_email ||
+                      order.client_email ||
+                      profile?.email ||
+                      "cliente@erxidi.pe"}
+                  </p>
+                </div>
               </div>
 
+              {/* Ficha de Despacho */}
               <div className="p-3 rounded-button bg-surface-subtle border border-border space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-brand-muted flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5 text-brand-secondary" />
-                    Dirección de entrega
+                    Modalidad de entrega
                   </span>
-                  <Badge variant="neutral">
-                    {DELIVERY_TYPE_LABELS[order.delivery_type] ||
-                      order.delivery_type ||
-                      "Despacho"}
-                  </Badge>
+
+                  {/* Distintivo Claro de Tipo de Entrega */}
+                  <div className="inline-flex items-center gap-1.5">
+                    {isPickup ? (
+                      <span className="inline-flex items-center gap-1 text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full text-xs font-bold shadow-2xs">
+                        <Store className="w-3.5 h-3.5" /> Recojo en Tienda
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full text-xs font-bold shadow-2xs">
+                        <Truck className="w-3.5 h-3.5" /> Delivery{" "}
+                        {order.shipping_type === "express" ||
+                        order.delivery_type === "express"
+                          ? "Express"
+                          : "Programado"}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <p className="text-xs font-bold text-brand-primary leading-snug">
@@ -1506,10 +1732,10 @@ export default function OrderDetailView() {
                     variant="outline"
                     size="sm"
                     disabled={saving || isCancelled}
-                    onClick={() => setDriverModalOpen(true)}
+                    onClick={() => setAssignModalOpen(true)}
                     className="text-xs"
                   >
-                    Reasignar
+                    {assignedDriver ? "Reasignar" : "Asignar"}
                   </Button>
                 </div>
               )}
@@ -1518,8 +1744,10 @@ export default function OrderDetailView() {
 
           {/* 3. Datos Fiscales (Facturación) */}
           <Card>
-            <CardHeader>
-              <CardTitle>Datos Fiscales (Facturación)</CardTitle>
+            <CardHeader className="border-b border-border/80 pb-2.5 mb-3.5">
+              <CardTitle className="text-xs font-black uppercase tracking-wider text-brand-primary">
+                Datos Fiscales (Facturación)
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5 text-xs">
               <div className="flex items-center justify-between">
@@ -1568,7 +1796,7 @@ export default function OrderDetailView() {
       </div>
 
       {/* =====================================================================
-          5. MODALES DE CONFIRMACIÓN Y CONTINGENCIA
+          MODALES DE CONFIRMACIÓN Y CONTINGENCIA
          ===================================================================== */}
       <ConfirmJumpModal
         isOpen={jumpModal.isOpen}
@@ -1595,13 +1823,15 @@ export default function OrderDetailView() {
         onConfirm={handleConfirmIncident}
       />
 
-      <ReassignDriverModal
-        isOpen={driverModalOpen}
+      <AssignCourierModal
+        isOpen={assignModalOpen}
         currentDriverId={order.assigned_delivery_id}
+        orderDeliveryType={order.shipping_type || order.delivery_type}
         deliveryStaff={deliveryStaff}
         loading={saving}
-        onClose={() => setDriverModalOpen(false)}
+        onClose={() => setAssignModalOpen(false)}
         onConfirm={handleAssignDelivery}
+        onCouriersChange={setDeliveryStaff}
       />
 
       <OrderPaymentModal
@@ -1609,8 +1839,18 @@ export default function OrderDetailView() {
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
         onSuccess={(updated) => {
-          setOrder((curr) => ({ ...curr, ...updated }));
+          const nextOrderState = {
+            ...order,
+            ...updated,
+            status: "en_preparacion",
+            payment_status: "paid",
+          };
+          setOrder(nextOrderState);
           showToast("Pago verificado y orden en preparación.");
+          const payload = buildEmailPayload(nextOrderState, "en_preparacion");
+          if (payload.customerEmail) {
+            sendOrderNotificationEmail(payload);
+          }
         }}
       />
 

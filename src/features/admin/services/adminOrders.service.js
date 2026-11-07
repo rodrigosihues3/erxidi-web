@@ -13,21 +13,31 @@ export const ORDER_STATUS = {
   INCIDENT: "incidencia_transporte",
 };
 
-export const ORDER_LIFECYCLE_STEPS = [
-  { key: "recibido", label: "Recibido", sublabel: "Validación inicial / Voucher" },
-  { key: "en_preparacion", label: "En Preparación", sublabel: "Armado de paquete" },
-  { key: "por_asignar", label: "Por Asignar", sublabel: "En bolsa común" },
-  { key: "asignado", label: "Asignado", sublabel: "Repartidor con paquete" },
-  { key: "en_camino", label: "En Ruta", sublabel: "En tránsito al destino" },
-  { key: "cerca", label: "Cerca", sublabel: "A pocas cuadras" },
-  { key: "en_ubicacion", label: "En Ubicación", sublabel: "Repartidor en puerta" },
-  { key: "entregado", label: "Entregado", sublabel: "Recepción conforme" },
+export const DELIVERY_STEPS = [
+  { key: "recibido", label: "Recibido", sublabel: "Validación inicial / Voucher", stepNumber: 1 },
+  { key: "en_preparacion", label: "En Preparación", sublabel: "Armado de paquete", stepNumber: 2 },
+  { key: "por_asignar", label: "Por Asignar", sublabel: "En bolsa común", stepNumber: 3 },
+  { key: "asignado", label: "Asignado", sublabel: "Repartidor con paquete", stepNumber: 4 },
+  { key: "en_camino", label: "En Ruta", sublabel: "En tránsito al destino", stepNumber: 5 },
+  { key: "cerca", label: "Cerca", sublabel: "A pocas cuadras", stepNumber: 6 },
+  { key: "en_ubicacion", label: "En Ubicación", sublabel: "Repartidor en puerta", stepNumber: 7 },
+  { key: "entregado", label: "Entregado", sublabel: "Recepción conforme", stepNumber: 8 },
 ];
+
+export const PICKUP_STEPS = [
+  { key: "recibido", label: "Recibido", sublabel: "Validación inicial / Voucher", stepNumber: 1 },
+  { key: "en_preparacion", label: "En Preparación", sublabel: "Empaque en almacén", stepNumber: 2 },
+  { key: "listo_recojo", label: "Listo para Recojo", sublabel: "Esperando al cliente en tienda", stepNumber: 3 },
+  { key: "entregado", label: "Entregado", sublabel: "Entrega física completada", stepNumber: 4 },
+];
+
+export const ORDER_LIFECYCLE_STEPS = DELIVERY_STEPS;
 
 const STEP_KEY_TO_DB_STATUS = {
   recibido: "recibido",
   en_preparacion: "en_preparacion",
   por_asignar: "por_asignar_repartidor",
+  listo_recojo: "por_asignar_repartidor",
   asignado: "asignado",
   en_camino: "en_camino",
   cerca: "cerca",
@@ -39,7 +49,7 @@ export function mapStepKeyToDbStatus(stepKeyOrStatus) {
   return STEP_KEY_TO_DB_STATUS[stepKeyOrStatus] || stepKeyOrStatus;
 }
 
-export function normalizeStatusToStepKey(status) {
+export function normalizeStatusToStepKey(status, isPickup = false) {
   const s = (status || "").toLowerCase();
   if (["recibido", "received", "pendiente_pago", "pending", "pagado"].includes(s)) {
     return "recibido";
@@ -47,20 +57,26 @@ export function normalizeStatusToStepKey(status) {
   if (["en_preparacion", "preparing"].includes(s)) {
     return "en_preparacion";
   }
-  if (["por_asignar", "por_asignar_repartidor"].includes(s)) {
-    return "por_asignar";
-  }
-  if (s === "asignado") {
-    return "asignado";
-  }
-  if (["en_camino", "dispatched"].includes(s)) {
-    return "en_camino";
-  }
-  if (["cerca", "nearby"].includes(s)) {
-    return "cerca";
-  }
-  if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
-    return "en_ubicacion";
+  if (isPickup) {
+    if (["listo_recojo", "por_asignar", "por_asignar_repartidor", "en_destino", "arrived"].includes(s)) {
+      return "listo_recojo";
+    }
+  } else {
+    if (["por_asignar", "por_asignar_repartidor"].includes(s)) {
+      return "por_asignar";
+    }
+    if (s === "asignado") {
+      return "asignado";
+    }
+    if (["en_camino", "dispatched"].includes(s)) {
+      return "en_camino";
+    }
+    if (["cerca", "nearby"].includes(s)) {
+      return "cerca";
+    }
+    if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
+      return "en_ubicacion";
+    }
   }
   if (["entregado", "delivered"].includes(s)) {
     return "entregado";
@@ -84,6 +100,7 @@ export const ORDER_STATUS_LABELS = {
   en_preparacion: "En preparación",
   por_asignar: "Por Asignar",
   por_asignar_repartidor: "Por Asignar",
+  listo_recojo: "Listo para Recojo",
   asignado: "Asignado",
   dispatched: "En Ruta",
   en_camino: "En Ruta",
@@ -428,11 +445,46 @@ export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_
 export async function getDeliveryStaff() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, first_name, paternal_surname, phone, delivery_type")
+    .select(
+      "id, dni, first_name, paternal_surname, phone, delivery_type, operational_status, is_on_duty, is_active",
+    )
     .eq("role", "delivery");
 
   if (error) throw error;
-  return data || [];
+  return (data || []).filter((c) => c.is_active !== false);
+}
+
+export function subscribeCouriersRealtime(onCourierUpdate) {
+  const channel = supabase
+    .channel("couriers_realtime_status")
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "delivery_users" },
+      (payload) => {
+        if (payload?.new) {
+          onCourierUpdate(payload.new);
+        }
+      },
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "profiles" },
+      (payload) => {
+        if (payload?.new) {
+          onCourierUpdate(payload.new);
+        }
+      },
+    )
+    .on("broadcast", { event: "courier_status_change" }, (payload) => {
+      if (payload?.payload) {
+        onCourierUpdate(payload.payload);
+      }
+    })
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
 
 export async function updateDeliveryStaff(id, payload) {
@@ -590,3 +642,8 @@ export async function getOrderItemsForDashboard(orderIds) {
   if (error) throw error;
   return data ?? [];
 }
+
+export {
+  sendOrderNotificationEmail,
+  AUTO_NOTIFICATION_STATUSES,
+} from "./orderNotification.service";

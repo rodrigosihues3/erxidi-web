@@ -359,6 +359,11 @@ export function generateReceiptPDF(order) {
   doc.save(fileName);
 }
 
+export function generateReceiptBlob(order) {
+  const { doc } = buildReceiptPDFDoc(order);
+  return doc.output("blob");
+}
+
 export function generateReceiptPDFBase64(order) {
   try {
     const { doc, fileName } = buildReceiptPDFDoc(order);
