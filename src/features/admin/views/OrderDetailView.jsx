@@ -19,6 +19,7 @@ import {
   RefreshCw,
   X,
   ExternalLink,
+  User,
   UserCheck,
   Users,
   UserX,
@@ -168,26 +169,64 @@ function getStageSolid(status) {
 
 function SectionTitle({ children }) {
   return (
-    <h2 className="text-sm font-semibold text-brand-primary">{children}</h2>
+    <h2 className="text-base font-semibold text-brand-primary">{children}</h2>
   );
 }
 
-function InfoRow({ label, children, mono = false, className = "" }) {
+function InfoRow({ label, mono = false, wide = false, children }) {
   return (
     <div
-      className={`flex items-baseline justify-between gap-4 py-2 last:pb-0 text-sm ${className}`}
-    >
-      <dt className="text-xs text-brand-secondary shrink-0">{label}</dt>
-      <dd
-        className={`text-sm font-medium text-brand-primary text-right min-w-0 ${
-          mono ? "font-mono" : ""
+      className={`grid items-baseline gap-x-3 ${wide ? "grid-cols-[9rem_1fr]" : "grid-cols-[7.5rem_1fr]"
         }`}
+    >
+      <dt className="text-xs text-brand-secondary">{label}</dt>
+      <dd
+        className={`min-w-0 break-words text-sm font-medium text-brand-primary ${mono ? "font-mono" : ""
+          }`}
       >
         {children}
       </dd>
     </div>
   );
 }
+
+const NAME_LOWER_WORDS = new Set(["de", "del", "la", "las", "los", "y", "e"]);
+
+function toDisplayName(value) {
+  if (!value || typeof value !== "string") return value;
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word, i) =>
+      i > 0 && NAME_LOWER_WORDS.has(word)
+        ? word
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}
+
+function getOrderAgeInfo(createdAt) {
+  if (!createdAt) return null;
+  const time = new Date(createdAt).getTime();
+  if (Number.isNaN(time)) return null;
+  const hours = Math.max(0, Math.floor((Date.now() - time) / 3600000));
+  const text =
+    hours < 1
+      ? "hace menos de 1 h"
+      : hours < 24
+        ? `hace ${hours} h`
+        : `hace ${Math.floor(hours / 24)} d`;
+  const tone = hours >= 168 ? "danger" : hours >= 48 ? "warning" : "neutral";
+  return { text, tone };
+}
+
+const AGE_TONE_CLASSES = {
+  danger:
+    "bg-status-danger-bg text-status-danger-text border-status-danger-border",
+  warning:
+    "bg-status-warning-bg text-status-warning-text border-status-warning-border",
+  neutral: "bg-surface-subtle text-brand-secondary border-border",
+};
 
 function ConfirmJumpModal({
   isOpen,
@@ -317,11 +356,10 @@ function CancelOrderModal({ isOpen, loading, onClose, onConfirm }) {
               return (
                 <label
                   key={reason}
-                  className={`flex items-center gap-2.5 p-2.5 rounded-button border text-xs cursor-pointer transition-colors ${
-                    active
-                      ? "border-rose-400 bg-rose-50/40 text-brand-primary font-semibold"
-                      : "border-border bg-surface-card text-brand-secondary hover:bg-surface-subtle"
-                  }`}
+                  className={`flex items-center gap-2.5 p-2.5 rounded-button border text-xs cursor-pointer transition-colors ${active
+                    ? "border-rose-400 bg-rose-50/40 text-brand-primary font-semibold"
+                    : "border-border bg-surface-card text-brand-secondary hover:bg-surface-subtle"
+                    }`}
                 >
                   <input
                     type="radio"
@@ -426,11 +464,10 @@ function ReportIncidentModal({ isOpen, loading, onClose, onConfirm }) {
               return (
                 <label
                   key={reason}
-                  className={`flex items-center gap-2.5 p-2.5 rounded-button border text-xs cursor-pointer transition-colors ${
-                    active
-                      ? "border-amber-400 bg-amber-50/50 text-brand-primary font-semibold"
-                      : "border-border bg-surface-card text-brand-secondary hover:bg-surface-subtle"
-                  }`}
+                  className={`flex items-center gap-2.5 p-2.5 rounded-button border text-xs cursor-pointer transition-colors ${active
+                    ? "border-amber-400 bg-amber-50/50 text-brand-primary font-semibold"
+                    : "border-border bg-surface-card text-brand-secondary hover:bg-surface-subtle"
+                    }`}
                 >
                   <input
                     type="radio"
@@ -718,20 +755,20 @@ export default function OrderDetailView() {
 
     const addressObj =
       typeof targetOrder?.delivery_address === "object" &&
-      targetOrder?.delivery_address !== null
+        targetOrder?.delivery_address !== null
         ? targetOrder.delivery_address
         : null;
     const formattedAddress = addressObj
       ? [
-          addressObj.street || addressObj.address,
-          addressObj.district,
-          addressObj.city,
-        ]
-          .filter(Boolean)
-          .join(", ")
+        addressObj.street || addressObj.address,
+        addressObj.district,
+        addressObj.city,
+      ]
+        .filter(Boolean)
+        .join(", ")
       : targetOrder?.delivery_address ||
-        targetOrder?.shipping_address ||
-        "—";
+      targetOrder?.shipping_address ||
+      "—";
 
     return {
       orderId: targetOrder?.id,
@@ -750,10 +787,10 @@ export default function OrderDetailView() {
       order: targetOrder,
       driverInfo: driverObj
         ? {
-            name: cleanDriverName,
-            phone: driverObj.phone || "",
-            dni: driverObj.dni || "",
-          }
+          name: cleanDriverName,
+          phone: driverObj.phone || "",
+          dni: driverObj.dni || "",
+        }
         : null,
       incidentReason:
         reasonOverride ||
@@ -1027,9 +1064,9 @@ export default function OrderDetailView() {
   const isPaid = order.payment_status === "paid";
   const hasIncident = Boolean(
     order.incident_reason ||
-      order.incident_comment ||
-      order.status === "incidencia_transporte" ||
-      order.has_incident,
+    order.incident_comment ||
+    order.status === "incidencia_transporte" ||
+    order.has_incident,
   );
 
   const invoiceTypeLabel =
@@ -1044,6 +1081,12 @@ export default function OrderDetailView() {
     order.payment_reference ||
     order.payment_gateway_tx_id ||
     "";
+
+  const age = getOrderAgeInfo(order.created_at);
+  const totalUnits = (order.items || []).reduce(
+    (acc, it) => acc + Number(it.quantity || 0),
+    0,
+  );
 
   return (
     <div className="space-y-6">
@@ -1073,6 +1116,20 @@ export default function OrderDetailView() {
           >
             {currentStepMeta.label}
           </span>
+          {hasIncident && order.status !== "incidencia_transporte" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-status-warning-border bg-status-warning-bg px-2.5 py-0.5 text-xs font-semibold text-status-warning-text">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Incidente
+            </span>
+          )}
+          {!isFinishedOrCancelled && age && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono text-xs font-semibold ${AGE_TONE_CLASSES[age.tone]}`}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              Creado {age.text}
+            </span>
+          )}
         </div>
 
         {/* Derecha: Botonera de Acción */}
@@ -1156,12 +1213,8 @@ export default function OrderDetailView() {
                     ? "Progreso de recojo en tienda"
                     : "Progreso de despacho y entrega"}
                 </SectionTitle>
-                <p className="text-xs text-brand-secondary mt-0.5">
-                  Fase actual:{" "}
-                  <span className="font-semibold text-brand-primary">
-                    {currentStepMeta.label}
-                  </span>{" "}
-                  — {currentStepMeta.sublabel}
+                <p className="text-sm text-brand-secondary mt-0.5">
+                  {currentStepMeta.sublabel}
                 </p>
               </div>
               <Button
@@ -1170,11 +1223,10 @@ export default function OrderDetailView() {
                 size="sm"
                 disabled={isSendingEmail || saving || emailSentSuccess}
                 onClick={() => handleSendCustomerEmail(order.status)}
-                className={`shrink-0 transition-all duration-300 ${
-                  emailSentSuccess
-                    ? "bg-brand-primary text-white border-transparent"
-                    : ""
-                }`}
+                className={`shrink-0 transition-all duration-300 ${emailSentSuccess
+                  ? "bg-brand-primary text-white border-transparent"
+                  : ""
+                  }`}
               >
                 {isSendingEmail ? (
                   <>
@@ -1198,9 +1250,8 @@ export default function OrderDetailView() {
             {/* Barra Horizontal Conectada con los Pasos Dinámicos */}
             <div className="overflow-x-auto mt-5 pt-1.5 pb-1">
               <ol
-                className={`min-w-[560px] grid ${
-                  isPickup ? "grid-cols-4" : "grid-cols-8"
-                } gap-2`}
+                className={`min-w-[560px] grid ${isPickup ? "grid-cols-4" : "grid-cols-8"
+                  } gap-2`}
               >
                 {currentSteps.map((step, idx) => {
                   const isCompleted = !isCancelled && idx < currentStepIndex;
@@ -1282,14 +1333,14 @@ export default function OrderDetailView() {
             </div>
 
             {/* Fila de Control de Transición Inmediata */}
-            <div className="mt-4 pt-4 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <p className="text-sm text-brand-primary">
+            <div className="mt-4 pt-5 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <p className="text-sm text-brand-secondary">
                 {isCancelled
                   ? "Este pedido fue cancelado y su flujo operativo se encuentra cerrado."
                   : !isPickup && currentStepKey === "por_asignar"
                     ? "Asigna un repartidor especializado para pasar a la fase de entrega."
                     : nextStep
-                      ? `Siguiente etapa recomendada: ${nextStep.label} (${nextStep.sublabel}).`
+                      ? `Siguiente: ${nextStep.sublabel}`
                       : "El pedido ha completado todas las etapas del flujo."}
               </p>
 
@@ -1305,24 +1356,26 @@ export default function OrderDetailView() {
                       size="sm"
                       disabled={saving}
                       onClick={() => setAssignModalOpen(true)}
+                      className="text-sm font-semibold px-4 py-2.5 h-auto"
                     >
-                      <Users className="w-3.5 h-3.5 mr-1.5 text-brand-secondary" />
+                      <Users className="w-4 h-4 mr-1.5 text-brand-secondary" />
                       <span>Reasignar Repartidor</span>
                     </Button>
                   )}
 
                 {/* En Fase 3 (Por Asignar) para despacho a domicilio: botón primario especializado */}
                 {!isPickup &&
-                !isCancelled &&
-                currentStepKey === "por_asignar" ? (
+                  !isCancelled &&
+                  currentStepKey === "por_asignar" ? (
                   <Button
                     type="button"
                     variant="primary"
                     size="sm"
                     onClick={() => setAssignModalOpen(true)}
                     disabled={saving}
+                    className="text-sm font-semibold px-5 py-2.5 h-auto"
                   >
-                    <UserCheck className="w-3.5 h-3.5 mr-1.5" />
+                    <UserCheck className="w-4 h-4 mr-1.5" />
                     <span>Seleccionar Repartidor y Asignar</span>
                   </Button>
                 ) : (
@@ -1335,9 +1388,10 @@ export default function OrderDetailView() {
                       size="sm"
                       disabled={saving}
                       onClick={() => handleRequestJump(nextStep.key)}
+                      className="text-sm font-semibold px-5 py-2.5 h-auto"
                     >
                       <span>Pasar a: {nextStep.label}</span>
-                      <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                      <ArrowRight className="w-4 h-4 ml-1.5" />
                     </Button>
                   )
                 )}
@@ -1348,17 +1402,12 @@ export default function OrderDetailView() {
           {/* 2. Artículos del Pedido (Miniaturas 4:5, Color, Talla) */}
           <Card>
             <div className="flex items-center justify-between gap-4 pb-3 border-b border-border">
-              <CardTitle className="text-sm font-semibold text-brand-primary">
+              <CardTitle className="text-base font-semibold text-brand-primary">
                 Artículos del pedido
               </CardTitle>
               <span className="text-xs text-brand-secondary">
-                <span className="font-mono">
-                  {(order.items || []).reduce(
-                    (acc, it) => acc + Number(it.quantity || 0),
-                    0,
-                  )}
-                </span>{" "}
-                prenda(s)
+                <span className="font-mono">{totalUnits}</span>{" "}
+                {totalUnits === 1 ? "prenda" : "prendas"}
               </span>
             </div>
 
@@ -1373,54 +1422,56 @@ export default function OrderDetailView() {
                 return (
                   <li
                     key={item.id}
-                    className="py-4 last:pb-0 flex items-center justify-between gap-4"
+                    className="py-4 last:pb-0 flex items-center gap-4"
                   >
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-16 aspect-[4/5] shrink-0 rounded-button border border-border bg-slate-50 p-1 overflow-hidden flex items-center justify-center">
-                        {product.main_image_url ? (
-                          <img
-                            src={product.main_image_url}
-                            alt={product.name || "Prenda"}
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <Package className="w-5 h-5 text-brand-muted" />
-                        )}
-                      </div>
+                    <div className="w-16 aspect-[4/5] shrink-0 rounded-button border border-border bg-slate-50 p-1 overflow-hidden flex items-center justify-center">
+                      {product.main_image_url ? (
+                        <img
+                          src={product.main_image_url}
+                          alt={product.name || "Prenda"}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <Package className="w-5 h-5 text-brand-muted" />
+                      )}
+                    </div>
 
-                      <div className="min-w-0 space-y-2">
-                        <p className="text-sm font-medium text-brand-primary truncate">
-                          {product.name || "Producto"}
-                        </p>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <p className="text-sm font-semibold text-brand-primary truncate">
+                        {product.name || "Producto"}
+                      </p>
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 h-6 px-2 rounded-sm border border-border bg-surface-subtle text-xs text-brand-primary capitalize">
-                            {colorHex && (
-                              <span
-                                className="w-2.5 h-2.5 rounded-full border border-border-strong shrink-0"
-                                style={{ backgroundColor: colorHex }}
-                              />
-                            )}
-                            {colorName}
-                          </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 h-6 px-2 rounded-sm border border-border bg-surface-subtle text-xs text-brand-primary capitalize">
+                          {colorHex && (
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-border-strong shrink-0"
+                              style={{ backgroundColor: colorHex }}
+                            />
+                          )}
+                          {colorName}
+                        </span>
 
-                          <span className="inline-flex items-center h-6 px-2 rounded-sm border border-border bg-surface-subtle text-xs text-brand-primary">
-                            Talla {sizeName}
-                          </span>
+                        <span className="inline-flex items-center h-6 px-2 rounded-sm border border-border bg-surface-subtle text-xs text-brand-primary">
+                          Talla {sizeName}
+                        </span>
 
-                          <span className="text-xs font-mono text-brand-secondary">
-                            SKU {variant.sku || "—"}
-                          </span>
-                        </div>
+                        <span className="text-xs font-mono text-brand-secondary">
+                          SKU {variant.sku || "—"}
+                        </span>
                       </div>
                     </div>
 
+                    <span className="inline-flex min-w-[2.75rem] justify-center rounded-button border border-border-strong bg-surface-subtle px-2 py-1 font-mono text-base font-bold text-brand-primary">
+                      ×{item.quantity}
+                    </span>
+
                     <div className="text-right shrink-0 space-y-1">
-                      <p className="text-xs font-mono text-brand-secondary">
-                        {item.quantity} x {money(item.unit_price)}
-                      </p>
                       <p className="text-sm font-mono font-semibold text-brand-primary">
                         {money(item.subtotal)}
+                      </p>
+                      <p className="text-xs font-mono text-brand-secondary">
+                        {money(item.unit_price)} c/u
                       </p>
                     </div>
                   </li>
@@ -1432,7 +1483,7 @@ export default function OrderDetailView() {
           {/* 3. Bitácora de Eventos & Incidentes (Línea de tiempo) */}
           <Card>
             <div className="pb-3 mb-5 border-b border-border">
-              <CardTitle className="text-sm font-semibold text-brand-primary">
+              <CardTitle className="text-base font-semibold text-brand-primary">
                 Bitácora de eventos e incidentes
               </CardTitle>
             </div>
@@ -1445,7 +1496,7 @@ export default function OrderDetailView() {
                   aria-hidden="true"
                 />
                 <div className="flex items-baseline justify-between gap-4">
-                  <p className="text-sm font-medium text-brand-primary">
+                  <p className="text-sm text-brand-primary">
                     Creación del pedido
                   </p>
                   <time className="text-xs font-mono text-brand-secondary shrink-0">
@@ -1462,8 +1513,7 @@ export default function OrderDetailView() {
                     aria-hidden="true"
                   />
                   <div className="flex items-baseline justify-between gap-4">
-                    <p className="text-sm font-medium text-brand-primary flex items-center gap-1.5">
-                      <AlertTriangle className="w-4 h-4 text-status-warning-text shrink-0 self-center" />
+                    <p className="text-sm font-semibold text-status-warning-text">
                       Reporte de incidente registrado
                     </p>
                     <time className="text-xs font-mono text-brand-secondary shrink-0">
@@ -1472,18 +1522,16 @@ export default function OrderDetailView() {
                   </div>
 
                   <div className="mt-3 p-3 rounded-card bg-status-warning-bg border border-status-warning-border">
-                    <dl className="divide-y divide-status-warning-border">
-                      <InfoRow label="Motivo tipificado" className="pt-0">
+                    <dl className="space-y-2">
+                      <InfoRow wide label="Motivo tipificado">
                         {order.incident_reason || "Incidencia operativa"}
                       </InfoRow>
-                      <InfoRow label="Repartidor involucrado">
+                      <InfoRow wide label="Repartidor involucrado">
                         {driverName || "Sin repartidor asignado"}
                       </InfoRow>
                       {order.incident_comment && (
-                        <InfoRow label="Observaciones">
-                          <span className="font-normal">
-                            {order.incident_comment}
-                          </span>
+                        <InfoRow wide label="Observaciones">
+                          {order.incident_comment}
                         </InfoRow>
                       )}
                     </dl>
@@ -1524,7 +1572,7 @@ export default function OrderDetailView() {
                   aria-hidden="true"
                 />
                 <div className="flex items-baseline justify-between gap-4">
-                  <p className="text-sm font-medium text-brand-primary">
+                  <p className="text-sm text-brand-primary">
                     Última actualización de estado
                   </p>
                   <time className="text-xs font-mono text-brand-secondary shrink-0">
@@ -1550,61 +1598,71 @@ export default function OrderDetailView() {
           <Card>
             <div className="divide-y divide-border">
               {/* 1. Resumen Financiero & Pagos */}
-              <section className="pb-5">
-                <div className="flex items-center justify-between gap-4 mb-2">
-                  <CardTitle className="text-sm font-semibold text-brand-primary">
+              <section className="pb-6">
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <h3 className="text-base font-semibold text-brand-primary">
                     Resumen financiero y pagos
-                  </CardTitle>
+                  </h3>
                   <Badge variant={isPaid ? "success" : "warning"}>
                     {isPaid ? "Pagado" : "Pendiente"}
                   </Badge>
                 </div>
 
-                <dl className="divide-y divide-border">
-                  <InfoRow label="Subtotal prendas" mono>
-                    {money(order.subtotal)}
-                  </InfoRow>
-                  <InfoRow label="Costo de envío" mono>
-                    {money(order.delivery_cost)}
-                  </InfoRow>
-                </dl>
+                <div className="space-y-2.5">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm text-brand-secondary">
+                      Subtotal prendas
+                    </span>
+                    <span className="text-sm font-mono font-medium text-brand-primary">
+                      {money(order.subtotal)}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm text-brand-secondary">
+                      Costo de envío
+                    </span>
+                    <span className="text-sm font-mono font-medium text-brand-primary">
+                      {money(order.delivery_cost)}
+                    </span>
+                  </div>
+                </div>
 
-                <div className="mt-2 flex items-center justify-between gap-4 rounded-card bg-brand-primary text-white px-4 py-3">
-                  <span className="text-sm font-semibold">Total general</span>
-                  <span className="font-mono text-xl font-bold">
+                <div className="mt-3 flex items-baseline justify-between border-t border-border-strong pt-3">
+                  <span className="text-sm font-semibold text-brand-primary">
+                    Total general
+                  </span>
+                  <span className="text-2xl font-mono font-bold text-brand-primary">
                     {money(order.total_amount)}
                   </span>
                 </div>
 
-                <dl className="mt-2 divide-y divide-border">
+                <dl className="mt-5 space-y-2.5">
                   <InfoRow label="Método de pago">
                     {PAYMENT_METHOD_LABELS[order.payment_method] ||
                       order.payment_method ||
                       "—"}
                   </InfoRow>
-                  <InfoRow label="N° de operación">
-                    <span className="inline-flex items-center gap-1.5 font-mono">
-                      <span className="break-all">{operationNumber || "—"}</span>
-                      {operationNumber && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(operationNumber);
-                            showToast("Número de operación copiado.");
-                          }}
-                          className="p-1 rounded-button text-brand-muted hover:text-brand-primary hover:bg-surface-subtle transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
-                          title="Copiar número de operación"
-                          aria-label="Copiar número de operación"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </span>
+                  <InfoRow mono label="N° de operación">
+                    <span className="break-all">{operationNumber || "—"}</span>
+                    {operationNumber && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(operationNumber);
+                          showToast("Número de operación copiado.");
+                        }}
+                        className="ml-1.5 inline-flex rounded p-1 text-brand-secondary hover:text-brand-primary focus-visible:ring-2 focus-visible:ring-border-strong"
+                        title="Copiar número de operación"
+                        aria-label="Copiar número de operación"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </InfoRow>
                 </dl>
 
                 {/* Botón Condicional: Validar Comprobante vs Descargar comprobante (PDF) */}
-                <div className="mt-3">
+                <div className="mt-5">
                   {order.payment_status !== "paid" && currentStepIndex === 0 ? (
                     <Button
                       type="button"
@@ -1641,123 +1699,132 @@ export default function OrderDetailView() {
               </section>
 
               {/* 2. Cliente & Despacho */}
-              <section className="py-5">
-                <div className="mb-2">
-                  <CardTitle className="text-sm font-semibold text-brand-primary">
-                    Cliente y despacho
-                  </CardTitle>
+              <section className="py-6">
+                <h3 className="text-base font-semibold text-brand-primary mb-4">
+                  Cliente y despacho
+                </h3>
+
+                <div>
+                  <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-brand-primary">
+                    <User className="h-4 w-4 text-brand-secondary" />
+                    Cliente
+                  </h4>
+                  <dl className="space-y-2.5">
+                    <InfoRow label="Nombre">
+                      {toDisplayName(customerName)}
+                    </InfoRow>
+                    <InfoRow label="DNI" mono>
+                      {customerDni}
+                    </InfoRow>
+                    <InfoRow label="Teléfono" mono>
+                      {cleanPhone ? (
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <span>{customerPhone}</span>
+                          <a
+                            href={`https://wa.me/51${cleanPhone}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 h-6 px-2 rounded-button bg-status-success-bg text-status-success-text border border-status-success-border text-xs font-semibold transition-colors hover:border-status-success-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-success-text focus-visible:ring-offset-2 font-sans"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>Chat WhatsApp</span>
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                          </a>
+                        </span>
+                      ) : (
+                        <span className="text-brand-secondary">—</span>
+                      )}
+                    </InfoRow>
+                    <InfoRow label="Correo electrónico">
+                      <span className="break-all">
+                        {order.customer_email ||
+                          order.client_email ||
+                          profile?.email ||
+                          "cliente@erxidi.pe"}
+                      </span>
+                    </InfoRow>
+                  </dl>
                 </div>
 
-                <dl className="divide-y divide-border">
-                  <InfoRow label="Cliente">{customerName}</InfoRow>
-                  <InfoRow label="DNI" mono>
-                    {customerDni}
-                  </InfoRow>
-                  <InfoRow label="Teléfono">
-                    {cleanPhone ? (
-                      <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                        <span className="font-mono">{customerPhone}</span>
-                        <a
-                          href={`https://wa.me/51${cleanPhone}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 h-6 px-2 rounded-button bg-status-success-bg text-status-success-text border border-status-success-border text-xs font-semibold transition-colors hover:border-status-success-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-success-text focus-visible:ring-offset-2"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5" />
-                          <span>Chat WhatsApp</span>
-                          <ArrowUpRight className="w-3.5 h-3.5" />
-                        </a>
-                      </span>
-                    ) : (
-                      <span className="text-brand-secondary">—</span>
-                    )}
-                  </InfoRow>
-                  <InfoRow label="Correo electrónico">
-                    <span className="break-all">
-                      {order.customer_email ||
-                        order.client_email ||
-                        profile?.email ||
-                        "cliente@erxidi.pe"}
-                    </span>
-                  </InfoRow>
-
-                  {/* Ficha de Despacho */}
-                  <InfoRow label="Modalidad de entrega">
-                    {isPickup ? (
-                      <span className="inline-flex items-center gap-1 h-6 px-2 rounded-badge border text-xs font-semibold bg-delivery-pickup-bg text-delivery-pickup-text border-delivery-pickup-border">
-                        <Store className="w-3.5 h-3.5" /> Recojo en tienda
-                      </span>
-                    ) : order.shipping_type === "express" ||
-                      order.delivery_type === "express" ? (
-                      <span className="inline-flex items-center gap-1 h-6 px-2 rounded-badge border text-xs font-semibold bg-delivery-express-bg text-delivery-express-text border-delivery-express-border">
-                        <Zap className="w-3.5 h-3.5" /> Delivery express
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 h-6 px-2 rounded-badge border text-xs font-semibold bg-delivery-scheduled-bg text-delivery-scheduled-text border-delivery-scheduled-border">
-                        <CalendarClock className="w-3.5 h-3.5" /> Delivery
-                        programado
-                      </span>
-                    )}
-                  </InfoRow>
-                  <InfoRow label="Dirección">
-                    {order.delivery_address ||
-                      address?.street_address ||
-                      (isPickup ? "Recojo en tienda ERXIDI" : "—")}
-                  </InfoRow>
-                  {address?.delivery_zones?.district_name && (
-                    <InfoRow label="Distrito">
-                      {address.delivery_zones.district_name}
-                    </InfoRow>
-                  )}
-                  {address?.reference && (
-                    <InfoRow label="Referencia">{address.reference}</InfoRow>
-                  )}
-                  {order.scheduled_time_slot && (
-                    <InfoRow label="Franja horaria" mono>
-                      {order.scheduled_time_slot}
-                    </InfoRow>
-                  )}
-                </dl>
-
-                {!isPickup && (
-                  <div className="mt-2 pt-3 border-t border-border flex items-center justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <p className="text-xs text-brand-secondary">
-                        Repartidor asignado
-                      </p>
-                      {driverName ? (
-                        <p className="text-sm font-medium text-brand-primary truncate">
-                          {driverName}
-                        </p>
+                <div className="mt-6">
+                  <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-brand-primary">
+                    <MapPin className="h-4 w-4 text-brand-secondary" />
+                    Entrega
+                  </h4>
+                  <dl className="space-y-2.5">
+                    <InfoRow label="Modalidad">
+                      {isPickup ? (
+                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-badge border text-xs font-semibold bg-delivery-pickup-bg text-delivery-pickup-text border-delivery-pickup-border">
+                          <Store className="w-3.5 h-3.5" /> Recojo en tienda
+                        </span>
+                      ) : order.shipping_type === "express" ||
+                        order.delivery_type === "express" ? (
+                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-badge border text-xs font-semibold bg-delivery-express-bg text-delivery-express-text border-delivery-express-border">
+                          <Zap className="w-3.5 h-3.5" /> Delivery express
+                        </span>
                       ) : (
-                        <Badge variant="warning" icon={UserX}>
-                          Sin asignar (Bolsa común)
-                        </Badge>
+                        <span className="inline-flex items-center gap-1 h-6 px-2 rounded-badge border text-xs font-semibold bg-delivery-scheduled-bg text-delivery-scheduled-text border-delivery-scheduled-border">
+                          <CalendarClock className="w-3.5 h-3.5" /> Delivery
+                          programado
+                        </span>
                       )}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={saving || isCancelled}
-                      onClick={() => setAssignModalOpen(true)}
-                      className="shrink-0"
-                    >
-                      {assignedDriver ? "Reasignar" : "Asignar"}
-                    </Button>
-                  </div>
-                )}
+                    </InfoRow>
+                    <InfoRow label="Dirección">
+                      {order.delivery_address ||
+                        address?.street_address ||
+                        (isPickup ? "Recojo en tienda ERXIDI" : "—")}
+                    </InfoRow>
+                    {address?.delivery_zones?.district_name && (
+                      <InfoRow label="Distrito">
+                        {address.delivery_zones.district_name}
+                      </InfoRow>
+                    )}
+                    {address?.reference && (
+                      <InfoRow label="Referencia">{address.reference}</InfoRow>
+                    )}
+                    {order.scheduled_time_slot && (
+                      <InfoRow label="Franja horaria" mono>
+                        {order.scheduled_time_slot}
+                      </InfoRow>
+                    )}
+                    {!isPickup && (
+                      <InfoRow label="Repartidor">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            {driverName ? (
+                              <span className="truncate block">
+                                {driverName}
+                              </span>
+                            ) : (
+                              <Badge variant="warning" icon={UserX}>
+                                Sin asignar (Bolsa común)
+                              </Badge>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={saving || isCancelled}
+                            onClick={() => setAssignModalOpen(true)}
+                            className="shrink-0"
+                          >
+                            {assignedDriver ? "Reasignar" : "Asignar"}
+                          </Button>
+                        </div>
+                      </InfoRow>
+                    )}
+                  </dl>
+                </div>
               </section>
 
               {/* 3. Datos Fiscales (Facturación) */}
-              <section className="pt-5">
-                <div className="mb-2">
-                  <CardTitle className="text-sm font-semibold text-brand-primary">
-                    Datos fiscales
-                  </CardTitle>
-                </div>
+              <section className="pt-6">
+                <h3 className="text-base font-semibold text-brand-primary mb-4">
+                  Datos fiscales
+                </h3>
 
-                <dl className="divide-y divide-border">
+                <dl className="space-y-2.5">
                   <InfoRow label="Tipo de documento">{invoiceTypeLabel}</InfoRow>
                   <InfoRow label="RUC / DNI" mono>
                     {fiscal.tax_id ||
@@ -1776,12 +1843,12 @@ export default function OrderDetailView() {
                   {(fiscal.fiscal_address ||
                     fiscal.address ||
                     fiscal.direccionFiscal) && (
-                    <InfoRow label="Dirección fiscal">
-                      {fiscal.fiscal_address ||
-                        fiscal.address ||
-                        fiscal.direccionFiscal}
-                    </InfoRow>
-                  )}
+                      <InfoRow label="Dirección fiscal">
+                        {fiscal.fiscal_address ||
+                          fiscal.address ||
+                          fiscal.direccionFiscal}
+                      </InfoRow>
+                    )}
                 </dl>
               </section>
             </div>

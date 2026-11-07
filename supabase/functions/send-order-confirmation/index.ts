@@ -126,10 +126,12 @@ serve(async (req) => {
       );
     }
 
-    const baseUrl = (app_url || "https://erxidi-web.vercel.app").replace(
-      /\/$/,
-      ""
-    );
+    const rawUrl = (app_url || "").trim();
+    const baseUrl = (
+      rawUrl && !rawUrl.includes("localhost")
+        ? rawUrl
+        : "https://erxidi-web.vercel.app"
+    ).replace(/\/$/, "");
     const trackingUrl = `${baseUrl}/seguimiento/${order.order_number}`;
 
     const invoice = order.invoice_data || {};

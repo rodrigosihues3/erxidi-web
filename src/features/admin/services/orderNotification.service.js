@@ -91,11 +91,8 @@ export function createOrderStatusTemplate(
     orderData.incident_reason ||
     "Contingencia operativa reportada durante el despacho.";
 
-  const appUrl =
-    typeof window !== "undefined"
-      ? window.location.origin
-      : "https://erxidi-web.vercel.app";
-  const trackingUrl = `${appUrl.replace(/\/$/, "")}/seguimiento/${cleanCode}`;
+  const appUrl = "https://erxidi-web.vercel.app";
+  const trackingUrl = `${appUrl}/seguimiento/${cleanCode}`;
 
   const statusConfigs = {
     en_preparacion: {

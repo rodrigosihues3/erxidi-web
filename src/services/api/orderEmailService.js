@@ -13,7 +13,7 @@ export const triggerOrderConfirmationEmail = (order, items) => {
         return;
     }
 
-    const appUrl = window.location.origin;
+    const appUrl = "https://erxidi-web.vercel.app";
     const orderWithItems = {
         ...order,
         items: items || order.items || order.order_items || [],

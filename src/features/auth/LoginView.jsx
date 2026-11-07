@@ -240,7 +240,7 @@ export default function LoginView() {
       const { error } = await supabase.auth.resetPasswordForEmail(
         loginEmail.trim(),
         {
-          redirectTo: window.location.origin + "/actualizar-password",
+          redirectTo: "https://erxidi-web.vercel.app/actualizar-password",
         }
       );
       if (error) throw error;
