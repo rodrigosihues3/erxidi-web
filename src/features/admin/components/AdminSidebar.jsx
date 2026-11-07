@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  ExternalLink,
   X,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
@@ -173,22 +174,25 @@ export default function AdminSidebar({
         className="relative border-t border-white/10 px-3 flex-shrink-0 bg-black/10"
       >
         {!collapsed ? (
-          <div className="h-12 flex items-center gap-2">
+          <div className="py-3 flex flex-col gap-2">
             <button
               type="button"
               onClick={() => window.open("/", "_blank")}
               title="Ver tienda en nueva pestaña"
-              className="flex-1 h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-button border border-white/10 text-xs font-semibold text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+              className="w-full h-9 flex items-center justify-between px-3 rounded-button border border-white/10 text-xs font-semibold text-white/80 hover:bg-white/10 hover:text-white transition-colors"
             >
-              <Store className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">Tienda</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <Store className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Tienda</span>
+              </div>
+              <ExternalLink className="h-3.5 w-3.5 text-white/50 shrink-0" />
             </button>
 
             <button
               type="button"
               onClick={() => setPopoverOpen((prev) => !prev)}
               title="Perfil y sesión"
-              className="flex-1 min-w-0 h-9 flex items-center justify-between gap-2 px-2 rounded-button border border-white/10 hover:bg-white/10 transition-colors"
+              className="w-full h-9 flex items-center justify-between px-2.5 rounded-button border border-white/10 hover:bg-white/10 transition-colors"
             >
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-6 h-6 rounded-full bg-white/15 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
@@ -198,8 +202,8 @@ export default function AdminSidebar({
                   {displayName}
                 </p>
               </div>
-              <ChevronUp
-                className={`h-3.5 w-3.5 text-white/70 shrink-0 transition-transform ${
+              <ChevronRight
+                className={`h-3.5 w-3.5 text-white/70 shrink-0 transition-transform duration-200 ease-in-out ${
                   popoverOpen ? "rotate-90" : ""
                 }`}
               />

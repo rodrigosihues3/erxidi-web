@@ -31,8 +31,10 @@ import OrderStatusBadge from "../components/OrderStatusBadge";
 import OrderPaymentModal from "../components/OrderPaymentModal";
 import OrderKanbanView from "../components/OrderKanbanView";
 import { useAdminOrders } from "../hooks/useAdminOrders";
+import { sendOrderNotificationEmail } from "../services/orderNotification.service";
 import {
   getDeliveryStaff,
+  getOrderDetail,
   listOrders,
   markOrderReadyForDelivery,
   resolveOrderIncident,
@@ -449,6 +451,56 @@ export default function OrdersListView() {
   }
 
 
+
+  async function notifyPaymentVerified(baseOrder, updatedOrder) {
+    const orderId = updatedOrder?.id || baseOrder?.id;
+    if (!orderId) return;
+
+    try {
+      let order = {
+        ...baseOrder,
+        ...updatedOrder,
+        status: "en_preparacion",
+      };
+
+      let customerEmail =
+        order.customer_email || order.client_email || order.profiles?.email;
+
+      if (
+        !customerEmail ||
+        !order.order_number ||
+        !(order.shipping_type || order.delivery_type)
+      ) {
+        const fullOrder = await getOrderDetail(orderId);
+        if (fullOrder) {
+          order = { ...fullOrder, ...updatedOrder, status: "en_preparacion" };
+          customerEmail =
+            order.customer_email || order.client_email || order.profiles?.email;
+        }
+      }
+
+      const result = await sendOrderNotificationEmail({
+        orderId,
+        status: "en_preparacion",
+        customerEmail,
+        order,
+      });
+
+      if (result?.success === false) {
+        console.warn(
+          "No se pudo enviar correo de notificación:",
+          result.error || result.reason,
+        );
+        showToast("Pago validado, pero no se pudo enviar el correo al cliente.");
+      }
+    } catch (err) {
+      console.warn(
+        "Error al enviar correo de notificación:",
+        err?.message || err,
+      );
+      showToast("Pago validado, pero no se pudo enviar el correo al cliente.");
+    }
+  }
 
   function renderDeliveryBadge(type) {
     const t = (type || "").toLowerCase();
@@ -1121,12 +1173,20 @@ export default function OrdersListView() {
         isOpen={paymentModal.isOpen}
         onClose={() => setPaymentModal({ isOpen: false, order: null })}
         onSuccess={(updatedOrder) => {
+          const baseOrder = paymentModal.order;
           setLocalOrders((prev) =>
             prev.map((o) =>
               o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o,
             ),
           );
           setRefreshTick((t) => t + 1);
+          if (
+            updatedOrder?.status === "cancelado" ||
+            updatedOrder?.payment_status === "failed"
+          ) {
+            return;
+          }
+          void notifyPaymentVerified(baseOrder, updatedOrder);
         }}
       />
       {/* Toast Flotante de Notificaciones */}
