@@ -743,11 +743,19 @@ export default function OrderDetailView() {
         .join(" ") ||
       "Cliente ERXIDI";
 
-    const driverObj =
-      driverOverride ||
-      deliveryStaff.find((s) => s.id === targetOrder?.assigned_delivery_id) ||
-      targetOrder?.delivery_profile ||
-      null;
+    const isPickupOrder =
+      (targetOrder?.delivery_type || order?.delivery_type) === "pickup" ||
+      (targetOrder?.delivery_type || order?.delivery_type) === "recojo" ||
+      (targetOrder?.shipping_type || order?.shipping_type) === "recojo_tienda" ||
+      (targetOrder?.shipping_type || order?.shipping_type) === "recojo" ||
+      (targetOrder?.shipping_type || order?.shipping_type) === "pickup";
+
+    const driverObj = isPickupOrder
+      ? null
+      : driverOverride ||
+        deliveryStaff.find((s) => s.id === targetOrder?.assigned_delivery_id) ||
+        targetOrder?.delivery_profile ||
+        null;
 
     const cleanDriverName = driverObj
       ? `${driverObj.first_name || ""} ${String(driverObj.paternal_surname || "").replace(/\[.*?\]/g, "").trim()}`.trim()
@@ -781,7 +789,7 @@ export default function OrderDetailView() {
       deliveryType:
         targetOrder?.shipping_type ||
         targetOrder?.delivery_type ||
-        "programado",
+        (isPickupOrder ? "pickup" : "programado"),
       deliveryAddress: formattedAddress,
       scheduledTimeSlot: targetOrder?.scheduled_time_slot || null,
       order: targetOrder,
@@ -810,11 +818,21 @@ export default function OrderDetailView() {
       setOrder(nextOrderState);
       const targetStepLabel = jumpModal.targetStep.label;
       setJumpModal({ isOpen: false, targetStep: null, isRevert: false });
-      showToast(`Estado actualizado a ${targetStepLabel}.`);
 
       const payload = buildEmailPayload(nextOrderState, targetKey);
       if (payload.customerEmail && AUTO_NOTIFICATION_STATUSES.includes(targetKey)) {
-        sendOrderNotificationEmail(payload);
+        const emailResult = await sendOrderNotificationEmail(payload);
+        if (emailResult?.success === false) {
+          showToast(
+            `Estado actualizado a ${targetStepLabel}. Aviso de correo: ${emailResult.error}`,
+          );
+        } else {
+          showToast(
+            `Estado actualizado a ${targetStepLabel} y cliente notificado.`,
+          );
+        }
+      } else {
+        showToast(`Estado actualizado a ${targetStepLabel}.`);
       }
     } catch (err) {
       showToast(err.message || "Error al cambiar el estado.");
@@ -859,7 +877,6 @@ export default function OrderDetailView() {
       const nextOrderState = { ...order, ...updated };
       setOrder(nextOrderState);
       setCancelModalOpen(false);
-      showToast("Pedido cancelado y stock restituido.");
 
       const payload = buildEmailPayload(
         nextOrderState,
@@ -868,7 +885,16 @@ export default function OrderDetailView() {
         reason,
       );
       if (payload.customerEmail) {
-        sendOrderNotificationEmail(payload);
+        const emailResult = await sendOrderNotificationEmail(payload);
+        if (emailResult?.success === false) {
+          showToast(
+            `Pedido cancelado y stock restituido. Aviso de correo: ${emailResult.error}`,
+          );
+        } else {
+          showToast("Pedido cancelado, stock restituido y cliente notificado.");
+        }
+      } else {
+        showToast("Pedido cancelado y stock restituido.");
       }
     } catch (err) {
       showToast(err.message || "Error al cancelar el pedido.");
@@ -889,7 +915,6 @@ export default function OrderDetailView() {
       const nextOrderState = { ...order, ...updated };
       setOrder(nextOrderState);
       setIncidentModalOpen(false);
-      showToast("Incidente operativo registrado.");
 
       const payload = buildEmailPayload(
         nextOrderState,
@@ -898,7 +923,16 @@ export default function OrderDetailView() {
         reason,
       );
       if (payload.customerEmail) {
-        sendOrderNotificationEmail(payload);
+        const emailResult = await sendOrderNotificationEmail(payload);
+        if (emailResult?.success === false) {
+          showToast(
+            `Incidente operativo registrado. Aviso de correo: ${emailResult.error}`,
+          );
+        } else {
+          showToast("Incidente operativo registrado y cliente notificado.");
+        }
+      } else {
+        showToast("Incidente operativo registrado.");
       }
     } catch (err) {
       showToast(err.message || "Error al reportar incidente.");
@@ -931,20 +965,25 @@ export default function OrderDetailView() {
       setAssignModalOpen(false);
 
       if (deliveryId) {
-        if (currentStepKey === "por_asignar") {
-          showToast(
-            `Pedido asignado a ${courierName}. Fase actualizada a Asignado.`,
-          );
-        } else {
-          showToast(`Repartidor reasignado a ${courierName}.`);
-        }
+        const actionLabel =
+          currentStepKey === "por_asignar"
+            ? `Pedido asignado a ${courierName}. Fase actualizada a Asignado.`
+            : `Repartidor reasignado a ${courierName}.`;
+
         const payload = buildEmailPayload(
           nextOrderState,
           "asignado",
           selectedStaff,
         );
         if (payload.customerEmail) {
-          sendOrderNotificationEmail(payload);
+          const emailResult = await sendOrderNotificationEmail(payload);
+          if (emailResult?.success === false) {
+            showToast(`${actionLabel} Aviso de correo: ${emailResult.error}`);
+          } else {
+            showToast(`${actionLabel} Cliente notificado.`);
+          }
+        } else {
+          showToast(actionLabel);
         }
       } else {
         showToast("Repartidor desvinculado. Pedido en bolsa común.");
@@ -1899,18 +1938,40 @@ export default function OrderDetailView() {
         order={order}
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
-        onSuccess={(updated) => {
-          const nextOrderState = {
-            ...order,
-            ...updated,
-            status: "en_preparacion",
-            payment_status: "paid",
-          };
-          setOrder(nextOrderState);
-          showToast("Pago verificado y orden en preparación.");
-          const payload = buildEmailPayload(nextOrderState, "en_preparacion");
-          if (payload.customerEmail) {
-            sendOrderNotificationEmail(payload);
+        onSuccess={async (updated) => {
+          if (
+            updated?.status === "cancelado" ||
+            updated?.status === "cancelled" ||
+            updated?.payment_status === "failed" ||
+            updated?.payment_status === "rejected"
+          ) {
+            setOrder((curr) => ({ ...curr, ...updated }));
+            showToast("Comprobante de pago rechazado.");
+            return;
+          }
+
+          if (updated?.payment_status === "paid") {
+            const nextOrderState = {
+              ...order,
+              ...updated,
+              status: "en_preparacion",
+              payment_status: "paid",
+            };
+            setOrder(nextOrderState);
+
+            const payload = buildEmailPayload(nextOrderState, "en_preparacion");
+            if (payload.customerEmail) {
+              const emailResult = await sendOrderNotificationEmail(payload);
+              if (emailResult?.success === false) {
+                showToast(
+                  `Pago verificado y orden en preparación. Aviso de correo: ${emailResult.error}`,
+                );
+              } else {
+                showToast("Pago verificado y orden en preparación.");
+              }
+            } else {
+              showToast("Pago verificado y orden en preparación.");
+            }
           }
         }}
       />

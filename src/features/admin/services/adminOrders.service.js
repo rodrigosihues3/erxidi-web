@@ -233,9 +233,13 @@ export async function updateOrderStatus(orderId, status) {
   };
 
   if (
-    ["recibido", "received", "en_preparacion", "por_asignar_repartidor"].includes(
-      dbStatus,
-    )
+    [
+      "recibido",
+      "received",
+      "en_preparacion",
+      "por_asignar_repartidor",
+      "listo_recojo",
+    ].includes(dbStatus)
   ) {
     payload.assigned_delivery_id = null;
   }
