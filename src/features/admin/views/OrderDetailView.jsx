@@ -499,6 +499,7 @@ export default function OrderDetailView() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailSentSuccess, setEmailSentSuccess] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -951,6 +952,10 @@ export default function OrderDetailView() {
         showToast(res.error || "Error al enviar el correo.");
         return;
       }
+      setEmailSentSuccess(true);
+      setTimeout(() => {
+        setEmailSentSuccess(false);
+      }, 2000);
       showToast("Notificación enviada al cliente para el estado actual.");
     } catch (err) {
       showToast(err.message || "Error al enviar el correo.");
@@ -1158,20 +1163,29 @@ export default function OrderDetailView() {
               </div>
               <Button
                 type="button"
-                variant="outline"
+                variant={emailSentSuccess ? "secondary" : "outline"}
                 size="sm"
-                disabled={isSendingEmail || saving}
+                disabled={isSendingEmail || saving || emailSentSuccess}
                 onClick={() => handleSendCustomerEmail(order.status)}
-                className="shrink-0"
+                className={`shrink-0 transition-all duration-300 ${
+                  emailSentSuccess
+                    ? "bg-brand-primary text-white border-transparent"
+                    : ""
+                }`}
               >
                 {isSendingEmail ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin text-brand-secondary" />
                     <span>Enviando...</span>
                   </>
+                ) : emailSentSuccess ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 mr-1.5 text-white" />
+                    <span>Mensaje enviado</span>
+                  </>
                 ) : (
                   <>
-                    <Send className="w-3.5 h-3.5 mr-1.5 text-brand-secondary" />
+                    <Send className="w-3.5 h-3.5 mr-1.5 text-brand-secondary transition-transform duration-200 group-hover:translate-x-0.5" />
                     <span>Notificar por email</span>
                   </>
                 )}
@@ -1179,7 +1193,7 @@ export default function OrderDetailView() {
             </div>
 
             {/* Barra Horizontal Conectada con los Pasos Dinámicos */}
-            <div className="overflow-x-auto mt-5 pb-1">
+            <div className="overflow-x-auto mt-5 pt-1.5 pb-1">
               <ol
                 className={`min-w-[560px] grid ${
                   isPickup ? "grid-cols-4" : "grid-cols-8"
