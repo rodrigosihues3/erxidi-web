@@ -1058,6 +1058,7 @@ export default function OrderDetailView() {
             variant="ghost"
             size="sm"
             onClick={() => navigate("/admin/pedidos")}
+            className="text-brand-secondary hover:text-brand-primary focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none"
           >
             <ArrowLeft className="w-4 h-4 mr-1" /> Pedidos
           </Button>
@@ -1085,6 +1086,7 @@ export default function OrderDetailView() {
               disabled={saving || isCancelled}
               onClick={() => handleToggleBolsa()}
               title="Oculta este pedido de la bolsa común de repartidores"
+              className="text-brand-primary border-border-strong hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none"
             >
               <Package className="w-3.5 h-3.5 mr-1.5 text-brand-secondary" />
               {order.in_pool === false
@@ -1100,7 +1102,7 @@ export default function OrderDetailView() {
             size="sm"
             disabled={saving || isFinishedOrCancelled}
             onClick={() => setIncidentModalOpen(true)}
-            className="border-border-strong"
+            className="text-xs font-semibold text-brand-primary border-border-strong hover:bg-surface-subtle disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none"
           >
             <AlertTriangle className="w-3.5 h-3.5 mr-1.5 text-status-warning-text" />
             Reportar incidente
@@ -1113,9 +1115,9 @@ export default function OrderDetailView() {
             size="sm"
             disabled={saving || isFinishedOrCancelled}
             onClick={() => setCancelModalOpen(true)}
-            className="text-status-danger-text hover:bg-status-danger-bg focus:ring-status-danger-text"
+            className="text-xs font-semibold text-status-danger-text border-border hover:bg-status-danger-bg disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none"
           >
-            <Ban className="w-3.5 h-3.5 mr-1.5" />
+            <Ban className="w-3.5 h-3.5 mr-1.5 text-status-danger-text" />
             Cancelar pedido
           </Button>
 
@@ -1128,6 +1130,7 @@ export default function OrderDetailView() {
             disabled={isRefreshing}
             title="Sincronizar datos del pedido"
             aria-label="Sincronizar datos del pedido"
+            className="text-brand-primary border-border-strong hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 text-brand-secondary ${isRefreshing ? "animate-spin" : ""}`}
@@ -1345,7 +1348,9 @@ export default function OrderDetailView() {
           {/* 2. Artículos del Pedido (Miniaturas 4:5, Color, Talla) */}
           <Card>
             <div className="flex items-center justify-between gap-4 pb-3 border-b border-border">
-              <SectionTitle>Artículos del pedido</SectionTitle>
+              <CardTitle className="text-sm font-semibold text-brand-primary">
+                Artículos del pedido
+              </CardTitle>
               <span className="text-xs text-brand-secondary">
                 <span className="font-mono">
                   {(order.items || []).reduce(
@@ -1427,7 +1432,9 @@ export default function OrderDetailView() {
           {/* 3. Bitácora de Eventos & Incidentes (Línea de tiempo) */}
           <Card>
             <div className="pb-3 mb-5 border-b border-border">
-              <SectionTitle>Bitácora de eventos e incidentes</SectionTitle>
+              <CardTitle className="text-sm font-semibold text-brand-primary">
+                Bitácora de eventos e incidentes
+              </CardTitle>
             </div>
 
             <ol className="relative ml-1.5 border-l border-border space-y-6">
@@ -1545,7 +1552,9 @@ export default function OrderDetailView() {
               {/* 1. Resumen Financiero & Pagos */}
               <section className="pb-5">
                 <div className="flex items-center justify-between gap-4 mb-2">
-                  <SectionTitle>Resumen financiero y pagos</SectionTitle>
+                  <CardTitle className="text-sm font-semibold text-brand-primary">
+                    Resumen financiero y pagos
+                  </CardTitle>
                   <Badge variant={isPaid ? "success" : "warning"}>
                     {isPaid ? "Pagado" : "Pendiente"}
                   </Badge>
@@ -1561,7 +1570,7 @@ export default function OrderDetailView() {
                 </dl>
 
                 <div className="mt-2 flex items-center justify-between gap-4 rounded-card bg-brand-primary text-white px-4 py-3">
-                  <span className="text-sm font-medium">Total general</span>
+                  <span className="text-sm font-semibold">Total general</span>
                   <span className="font-mono text-xl font-bold">
                     {money(order.total_amount)}
                   </span>
@@ -1634,7 +1643,9 @@ export default function OrderDetailView() {
               {/* 2. Cliente & Despacho */}
               <section className="py-5">
                 <div className="mb-2">
-                  <SectionTitle>Cliente y despacho</SectionTitle>
+                  <CardTitle className="text-sm font-semibold text-brand-primary">
+                    Cliente y despacho
+                  </CardTitle>
                 </div>
 
                 <dl className="divide-y divide-border">
@@ -1741,7 +1752,9 @@ export default function OrderDetailView() {
               {/* 3. Datos Fiscales (Facturación) */}
               <section className="pt-5">
                 <div className="mb-2">
-                  <SectionTitle>Datos fiscales</SectionTitle>
+                  <CardTitle className="text-sm font-semibold text-brand-primary">
+                    Datos fiscales
+                  </CardTitle>
                 </div>
 
                 <dl className="divide-y divide-border">
