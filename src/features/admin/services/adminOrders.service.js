@@ -649,6 +649,92 @@ export async function getOrderItemsForDashboard(orderIds) {
   return data ?? [];
 }
 
+/**
+ * Obtiene la información necesaria para el Dashboard analítico.
+ * Utiliza las relaciones existentes en Supabase.
+ */
+export async function getDashboardAnalytics({ startDate, endDate } = {}) {
+  const pageSize = 1000;
+  let allOrders = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        customer_id,
+        customer_name,
+        customer_email,
+        total_amount,
+        subtotal,
+        delivery_cost,
+        payment_method,
+        status,
+        payment_status,
+        incident_reason,
+        created_at,
+        profiles:customer_id (
+          id,
+          first_name,
+          paternal_surname,
+          maternal_surname,
+          email
+        ),
+        order_items (
+          id,
+          quantity,
+          unit_price,
+          subtotal,
+          product_variants:variant_id (
+            id,
+            color,
+            sku,
+            products:product_id (
+              id,
+              name,
+              main_image_url,
+              category_id,
+              categories:category_id (
+                id,
+                name
+              )
+            )
+          )
+        )
+      `)
+      .order("created_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (startDate) {
+      query = query.gte("created_at", startDate);
+    }
+
+    if (endDate) {
+      query = query.lte("created_at", endDate);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error al obtener analítica del dashboard:", error);
+      throw error;
+    }
+
+    const page = data || [];
+    allOrders = allOrders.concat(page);
+
+    if (page.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return allOrders;
+}
+
 export {
   sendOrderNotificationEmail,
   AUTO_NOTIFICATION_STATUSES,
