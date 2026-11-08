@@ -13,35 +13,13 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 
+CREATE SCHEMA IF NOT EXISTS "public";
+
+
+ALTER SCHEMA "public" OWNER TO "pg_database_owner";
+
+
 COMMENT ON SCHEMA "public" IS 'standard public schema';
-
-
-
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements" WITH SCHEMA "extensions";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
-
-
-
 
 
 
@@ -576,7 +554,7 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     CONSTRAINT "orders_delivery_type_check" CHECK ((("delivery_type")::"text" = ANY ((ARRAY['express'::character varying, 'programado'::character varying, 'scheduled'::character varying, 'recojo'::character varying, 'pickup'::character varying])::"text"[]))),
     CONSTRAINT "orders_invoice_type_check" CHECK (((("invoice_type")::"text" = ANY ((ARRAY['none'::character varying, 'boleta'::character varying, 'factura'::character varying, 'sin_comprobante'::character varying, ''::character varying])::"text"[])) OR ("invoice_type" IS NULL))),
     CONSTRAINT "orders_payment_method_check" CHECK ((("payment_method")::"text" = ANY ((ARRAY['yape_plin'::character varying, 'culqi_gateway'::character varying, 'transferencia'::character varying, 'tarjeta'::character varying, 'contraentrega'::character varying, 'efectivo'::character varying])::"text"[]))),
-    CONSTRAINT "orders_status_check" CHECK ((("status")::"text" = ANY ((ARRAY['recibido'::character varying, 'received'::character varying, 'pendiente_pago'::character varying, 'pending'::character varying, 'en_preparacion'::character varying, 'preparing'::character varying, 'por_asignar_repartidor'::character varying, 'asignado'::character varying, 'listo_recojo'::character varying, 'en_camino'::character varying, 'dispatched'::character varying, 'cerca'::character varying, 'nearby'::character varying, 'en_destino'::character varying, 'arrived'::character varying, 'entregado'::character varying, 'delivered'::character varying, 'cancelado'::character varying, 'cancelled'::character varying, 'incidencia_transporte'::character varying])::"text"[]))),
+    CONSTRAINT "orders_status_check" CHECK ((("status")::"text" = ANY (ARRAY[('recibido'::character varying)::"text", ('received'::character varying)::"text", ('pendiente_pago'::character varying)::"text", ('pending'::character varying)::"text", ('en_preparacion'::character varying)::"text", ('preparing'::character varying)::"text", ('por_asignar_repartidor'::character varying)::"text", ('asignado'::character varying)::"text", ('listo_recojo'::character varying)::"text", ('en_camino'::character varying)::"text", ('dispatched'::character varying)::"text", ('cerca'::character varying)::"text", ('nearby'::character varying)::"text", ('en_destino'::character varying)::"text", ('arrived'::character varying)::"text", ('entregado'::character varying)::"text", ('delivered'::character varying)::"text", ('cancelado'::character varying)::"text", ('cancelled'::character varying)::"text", ('incidencia_transporte'::character varying)::"text"]))),
     CONSTRAINT "orders_subtotal_check" CHECK (("subtotal" > (0)::numeric))
 );
 
@@ -781,7 +759,22 @@ ALTER TABLE "public"."stock_reservations" OWNER TO "postgres";
 CREATE TABLE IF NOT EXISTS "public"."store_settings" (
     "key" "text" NOT NULL,
     "value" "jsonb" NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "yape_qr_url" "text",
+    "yape_phone" character varying(20),
+    "yape_holder_name" character varying(120),
+    "plin_qr_url" "text",
+    "plin_phone" character varying(20),
+    "plin_holder_name" character varying(120),
+    "yape_enabled" boolean DEFAULT true,
+    "plin_enabled" boolean DEFAULT false,
+    "store_closed" boolean DEFAULT false,
+    "pause_express" boolean DEFAULT false,
+    "pause_scheduled" boolean DEFAULT false,
+    "pause_pickup" boolean DEFAULT false,
+    "delivery_hyperlocal_enabled" boolean DEFAULT true,
+    "delivery_hyperlocal_distance_km" numeric(4,2) DEFAULT 0.80,
+    "delivery_hyperlocal_fee" numeric(6,2) DEFAULT 3.50
 );
 
 
@@ -1324,170 +1317,10 @@ ALTER TABLE "public"."stock_reservations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."store_settings" ENABLE ROW LEVEL SECURITY;
 
 
-
-
-ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
-
-
-
-
-
-
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."orders";
-
-
-
 GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1536,21 +1369,6 @@ GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1728,12 +1546,6 @@ GRANT ALL ON TABLE "public"."v_product_variants_available" TO "service_role";
 
 
 
-
-
-
-
-
-
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
@@ -1758,34 +1570,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

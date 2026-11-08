@@ -123,39 +123,6 @@ export default function HomeView() {
   // Catálogo de prendas para el carrusel flotante con sus respectivos hotspots
   const carouselItems = [
     {
-      id: "boxer",
-      name: "Bóxer Brief Anatómico",
-      category: "Línea Masculina",
-      image: heroImg,
-      alt: "Bóxer Anatómico ERXIDI",
-      hotspots: [
-        {
-          id: "waist",
-          x: "50%",
-          y: "18%",
-          title: "Pretina de Ajuste Firme",
-          desc: "Elástico afelpado reforzado que sostiene sin estrangular ni marcar la piel.",
-          placement: "top",
-        },
-        {
-          id: "cup",
-          x: "40%",
-          y: "48%",
-          title: "Corte Anatómico Diario",
-          desc: "Soporte ergonómico con costuras redondeadas para libertad de movimiento.",
-          placement: "bottom",
-        },
-        {
-          id: "hem",
-          x: "68%",
-          y: "78%",
-          title: "Terminación Antirroce",
-          desc: "Basta al ras de cuatro hilos que no se enrolla ni irrita el muslo.",
-          placement: "bottom",
-        },
-      ],
-    },
-    {
       id: "medias-tobilleras",
       name: "Medias Tobilleras",
       category: "Calcetería Unisex",
@@ -184,6 +151,39 @@ export default function HomeView() {
           y: "75%",
           title: "Puntera Plana Confort",
           desc: "Unión sin costura prominente para no incomodar los dedos al usar calzado.",
+          placement: "bottom",
+        },
+      ],
+    },
+    {
+      id: "boxer",
+      name: "Bóxer Brief Anatómico",
+      category: "Línea Masculina",
+      image: heroImg,
+      alt: "Bóxer Anatómico ERXIDI",
+      hotspots: [
+        {
+          id: "waist",
+          x: "50%",
+          y: "18%",
+          title: "Pretina de Ajuste Firme",
+          desc: "Elástico afelpado reforzado que sostiene sin estrangular ni marcar la piel.",
+          placement: "top",
+        },
+        {
+          id: "cup",
+          x: "40%",
+          y: "48%",
+          title: "Corte Anatómico Diario",
+          desc: "Soporte ergonómico con costuras redondeadas para libertad de movimiento.",
+          placement: "bottom",
+        },
+        {
+          id: "hem",
+          x: "68%",
+          y: "78%",
+          title: "Terminación Antirroce",
+          desc: "Basta al ras de cuatro hilos que no se enrolla ni irrita el muslo.",
           placement: "bottom",
         },
       ],
@@ -425,9 +425,8 @@ export default function HomeView() {
                         <div
                           key={spot.id}
                           style={{ top: spot.y, left: spot.x }}
-                          className={`absolute -translate-x-1/2 -translate-y-1/2 ${
-                            isActive ? "z-[60]" : "z-10"
-                          }`}
+                          className={`absolute -translate-x-1/2 -translate-y-1/2 ${isActive ? "z-[60]" : "z-10"
+                            }`}
                         >
                           <button
                             type="button"
@@ -441,24 +440,21 @@ export default function HomeView() {
                             <span className="absolute h-6 w-6 rounded-full bg-accent/40 animate-ping" />
                             <span className="relative flex h-5 w-5 rounded-full border-2 border-white bg-accent text-white items-center justify-center shadow-lg transition-transform duration-150 group-hover:scale-110">
                               <Plus
-                                className={`w-3 h-3 transition-transform duration-150 ${
-                                  isActive ? "rotate-45" : ""
-                                }`}
+                                className={`w-3 h-3 transition-transform duration-150 ${isActive ? "rotate-45" : ""
+                                  }`}
                               />
                             </span>
                           </button>
 
                           {isActive && (
                             <div
-                              className={`absolute w-52 bg-slate-950 border border-white/30 text-white rounded-lg p-3 shadow-2xl z-[70] pointer-events-none animate-in fade-in zoom-in-95 duration-150 ${
-                                isTopPlacement ? "bottom-8" : "top-8"
-                              } ${
-                                isRightSide
+                              className={`absolute w-52 bg-slate-950 border border-white/30 text-white rounded-lg p-3 shadow-2xl z-[70] pointer-events-none animate-in fade-in zoom-in-95 duration-150 ${isTopPlacement ? "bottom-8" : "top-8"
+                                } ${isRightSide
                                   ? "right-0 translate-x-0"
                                   : isLeftSide
                                     ? "left-0 translate-x-0"
                                     : "left-1/2 -translate-x-1/2"
-                              }`}
+                                }`}
                             >
                               <strong className="block text-xs font-bold text-accent leading-tight">
                                 {spot.title}
@@ -492,11 +488,10 @@ export default function HomeView() {
                         setActiveHotspot(null);
                         setCurrentSlide(idx);
                       }}
-                      className={`h-1.5 rounded-full transition-all duration-200 ${
-                        idx === currentSlide
-                          ? "w-6 bg-accent"
-                          : "w-1.5 bg-white/30 hover:bg-white/60"
-                      }`}
+                      className={`h-1.5 rounded-full transition-all duration-200 ${idx === currentSlide
+                        ? "w-6 bg-accent"
+                        : "w-1.5 bg-white/30 hover:bg-white/60"
+                        }`}
                       aria-label={`Ir a ${item.name}`}
                     />
                   ))}

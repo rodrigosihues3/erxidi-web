@@ -21,6 +21,10 @@ import {
   Loader2,
   Search,
   DollarSign,
+  HelpCircle,
+  X,
+  Zap,
+  Layers,
 } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
@@ -36,6 +40,10 @@ import {
   getStoreDeliverySettings,
   saveStoreDeliverySettings,
 } from "../services/adminSettings.service";
+import {
+  calculateDeliveryFee,
+  DEFAULT_SHIPPING_CONFIG,
+} from "../../checkout/services/shippingCalculator";
 
 // Configuración de iconos Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -77,9 +85,12 @@ const DEFAULT_STORE = {
 };
 
 const DEFAULT_PRICING = {
-  baseFee: 7.0,
-  baseKm: 3.0,
-  pricePerExtraKm: 1.5,
+  hyperlocalEnabled: DEFAULT_SHIPPING_CONFIG.hyperlocalEnabled,
+  hyperlocalDistanceKm: DEFAULT_SHIPPING_CONFIG.hyperlocalDistanceKm,
+  hyperlocalFee: DEFAULT_SHIPPING_CONFIG.hyperlocalFee,
+  baseFee: DEFAULT_SHIPPING_CONFIG.baseFee,
+  baseKm: DEFAULT_SHIPPING_CONFIG.baseDistanceKm,
+  pricePerExtraKm: DEFAULT_SHIPPING_CONFIG.extraKmFee,
 };
 
 function MapViewUpdater({ center, flyToPos }) {
@@ -105,6 +116,28 @@ export default function CoverageSettingsView() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
+
+  // Popover de ayuda y simulador interactivo
+  const [showPricingHelp, setShowPricingHelp] = useState(false);
+  const [simulatedKm, setSimulatedKm] = useState("0.8");
+  const helpPopoverRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (
+        helpPopoverRef.current &&
+        !helpPopoverRef.current.contains(event.target)
+      ) {
+        setShowPricingHelp(false);
+      }
+    }
+    if (showPricingHelp) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showPricingHelp]);
 
   // Buscador de dirección para el taller
   const [storeSearchQuery, setStoreSearchQuery] = useState("");
@@ -132,10 +165,21 @@ export default function CoverageSettingsView() {
         }
         if (data.pricing) {
           setPricing({
+            hyperlocalEnabled:
+              data.pricing.hyperlocalEnabled !== undefined
+                ? Boolean(data.pricing.hyperlocalEnabled)
+                : DEFAULT_PRICING.hyperlocalEnabled,
+            hyperlocalDistanceKm: Number(
+              data.pricing.hyperlocalDistanceKm ??
+              DEFAULT_PRICING.hyperlocalDistanceKm
+            ),
+            hyperlocalFee: Number(
+              data.pricing.hyperlocalFee ?? DEFAULT_PRICING.hyperlocalFee
+            ),
             baseFee: Number(data.pricing.baseFee ?? DEFAULT_PRICING.baseFee),
             baseKm: Number(data.pricing.baseKm ?? DEFAULT_PRICING.baseKm),
             pricePerExtraKm: Number(
-              data.pricing.pricePerExtraKm ?? DEFAULT_PRICING.pricePerExtraKm,
+              data.pricing.pricePerExtraKm ?? DEFAULT_PRICING.pricePerExtraKm
             ),
           });
         }
@@ -315,17 +359,6 @@ export default function CoverageSettingsView() {
         <div className="flex items-center gap-2">
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleReset}
-            className="text-xs"
-          >
-            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-            Resetear a valores por defecto
-          </Button>
-
-          <Button
-            type="button"
             variant="primary"
             size="sm"
             onClick={handleSave}
@@ -341,13 +374,12 @@ export default function CoverageSettingsView() {
 
       {statusMessage && (
         <div
-          className={`p-3.5 rounded-card border text-xs flex items-center gap-2 ${
-            statusMessage.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-              : statusMessage.type === "error"
-                ? "bg-rose-50 border-rose-200 text-rose-900"
-                : "bg-blue-50 border-blue-200 text-blue-900"
-          }`}
+          className={`p-3.5 rounded-card border text-xs flex items-center gap-2 ${statusMessage.type === "success"
+            ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+            : statusMessage.type === "error"
+              ? "bg-rose-50 border-rose-200 text-rose-900"
+              : "bg-blue-50 border-blue-200 text-blue-900"
+            }`}
         >
           {statusMessage.type === "success" ? (
             <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -504,83 +536,395 @@ export default function CoverageSettingsView() {
       </div>
 
       {/* Formulario de Tarifas por Distancia debajo del Mapa */}
-      <Card>
-        <CardHeader className="py-3 px-4 border-b border-border bg-surface-subtle">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-accent" />
-              <CardTitle className="text-sm font-bold text-brand-primary">
-                Configuración de Tarifas de Delivery por Distancia
-              </CardTitle>
+      <Card className="overflow-hidden border border-border shadow-subtle">
+        <CardHeader className="py-4 px-5 border-b border-border bg-surface-subtle">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 relative">
+              <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center shrink-0">
+                <DollarSign className="w-4 h-4 text-accent" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-sm font-bold text-brand-primary">
+                    Configuración de Tarifas de Delivery por Distancia
+                  </CardTitle>
+                  <button
+                    type="button"
+                    onClick={() => setShowPricingHelp((prev) => !prev)}
+                    className="text-brand-secondary hover:text-brand-primary p-0.5 rounded transition-colors focus:outline-none"
+                    title="Ver explicación de tramos y simulador interactivo"
+                    aria-label="Ayuda y simulador interactivo de tarifas"
+                  >
+                    <HelpCircle className="w-4 h-4 text-brand-secondary hover:text-brand-primary" />
+                  </button>
+                </div>
+                <CardDescription className="text-xs text-brand-secondary mt-0.5">
+                  Define los costos escalonados de despacho según la distancia entre el Taller ERXIDI y el cliente.
+                </CardDescription>
+              </div>
+
+              {/* Popover Explicativo con Simulador en Vivo */}
+              {showPricingHelp && (
+                <div
+                  ref={helpPopoverRef}
+                  className="absolute left-0 top-full mt-2 z-50 w-80 sm:w-96 bg-surface-card border border-border rounded-card p-4 shadow-dropdown text-xs space-y-3"
+                >
+                  <div className="flex items-center justify-between border-b border-border pb-2">
+                    <span className="font-bold text-brand-primary text-xs uppercase tracking-wider">
+                      Estructura Tarifaria Escalonada
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPricingHelp(false)}
+                      className="text-brand-secondary hover:text-brand-primary p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 text-brand-secondary leading-relaxed">
+                    <div className="p-2.5 rounded bg-surface-subtle border border-border">
+                      <strong className="text-brand-primary block mb-0.5">
+                        1. Tramo Hiperlocal (0 a{" "}
+                        {Number(pricing.hyperlocalDistanceKm).toFixed(2)} km)
+                      </strong>
+                      <span>
+                        Tarifa preferencial de{" "}
+                        <span className="font-mono font-bold text-brand-primary">
+                          S/ {Number(pricing.hyperlocalFee).toFixed(2)}
+                        </span>{" "}
+                        aplicable a pedidos ultracercanos dentro del radio
+                        hiperlocal{" "}
+                        {pricing.hyperlocalEnabled
+                          ? "(Activo)"
+                          : "(Desactivado)"}
+                        .
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded bg-surface-subtle border border-border">
+                      <strong className="text-brand-primary block mb-0.5">
+                        2. Cobertura Base en Moto (Hasta{" "}
+                        {Number(pricing.baseKm).toFixed(2)} km)
+                      </strong>
+                      <span>
+                        Tarifa regular en motocicleta de{" "}
+                        <span className="font-mono font-bold text-brand-primary">
+                          S/ {Number(pricing.baseFee).toFixed(2)}
+                        </span>{" "}
+                        para el radio de despacho nuclear.
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded bg-surface-subtle border border-border">
+                      <strong className="text-brand-primary block mb-0.5">
+                        3. Kilómetros Excedentes (&gt;{" "}
+                        {Number(pricing.baseKm).toFixed(2)} km)
+                      </strong>
+                      <span>
+                        Tarifa base más{" "}
+                        <span className="font-mono font-bold text-brand-primary">
+                          S/ {Number(pricing.pricePerExtraKm).toFixed(2)}
+                        </span>{" "}
+                        por cada kilómetro adicional que exceda el radio base.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Simulador Interactivo */}
+                  <div className="border-t border-border pt-3 space-y-2">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-brand-primary">
+                      Simulador Interactivo
+                    </label>
+                    <Input
+                      label="Probar distancia (km)"
+                      id="pricing-sim-distance"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={simulatedKm}
+                      onChange={(e) => setSimulatedKm(e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                    {(() => {
+                      const parsedKm = parseFloat(simulatedKm);
+                      const validKm = isNaN(parsedKm) ? 0 : Math.max(0, parsedKm);
+                      const res = calculateDeliveryFee(validKm, pricing);
+                      return (
+                        <div className="p-2.5 rounded bg-surface-subtle border border-border font-mono text-[11px] text-brand-primary">
+                          Distancia ingresada:{" "}
+                          <span className="font-bold">
+                            {validKm.toFixed(1)} km
+                          </span>{" "}
+                          &rarr; Tarifa resultante:{" "}
+                          <span className="font-bold text-accent">
+                            S/ {res.fee.toFixed(2)}
+                          </span>{" "}
+                          <span className="text-brand-secondary">
+                            [Tramo: {res.tier}]
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
-            <Badge variant="neutral" className="text-[10px] font-mono">
-              Fórmula Haversine
+            <Badge variant="neutral" className="text-[10px] font-mono self-start sm:self-auto">
+              Fórmula Escalonada
             </Badge>
           </div>
-          <CardDescription className="text-xs text-brand-secondary">
-            Define el costo de despacho en función de los kilómetros entre el
-            Taller ERXIDI y la dirección de entrega del cliente.
-          </CardDescription>
         </CardHeader>
-        <CardContent className="p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Input
-              label="Tarifa Base (S/)"
-              id="pricing-base-fee"
-              type="number"
-              step="0.5"
-              min="0"
-              value={pricing.baseFee}
-              onChange={(e) =>
-                setPricing((prev) => ({
-                  ...prev,
-                  baseFee: parseFloat(e.target.value) || 0,
-                }))
-              }
-              helperText="Costo cobrado dentro del radio base"
-            />
-            <Input
-              label="Distancia Base Incluida (km)"
-              id="pricing-base-km"
-              type="number"
-              step="0.5"
-              min="0.5"
-              value={pricing.baseKm}
-              onChange={(e) =>
-                setPricing((prev) => ({
-                  ...prev,
-                  baseKm: parseFloat(e.target.value) || 0,
-                }))
-              }
-              helperText="Kilómetros cubiertos con la tarifa base"
-            />
-            <Input
-              label="Costo por km Extra (S/)"
-              id="pricing-extra-km"
-              type="number"
-              step="0.5"
-              min="0"
-              value={pricing.pricePerExtraKm}
-              onChange={(e) =>
-                setPricing((prev) => ({
-                  ...prev,
-                  pricePerExtraKm: parseFloat(e.target.value) || 0,
-                }))
-              }
-              helperText="Monto adicional por cada km excedente"
-            />
+
+        <CardContent className="p-5 space-y-6">
+          {/* Bloque 1: Escalón Hiperlocal */}
+          <div
+            className={`rounded-card border transition-all ${pricing.hyperlocalEnabled
+              ? "bg-surface-card border-border shadow-xs"
+              : "bg-surface-subtle/50 border-border/70"
+              }`}
+          >
+            <div className="p-4 border-b border-border/70 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${pricing.hyperlocalEnabled
+                    ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                    : "bg-slate-100 text-slate-400 border border-slate-200"
+                    }`}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-brand-primary block">
+                    Escalón Hiperlocal
+                  </span>
+                  <span className="text-[11px] text-brand-secondary">
+                    Tarifa preferencial reducida para despachos a pie o proximidad inmediata.
+                  </span>
+                </div>
+              </div>
+
+              {/* Switch Toggle Accesible */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={pricing.hyperlocalEnabled}
+                onClick={() =>
+                  setPricing((prev) => ({
+                    ...prev,
+                    hyperlocalEnabled: !prev.hyperlocalEnabled,
+                  }))
+                }
+                className="flex items-center gap-2.5 focus:outline-none cursor-pointer shrink-0"
+              >
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold border transition-colors ${pricing.hyperlocalEnabled
+                    ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                    : "text-slate-500 bg-slate-100 border-slate-200"
+                    }`}
+                >
+                  {pricing.hyperlocalEnabled ? "Habilitado" : "Deshabilitado"}
+                </span>
+                <div
+                  className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors ${pricing.hyperlocalEnabled ? "bg-emerald-600" : "bg-slate-300"
+                    }`}
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${pricing.hyperlocalEnabled ? "translate-x-5" : "translate-x-0"
+                      }`}
+                  />
+                </div>
+              </button>
+            </div>
+
+            <div
+              className={`p-4 transition-opacity duration-200 ${!pricing.hyperlocalEnabled ? "opacity-45 pointer-events-none" : ""
+                }`}
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input
+                  label="Tarifa Hiperlocal (S/)"
+                  id="pricing-hyperlocal-fee"
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  disabled={!pricing.hyperlocalEnabled}
+                  value={pricing.hyperlocalFee}
+                  onChange={(e) =>
+                    setPricing((prev) => ({
+                      ...prev,
+                      hyperlocalFee: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  helperText="Costo cobrado dentro del radio hiperlocal (por defecto S/ 3.50)"
+                  className="font-mono"
+                />
+                <Input
+                  label="Radio Hiperlocal (km)"
+                  id="pricing-hyperlocal-km"
+                  type="number"
+                  step="0.05"
+                  min="0.1"
+                  disabled={!pricing.hyperlocalEnabled}
+                  value={pricing.hyperlocalDistanceKm}
+                  onChange={(e) =>
+                    setPricing((prev) => ({
+                      ...prev,
+                      hyperlocalDistanceKm: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  helperText="Distancia máxima para tarifa hiperlocal (por defecto 0.80 km)"
+                  className="font-mono"
+                />
+              </div>
+            </div>
           </div>
-          <div className="mt-4 p-3 bg-surface-subtle border border-border rounded-button text-xs text-brand-secondary">
-            <p>
-              <strong>Fórmula aplicada:</strong> Si distancia &le;{" "}
-              {pricing.baseKm} km &rarr;{" "}
-              <span className="font-mono text-brand-primary font-bold">
-                S/ {pricing.baseFee.toFixed(2)}
+
+          {/* Bloque 2: Cobertura Base y Km Extra */}
+          <div className="rounded-card border border-border bg-surface-card p-4 space-y-4 shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shrink-0">
+                <Layers className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-brand-primary block">
+                  Cobertura Base en Moto y Kilómetros Excedentes
+                </span>
+                <span className="text-[11px] text-brand-secondary">
+                  Tarifa regular en motocicleta y recargo adicional por distancia recorrida.
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              <Input
+                label="Tarifa Base (S/)"
+                id="pricing-base-fee"
+                type="number"
+                step="0.5"
+                min="0"
+                value={pricing.baseFee}
+                onChange={(e) =>
+                  setPricing((prev) => ({
+                    ...prev,
+                    baseFee: parseFloat(e.target.value) || 0,
+                  }))
+                }
+                helperText="Costo cobrado dentro del radio base (por defecto S/ 7.00)"
+                className="font-mono"
+              />
+              <Input
+                label="Distancia Base (km)"
+                id="pricing-base-km"
+                type="number"
+                step="0.5"
+                min="0.5"
+                value={pricing.baseKm}
+                onChange={(e) =>
+                  setPricing((prev) => ({
+                    ...prev,
+                    baseKm: parseFloat(e.target.value) || 0,
+                  }))
+                }
+                helperText="Kilómetros cubiertos con tarifa base (por defecto 3.00 km)"
+                className="font-mono"
+              />
+              <Input
+                label="Costo por km extra (S/)"
+                id="pricing-extra-km"
+                type="number"
+                step="0.5"
+                min="0"
+                value={pricing.pricePerExtraKm}
+                onChange={(e) =>
+                  setPricing((prev) => ({
+                    ...prev,
+                    pricePerExtraKm: parseFloat(e.target.value) || 0,
+                  }))
+                }
+                helperText="Monto adicional por cada km excedente (por defecto S/ 1.00)"
+                className="font-mono"
+              />
+            </div>
+          </div>
+
+          {/* Bloque 3: Resumen Visual de Tramos y Fórmula */}
+          <div className="rounded-card border border-border bg-surface-subtle p-4 space-y-3">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-brand-secondary block">
+              Escala de Liquidación Resultante
+            </span>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div className="p-3 bg-surface-card border border-border rounded-lg space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-secondary block">
+                  Tramo 1: Hiperlocal
+                </span>
+                <div className="flex items-center justify-between font-mono">
+                  <span className="text-brand-secondary">
+                    0.0 - {Number(pricing.hyperlocalDistanceKm).toFixed(2)} km
+                  </span>
+                  {pricing.hyperlocalEnabled ? (
+                    <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px]">
+                      S/ {Number(pricing.hyperlocalFee).toFixed(2)}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded text-[11px]">
+                      Inactivo
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 bg-surface-card border border-border rounded-lg space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-secondary block">
+                  Tramo 2: Base Moto
+                </span>
+                <div className="flex items-center justify-between font-mono">
+                  <span className="text-brand-secondary">
+                    {pricing.hyperlocalEnabled
+                      ? Number(pricing.hyperlocalDistanceKm).toFixed(2)
+                      : "0.00"}{" "}
+                    - {Number(pricing.baseKm).toFixed(2)} km
+                  </span>
+                  <span className="font-bold text-brand-primary bg-surface-subtle border border-border px-1.5 py-0.5 rounded text-[11px]">
+                    S/ {Number(pricing.baseFee).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-surface-card border border-border rounded-lg space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-secondary block">
+                  Tramo 3: Excedente
+                </span>
+                <div className="flex items-center justify-between font-mono">
+                  <span className="text-brand-secondary">
+                    &gt; {Number(pricing.baseKm).toFixed(2)} km
+                  </span>
+                  <span className="font-bold text-accent bg-accent/10 border border-accent/20 px-1.5 py-0.5 rounded text-[11px]">
+                    S/ {Number(pricing.baseFee).toFixed(2)} + S/ {Number(pricing.pricePerExtraKm).toFixed(2)}/km
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-brand-secondary pt-1 border-t border-border/70 font-mono">
+              <strong>Fórmula:</strong>{" "}
+              {pricing.hyperlocalEnabled && (
+                <>
+                  Si d &le; {Number(pricing.hyperlocalDistanceKm).toFixed(2)} km &rarr;{" "}
+                  <span className="text-brand-primary font-bold">
+                    S/ {Number(pricing.hyperlocalFee).toFixed(2)}
+                  </span>
+                  .{" "}
+                </>
+              )}
+              Si d &le; {Number(pricing.baseKm).toFixed(2)} km &rarr;{" "}
+              <span className="text-brand-primary font-bold">
+                S/ {Number(pricing.baseFee).toFixed(2)}
               </span>
-              . Si distancia &gt; {pricing.baseKm} km &rarr;{" "}
-              <span className="font-mono text-brand-primary font-bold">
-                S/ {pricing.baseFee.toFixed(2)} + (distancia - {pricing.baseKm})
-                &times; S/ {pricing.pricePerExtraKm.toFixed(2)}
+              . Si d &gt; {Number(pricing.baseKm).toFixed(2)} km &rarr;{" "}
+              <span className="text-brand-primary font-bold">
+                S/ {Number(pricing.baseFee).toFixed(2)} + (d - {Number(pricing.baseKm).toFixed(2)}) &times; S/ {Number(pricing.pricePerExtraKm).toFixed(2)}
               </span>
               .
             </p>
