@@ -12,6 +12,8 @@ import {
   List,
   Power,
   RotateCcw,
+  Zap,
+  Calendar,
 } from "lucide-react";
 
 import Button from "../../../components/ui/Button";
@@ -150,18 +152,20 @@ export default function DeliveryUsersView() {
       return (
         <Badge
           variant="warning"
-          className="bg-amber-50 text-amber-800 border-amber-200"
+          className="bg-amber-50 text-amber-800 border-amber-200 inline-flex items-center gap-1"
         >
-          ⚡ Express
+          <Zap className="w-3 h-3 text-amber-600" />
+          <span>Express</span>
         </Badge>
       );
     }
     return (
       <Badge
         variant="neutral"
-        className="bg-sky-50 text-sky-800 border-sky-200"
+        className="bg-sky-50 text-sky-800 border-sky-200 inline-flex items-center gap-1"
       >
-        📅 Programado
+        <Calendar className="w-3 h-3 text-sky-600" />
+        <span>Programado</span>
       </Badge>
     );
   }
@@ -184,43 +188,64 @@ export default function DeliveryUsersView() {
 
   function renderGridCards(users, isInactiveSection = false) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {users.map((user) => {
           const isActive = user.is_active !== false;
           const isToggling = togglingId === user.id;
+          const isExpress = (user.delivery_type || "scheduled") === "express";
 
           return (
             <Card
               key={user.id}
-              className={`flex flex-col justify-between p-4 ${
-                isInactiveSection ? "opacity-75" : ""
-              }`}
+              className={`flex flex-col justify-between p-4 bg-surface-card border-border border-t-4 transition-shadow hover:shadow-sm ${
+                isExpress ? "border-t-amber-500" : "border-t-sky-500"
+              } ${isInactiveSection ? "opacity-75" : ""}`}
             >
               <div className="space-y-3">
-                {/* CABECERA */}
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-full bg-surface-subtle border border-border flex items-center justify-center flex-shrink-0 text-xs font-bold text-brand-primary">
-                    {getInitials(user)}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-full border flex items-center justify-center flex-shrink-0 text-xs font-bold font-mono ${
+                        isExpress
+                          ? "bg-amber-50 text-amber-800 border-amber-200"
+                          : "bg-sky-50 text-sky-800 border-sky-200"
+                      }`}
+                    >
+                      {getInitials(user)}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <h3
+                        className="font-bold text-sm text-brand-primary truncate"
+                        title={getCleanFullName(user)}
+                      >
+                        {getCleanFullName(user) || "Sin nombre"}
+                      </h3>
+                      <p className="text-xs text-brand-secondary font-mono">
+                        DNI: {user.dni || "—"}
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-bold text-sm text-brand-primary truncate">
-                      {getCleanFullName(user) || "Sin nombre"}
-                    </h3>
-                    <p className="text-xs text-brand-secondary font-mono mt-0.5">
-                      DNI: {user.dni || "—"}
-                    </p>
-                  </div>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold text-white flex-shrink-0 shadow-sm ${
+                      isExpress ? "bg-amber-500" : "bg-sky-600"
+                    }`}
+                  >
+                    {isExpress ? (
+                      <Zap className="w-3 h-3" />
+                    ) : (
+                      <Calendar className="w-3 h-3" />
+                    )}
+                    <span>{isExpress ? "Express" : "Programado"}</span>
+                  </span>
                 </div>
 
-                {/* BADGES */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {renderDeliveryTypeBadge(user)}
+                <div className="flex items-center gap-2">
                   {renderOperationalBadge(user)}
                 </div>
 
-                {/* CONTACTO */}
-                <div className="space-y-1.5 pt-2 border-t border-border text-xs text-brand-secondary">
+                <div className="space-y-1.5 pt-2.5 border-t border-border text-xs text-brand-secondary">
                   <div className="flex items-center gap-2">
                     <Phone className="w-3.5 h-3.5 text-brand-muted flex-shrink-0" />
                     {user.phone ? (
@@ -244,7 +269,6 @@ export default function DeliveryUsersView() {
                 </div>
               </div>
 
-              {/* BARRA DE ACCIONES INFERIOR */}
               <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border">
                 <div className="flex items-center gap-1.5">
                   <Button
@@ -287,7 +311,7 @@ export default function DeliveryUsersView() {
                   variant="outline"
                   size="sm"
                   onClick={() => handleDelete(user.id)}
-                  className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 px-2.5"
+                  className="inline-flex items-center text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 px-2"
                   title="Eliminar repartidor"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -299,6 +323,8 @@ export default function DeliveryUsersView() {
       </div>
     );
   }
+
+
 
   function renderTable(users, isInactiveSection = false) {
     return (
@@ -336,9 +362,8 @@ export default function DeliveryUsersView() {
                 return (
                   <tr
                     key={user.id}
-                    className={`hover:bg-surface-subtle transition ${
-                      isInactiveSection ? "opacity-75" : ""
-                    }`}
+                    className={`hover:bg-surface-subtle transition ${isInactiveSection ? "opacity-75" : ""
+                      }`}
                   >
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-3">
@@ -465,18 +490,9 @@ export default function DeliveryUsersView() {
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-wider text-brand-muted">
-            Logística
-          </p>
-
           <h1 className="text-2xl font-bold text-brand-primary">
             Repartidores
           </h1>
-
-          <p className="text-sm text-brand-secondary mt-1">
-            Administra los usuarios encargados de las entregas y su modalidad
-            operativa.
-          </p>
         </div>
 
         <Button
@@ -507,11 +523,10 @@ export default function DeliveryUsersView() {
           <button
             type="button"
             onClick={() => setViewMode("grid")}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-semibold transition ${
-              viewMode === "grid"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-semibold transition ${viewMode === "grid"
                 ? "bg-surface-card text-brand-primary border border-border"
                 : "text-brand-secondary hover:text-brand-primary"
-            }`}
+              }`}
           >
             <LayoutGrid className="w-3.5 h-3.5" />
             <span>Cuadrícula</span>
@@ -520,11 +535,10 @@ export default function DeliveryUsersView() {
           <button
             type="button"
             onClick={() => setViewMode("table")}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-semibold transition ${
-              viewMode === "table"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-semibold transition ${viewMode === "table"
                 ? "bg-surface-card text-brand-primary border border-border"
                 : "text-brand-secondary hover:text-brand-primary"
-            }`}
+              }`}
           >
             <List className="w-3.5 h-3.5" />
             <span>Filas</span>
