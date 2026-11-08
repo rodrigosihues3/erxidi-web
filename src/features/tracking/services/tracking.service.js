@@ -3,6 +3,7 @@ import {
   Check,
   PackageCheck,
   Package,
+  UserCheck,
   Truck,
   Navigation,
   MapPin,
@@ -13,44 +14,50 @@ import {
 export const DELIVERY_TRACKING_STEPS = [
   {
     id: "recibido",
-    title: "Confirmado",
-    detail: "Tu compra quedó registrada y validada.",
+    title: "Pedido Registrado",
+    detail: "Hemos recibido tu compra.",
     icon: Check,
   },
   {
     id: "en_preparacion",
-    title: "En preparación",
-    detail: "Estamos seleccionando y empaquetando tus prendas.",
+    title: "En Preparación",
+    detail: "Seleccionando y empaquetando tus prendas en taller.",
     icon: PackageCheck,
   },
   {
-    id: "listo_despacho",
-    title: "Listo para despacho",
-    detail: "Empaque completado y listo para salida de almacén.",
+    id: "por_asignar_repartidor",
+    title: "Preparado para Despacho",
+    detail: "Listo en taller esperando asignación de motorizado.",
     icon: Package,
   },
   {
+    id: "asignado",
+    title: "Repartidor Asignado",
+    detail: "Repartidor designado para la entrega de tu pedido.",
+    icon: UserCheck,
+  },
+  {
     id: "en_camino",
-    title: "En camino",
-    detail: "Tu pedido está en tránsito hacia tu dirección.",
+    title: "En Camino",
+    detail: "El pedido ha salido del taller hacia tu dirección.",
     icon: Truck,
   },
   {
     id: "cerca",
-    title: "A pocas cuadras",
-    detail: "El repartidor se encuentra muy próximo a tu ubicación.",
+    title: "Repartidor Cerca",
+    detail: "El repartidor se encuentra a pocas cuadras de tu ubicación.",
     icon: Navigation,
   },
   {
     id: "en_ubicacion",
-    title: "Repartidor en puerta",
+    title: "En Ubicación",
     detail: "El repartidor ha llegado a tu puerta de entrega.",
     icon: MapPin,
   },
   {
     id: "entregado",
     title: "Entregado",
-    detail: "Pedido entregado con recepción conforme.",
+    detail: "Paquete recibido y entrega finalizada con conformidad.",
     icon: CheckCircle2,
   },
 ];
@@ -82,9 +89,14 @@ export const PICKUP_TRACKING_STEPS = [
   },
 ];
 
-export function isPickupDeliveryType(deliveryType) {
-  const t = String(deliveryType || "").toLowerCase();
-  return t === "pickup" || t === "recojo";
+export function isPickupDeliveryType(order) {
+  if (!order) return false;
+  const dType = (typeof order === "object" ? order.delivery_type : order) || "";
+  const sType = (typeof order === "object" ? order.shipping_type : "") || "";
+  return (
+    ["pickup", "recojo", "recojo_tienda"].includes(dType.toLowerCase()) ||
+    ["pickup", "recojo", "recojo_tienda"].includes(sType.toLowerCase())
+  );
 }
 
 export function getTrackingStepIndex(status, isPickup = false) {
@@ -124,27 +136,30 @@ export function getTrackingStepIndex(status, isPickup = false) {
     return 0;
   }
 
-  // Flujo Delivery
-  if (["recibido", "received", "pendiente_pago", "pending", "pagado"].includes(s)) {
-    return 0;
+  // Flujo Delivery (8 fases deterministas: 0 al 7)
+  if (["recibido", "received", "pendiente_pago", "pending"].includes(s)) {
+    return 0; // Se mantiene en Fase 1 hasta que pase a preparación
   }
-  if (["en_preparacion", "preparing"].includes(s)) {
+  if (["en_preparacion", "preparing", "pagado"].includes(s)) {
     return 1;
   }
-  if (["por_asignar", "por_asignar_repartidor", "asignado"].includes(s)) {
+  if (["por_asignar", "por_asignar_repartidor"].includes(s)) {
     return 2;
   }
-  if (["en_camino", "dispatched"].includes(s)) {
+  if (["asignado"].includes(s)) {
     return 3;
   }
-  if (["cerca", "nearby"].includes(s)) {
+  if (["en_camino", "en_ruta", "dispatched"].includes(s)) {
     return 4;
   }
-  if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
+  if (["cerca", "nearby"].includes(s)) {
     return 5;
   }
-  if (["entregado", "delivered"].includes(s)) {
+  if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
     return 6;
+  }
+  if (["entregado", "delivered"].includes(s)) {
+    return 7;
   }
 
   return 0;
@@ -164,13 +179,13 @@ export function getStatusBadgeConfig(status, isPickup = false) {
     case "en_destino":
     case "arrived":
       return {
-        label: isPickup ? "Disponible para Recojo" : "Repartidor en Puerta",
+        label: isPickup ? "Disponible para Recojo" : "En Ubicación",
         variant: "warning",
       };
     case "cerca":
     case "nearby":
       return {
-        label: isPickup ? "Disponible para Recojo" : "A pocas cuadras",
+        label: isPickup ? "Disponible para Recojo" : "Repartidor Cerca",
         variant: "warning",
       };
     case "en_camino":
@@ -192,7 +207,7 @@ export function getStatusBadgeConfig(status, isPickup = false) {
     case "por_asignar":
     case "por_asignar_repartidor":
       return {
-        label: isPickup ? "Empaque Finalizado" : "Empacado · Coordinando Despacho",
+        label: isPickup ? "Empaque Finalizado" : "Preparado para Despacho",
         variant: "neutral",
       };
     case "en_preparacion":
@@ -200,6 +215,12 @@ export function getStatusBadgeConfig(status, isPickup = false) {
       return {
         label: "En Preparación",
         variant: "neutral",
+      };
+    case "pendiente_pago":
+    case "pending":
+      return {
+        label: "Validación de Pago",
+        variant: "warning",
       };
     case "incidencia_transporte":
       return {
@@ -214,7 +235,7 @@ export function getStatusBadgeConfig(status, isPickup = false) {
       };
     default:
       return {
-        label: "Pedido Confirmado",
+        label: isPickup ? "Pedido Confirmado" : "Pedido Registrado",
         variant: "neutral",
       };
   }
@@ -238,12 +259,19 @@ export function normalizeOrderData(rawOrder) {
 
   const normalizedItems = (rawOrder.order_items || []).map((item) => {
     const variant = item.product_variants || {};
-    const product = variant.products || {};
+    const product = variant.products || item.products || {};
     const size = variant.sizes || {};
 
     const unitPrice = Number(item.unit_price || 0);
     const quantity = Number(item.quantity || 1);
     const totalPrice = Number(item.subtotal || unitPrice * quantity);
+
+    const resolvedImageUrl =
+      item.image_url ||
+      variant.products?.main_image_url ||
+      product.main_image_url ||
+      variant.image_url ||
+      "";
 
     return {
       id: item.id,
@@ -258,9 +286,9 @@ export function normalizeOrderData(rawOrder) {
       variant_color: variant.color || item.variant_color || "—",
       variant_size: size.name || item.variant_size || "U",
       sku: variant.sku || item.sku || "",
-      image_url:
-        product.main_image_url || item.image_url || "",
+      image_url: resolvedImageUrl,
       product_variants: variant,
+      products: product,
     };
   });
 

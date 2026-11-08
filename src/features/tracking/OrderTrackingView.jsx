@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  ArrowLeft,
   Check,
   PackageCheck,
   Package,
@@ -212,8 +213,8 @@ export default function OrderTrackingView() {
   };
 
   const isPickup = useMemo(
-    () => isPickupDeliveryType(order?.delivery_type),
-    [order?.delivery_type],
+    () => isPickupDeliveryType(order),
+    [order],
   );
 
   const steps = useMemo(
@@ -279,34 +280,6 @@ export default function OrderTrackingView() {
     );
   }, [order]);
 
-  const driverRole = useMemo(() => {
-    if (!order) return "";
-    return (
-      order.delivery_user?.delivery_role ||
-      (order.delivery_type === "express"
-        ? "Repartidor Express (Mismo Día)"
-        : "Repartidor Programado")
-    );
-  }, [order]);
-
-  const driverPhone = useMemo(() => {
-    if (!order) return "";
-    return order.delivery_user?.phone || order.delivery_profile?.phone || "";
-  }, [order]);
-
-  const driverWhatsAppUrl = useMemo(() => {
-    if (!driverPhone || !order?.order_number) return "";
-    const cleanNumber = digitsOnly(driverPhone);
-    const fullNumber =
-      cleanNumber.startsWith("51") || cleanNumber.length > 9
-        ? cleanNumber
-        : `51${cleanNumber}`;
-    const text = encodeURIComponent(
-      `Hola ${driverName}, te escribo con respecto a mi pedido ${order.order_number} de ERXIDI.`,
-    );
-    return `https://wa.me/${fullNumber}?text=${text}`;
-  }, [driverPhone, driverName, order?.order_number]);
-
   const deliveryTypeLabel = useMemo(() => {
     if (isPickup) return "Recojo en Tienda ERXIDI";
     if (order?.delivery_type === "express") return "Envío Express Mismo Día";
@@ -341,7 +314,7 @@ export default function OrderTrackingView() {
 
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Badge variant="neutral" className="font-mono text-xs">
+              <Badge variant="neutral" className="font-mono text-xs !rounded-sm">
                 {orderNumber || "SIN CÓDIGO"}
               </Badge>
             </div>
@@ -411,25 +384,38 @@ export default function OrderTrackingView() {
   return (
     <main className="mx-auto w-full max-w-5xl space-y-6 px-4 py-10 sm:px-6">
       {/* Encabezado */}
-      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 sm:flex-row sm:items-end">
-        <div className="space-y-1.5">
+      <header className="space-y-4 border-b border-border pb-5">
+        {/* Fila 1: Botón de retorno y Estado */}
+        <div className="flex items-center justify-between gap-4">
+          <Link
+            to="/mis-pedidos"
+            className="inline-flex items-center gap-1.5 rounded-button border border-border bg-surface-card px-2.5 py-1 text-xs font-medium text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <span>Mis pedidos</span>
+          </Link>
+
           <div className="flex items-center gap-2">
-            <Badge variant={statusBadge.variant} className="text-xs font-mono">
+            <Badge variant={statusBadge.variant} className="text-xs font-mono !rounded-sm">
               {statusBadge.label}
             </Badge>
             {isPickup && (
-              <Badge variant="neutral" className="text-xs">
+              <Badge variant="neutral" className="text-xs !rounded-sm">
                 Recojo en Tienda
               </Badge>
             )}
           </div>
+        </div>
+
+        {/* Fila 2: Título y Código */}
+        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <h1 className="text-2xl font-bold text-brand-primary">
             Seguimiento de Pedido
           </h1>
+          <p className="font-mono text-sm font-bold text-brand-primary">
+            Código: <span className="text-accent">{order.order_number}</span>
+          </p>
         </div>
-        <p className="font-mono text-sm font-bold text-brand-primary">
-          Código: <span className="text-accent">{order.order_number}</span>
-        </p>
       </header>
 
       {/* Banner de Incidencia Operativa */}
@@ -444,7 +430,7 @@ export default function OrderTrackingView() {
               <span className="text-xs font-bold uppercase tracking-wider">
                 Aviso de Novedad Operativa
               </span>
-              <Badge variant="warning" className="text-[10px] font-mono">
+              <Badge variant="warning" className="text-[10px] font-mono !rounded-sm">
                 En Gestión Logística
               </Badge>
             </div>
@@ -526,6 +512,9 @@ export default function OrderTrackingView() {
                 <span className="text-accent">
                   {steps[currentStep]?.title || "Procesando"}
                 </span>
+                <span className="hidden sm:inline text-brand-secondary font-normal ml-1.5">
+                  — {steps[currentStep]?.detail}
+                </span>
               </span>
               <span className="font-mono text-xs font-bold text-brand-primary">
                 {progressPercentage}%
@@ -541,8 +530,8 @@ export default function OrderTrackingView() {
 
           {/* Stepper Nodes */}
           <ol
-            className={`space-y-6 md:grid ${
-              isPickup ? "md:grid-cols-4" : "md:grid-cols-7"
+            className={`flex flex-col space-y-6 md:grid ${
+              isPickup ? "md:grid-cols-4" : "md:grid-cols-8"
             } md:gap-2 md:space-y-0`}
           >
             {steps.map((step, index) => {
@@ -550,25 +539,16 @@ export default function OrderTrackingView() {
               const isCompleted = isFinalDelivered || index < currentStep;
               const isActive = !isFinalDelivered && index === currentStep;
 
-              // Adaptación dinámica de detalle si la orden fue asignada a un repartidor
-              let stepDetail = step.detail;
-              if (
-                !isPickup &&
-                step.id === "listo_despacho" &&
-                order?.status === "asignado"
-              ) {
-                stepDetail = "Repartidor asignado y paquete en preparación de salida.";
-              }
-
               return (
                 <li
                   key={step.id}
-                  className="relative flex gap-3 md:flex-col md:gap-3"
+                  title={step.detail}
+                  className="relative flex min-w-0 gap-3 md:flex-col md:items-center md:gap-3"
                 >
                   {/* Conector lineal entre pasos */}
                   {index < steps.length - 1 && (
                     <span
-                      className={`absolute left-[17px] top-9 h-[calc(100%+8px)] w-px md:left-[34px] md:top-[17px] md:h-px md:w-[calc(100%-16px)] ${
+                      className={`absolute left-[17px] top-9 h-[calc(100%+8px)] w-px md:left-1/2 md:top-[18px] md:h-px md:w-[calc(100%+8px)] ${
                         isCompleted ? "bg-emerald-500" : "bg-border"
                       }`}
                       aria-hidden="true"
@@ -594,9 +574,9 @@ export default function OrderTrackingView() {
                   </span>
 
                   {/* Texto de la etapa */}
-                  <div className="pb-1 md:pr-1">
+                  <div className="min-w-0 pb-1 md:pr-1 w-full">
                     <h2
-                      className={`text-xs font-bold leading-tight ${
+                      className={`text-[11px] md:text-xs font-bold text-center leading-tight break-words ${
                         isActive || isCompleted
                           ? "text-brand-primary"
                           : "text-brand-muted"
@@ -604,17 +584,17 @@ export default function OrderTrackingView() {
                     >
                       {step.title}
                     </h2>
-                    <p className="mt-1 text-[11px] leading-relaxed text-brand-secondary">
-                      {stepDetail}
+                    <p className="mt-1 text-[11px] leading-relaxed text-brand-secondary md:hidden">
+                      {step.detail}
                     </p>
                     {isActive && (
-                      <span className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] font-bold text-accent uppercase">
+                      <span className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] font-bold text-accent uppercase md:hidden">
                         <Clock3 className="h-3 w-3" />
                         Estado actual
                       </span>
                     )}
                     {isCompleted && index === steps.length - 1 && (
-                      <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-1">
+                      <span className="text-[11px] font-bold text-emerald-600 flex items-center justify-center gap-1 mt-1">
                         <Check className="h-3 w-3" />
                         {isPickup ? "RETIRADO" : "FINALIZADO"}
                       </span>
@@ -644,7 +624,7 @@ export default function OrderTrackingView() {
                 </p>
               </div>
             </div>
-            <Badge variant="warning" className="text-[10px] font-mono">
+            <Badge variant="warning" className="text-[10px] font-mono !rounded-sm">
               {statusBadge.label}
             </Badge>
           </div>
@@ -658,45 +638,20 @@ export default function OrderTrackingView() {
                 <p className="text-sm font-bold text-brand-primary">
                   {driverName}
                 </p>
-                <p className="text-xs text-brand-secondary flex items-center gap-1.5 mt-0.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-                  {driverRole}
-                </p>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2.5 items-center">
-              {driverPhone ? (
-                <>
-                  <a
-                    href={`tel:${driverPhone}`}
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-button bg-brand-primary px-3.5 text-xs font-semibold text-white transition-colors hover:bg-slate-800"
-                  >
-                    <Phone className="h-3.5 w-3.5 text-accent" />
-                    <span>Llamar al Repartidor</span>
-                  </a>
-                  <a
-                    href={driverWhatsAppUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-button border border-border bg-surface-card px-3.5 text-xs font-semibold text-brand-primary transition-colors hover:bg-surface-subtle"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>WhatsApp</span>
-                  </a>
-                </>
-              ) : (
-                <span className="text-xs text-brand-secondary font-medium">
-                  Repartidor en trayecto a tu domicilio
-                </span>
-              )}
+            <div>
+              <span className="text-xs text-brand-secondary font-medium">
+                El repartidor te contactará al llegar a tu dirección
+              </span>
             </div>
           </div>
         </Card>
       )}
 
       {/* Ficha de Recojo en Tienda (Visible cuando la orden está lista para recojo) */}
-      {isPickup && currentStep >= 2 && !isFinalDelivered && (
+      {isPickup && (order.status === "listo_recojo" || currentStep >= 2) && !isFinalDelivered && (
         <Card className="p-5 space-y-4 shadow-subtle border border-border">
           <div className="flex items-center justify-between border-b border-border pb-3">
             <div className="flex items-center gap-2">
@@ -712,7 +667,7 @@ export default function OrderTrackingView() {
                 </p>
               </div>
             </div>
-            <Badge variant="warning" className="text-[10px] font-mono">
+            <Badge variant="warning" className="text-[10px] font-mono !rounded-sm">
               Listo para Retiro
             </Badge>
           </div>
@@ -850,7 +805,7 @@ export default function OrderTrackingView() {
                 Prendas del Pedido
               </h2>
             </div>
-            <Badge variant="neutral" className="text-[10px] font-mono">
+            <Badge variant="neutral" className="text-[10px] font-mono !rounded-sm">
               {items.length} {items.length === 1 ? "prenda" : "prendas"}
             </Badge>
           </div>
@@ -861,67 +816,76 @@ export default function OrderTrackingView() {
                 Detalle de ítems no disponible.
               </p>
             ) : (
-              items.map((item, idx) => (
-                <div
-                  key={item.id || idx}
-                  className="pt-3 first:pt-0 flex items-center gap-3.5 text-xs"
-                >
-                  {/* Foto miniatura en formato e-commerce 4:5 */}
-                  <div className="w-14 aspect-[4/5] shrink-0 rounded-button border border-border bg-slate-50 p-1 overflow-hidden flex items-center justify-center">
-                    {item.image_url ? (
-                      <img
-                        src={item.image_url}
-                        alt={item.product_name}
-                        className="w-full h-full object-contain"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <Package className="w-5 h-5 text-brand-muted" />
-                    )}
-                  </div>
+              items.map((item, idx) => {
+                const itemImageUrl =
+                  item.image_url ||
+                  item.product_variants?.products?.main_image_url ||
+                  item.products?.main_image_url ||
+                  item.product_variants?.image_url ||
+                  null;
 
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <p className="text-xs font-semibold text-brand-primary truncate">
-                      {item.product_name}
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {item.variant_color && item.variant_color !== "—" && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-sm border border-border bg-surface-subtle text-[10px] text-brand-primary font-medium">
-                          Color: {item.variant_color}
-                        </span>
-                      )}
-                      {item.variant_size && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-sm border border-border bg-surface-subtle text-[10px] text-brand-primary font-medium">
-                          Talla: {item.variant_size}
-                        </span>
-                      )}
-                      {item.sku && (
-                        <span className="font-mono text-[10px] text-brand-secondary">
-                          SKU: {item.sku}
-                        </span>
+                return (
+                  <div
+                    key={item.id || idx}
+                    className="pt-3 first:pt-0 flex items-center gap-3.5 text-xs"
+                  >
+                    {/* Foto miniatura en formato e-commerce 4:5 */}
+                    <div className="w-14 aspect-[4/5] shrink-0 rounded-button border border-border bg-slate-50 p-1 overflow-hidden flex items-center justify-center">
+                      {itemImageUrl ? (
+                        <img
+                          src={itemImageUrl}
+                          alt={item.product_name}
+                          className="w-full h-full object-contain"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <Package className="w-5 h-5 text-brand-muted" />
                       )}
                     </div>
 
-                    <p className="text-[11px] text-brand-secondary">
-                      Cantidad:{" "}
-                      <span className="font-mono font-semibold text-brand-primary">
-                        {item.quantity}
-                      </span>{" "}
-                      &bull; P. Unit:{" "}
-                      <span className="font-mono font-medium text-brand-primary">
-                        {formatCurrency(item.unit_price)}
-                      </span>
-                    </p>
-                  </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <p className="text-xs font-semibold text-brand-primary truncate">
+                        {item.product_name}
+                      </p>
 
-                  <div className="text-right shrink-0">
-                    <span className="font-mono font-bold text-brand-primary text-sm">
-                      {formatCurrency(item.total_price)}
-                    </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {item.variant_color && item.variant_color !== "—" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm border border-border bg-surface-subtle text-[10px] text-brand-primary font-medium">
+                            Color: {item.variant_color}
+                          </span>
+                        )}
+                        {item.variant_size && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-sm border border-border bg-surface-subtle text-[10px] text-brand-primary font-medium">
+                            Talla: {item.variant_size}
+                          </span>
+                        )}
+                        {item.sku && (
+                          <span className="font-mono text-[10px] text-brand-secondary">
+                            SKU: {item.sku}
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-brand-secondary">
+                        Cantidad:{" "}
+                        <span className="font-mono font-semibold text-brand-primary">
+                          {item.quantity}
+                        </span>{" "}
+                        &bull; P. Unit:{" "}
+                        <span className="font-mono font-medium text-brand-primary">
+                          {formatCurrency(item.unit_price)}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="font-mono font-bold text-brand-primary text-sm">
+                        {formatCurrency(item.total_price)}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </Card>

@@ -122,7 +122,6 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
   };
 
   const navLinks = [
-    { label: "Inicio", path: "/" },
     { label: "Catálogo", path: "/catalogo" },
   ];
 
@@ -466,10 +465,9 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 to={link.path}
                 onClick={() => setMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `px-3 py-2 rounded-button text-sm font-semibold transition-colors ${
-                    isActive
-                      ? "bg-white/10 text-accent"
-                      : "text-brand-muted hover:text-white hover:bg-white/5"
+                  `px-3 py-2 rounded-button text-sm font-semibold transition-colors ${isActive
+                    ? "bg-white/10 text-accent"
+                    : "text-brand-muted hover:text-white hover:bg-white/5"
                   }`
                 }
               >
@@ -485,15 +483,15 @@ export default function Navbar({ onOpenSizeMatcher, onOpenCartDrawer }) {
                 {(role === "owner" ||
                   role === "admin" ||
                   profile?.role === "owner") && (
-                  <Link
-                    to="/admin"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-button text-sm font-semibold text-white bg-white/10 hover:bg-accent transition-colors"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-accent" />
-                    <span>Panel Admin</span>
-                  </Link>
-                )}
+                    <Link
+                      to="/admin"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-button text-sm font-semibold text-white bg-white/10 hover:bg-accent transition-colors"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-accent" />
+                      <span>Panel Admin</span>
+                    </Link>
+                  )}
 
                 <div className="flex items-center gap-2.5 px-3 py-2 bg-white/5 rounded-button">
                   <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center font-bold text-xs">
