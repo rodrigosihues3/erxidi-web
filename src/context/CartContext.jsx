@@ -1,54 +1,25 @@
-import { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { CheckCircle2, ShoppingBag, X } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { supabase } from "../services/supabase";
 
 const CartContext = createContext(null);
-const STORAGE_KEY = "erxidi_cart_v1";
-
-const mapCartItemRow = (row) => {
-  const variant = row.product_variants;
-  const product = variant?.products;
-
-  // Validación estricta: variant.stock > 0 && variant.is_active !== false
-  if (
-    !variant ||
-    variant.is_active === false ||
-    product?.is_active === false ||
-    (Number(variant.stock) || 0) <= 0
-  ) {
-    return null;
-  }
-
-  const maxStock = Math.max(0, Number(variant.stock) || 0);
-  const qty = Math.max(1, Math.min(Number(row.quantity) || 1, maxStock));
-
-  return {
-    id: row.id,
-    variantId: Number(row.variant_id),
-    productId: product?.id,
-    name: product?.name || "Prenda",
-    price: Number(product?.price || 0),
-    size: variant.size,
-    color: variant.color,
-    quantity: qty,
-    imageUrl: product?.main_image_url || "",
-    stock: maxStock,
-    sku: variant.sku || "",
-  };
-};
+const STORAGE_KEY = "erxidi_cart";
 
 export function CartProvider({ children }) {
   const { user } = useAuth();
 
   const [items, setItems] = useState(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      const local =
+        localStorage.getItem(STORAGE_KEY) ||
+        localStorage.getItem("erxidi_cart_v1");
+      return local ? JSON.parse(local) : [];
     } catch {
       return [];
     }
   });
+  const [isInitialized, setIsInitialized] = useState(false);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
   const openCartDrawer = () => setIsCartOpen(true);
@@ -57,152 +28,105 @@ export function CartProvider({ children }) {
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
-  const previousUserRef = useRef(user?.id || null);
-  const isMergingRef = useRef(false);
-
-  // Consulta cart_items consolidada con product_variants y products desde Supabase
-  const fetchSupabaseCart = useCallback(async (userId) => {
-    if (!userId) return [];
-    try {
-      const { data, error } = await supabase
-        .from("cart_items")
-        .select(`
-          id,
-          variant_id,
-          quantity,
-          product_variants:variant_id (
-            id,
-            size,
-            color,
-            stock,
-            is_active,
-            sku,
-            products:product_id (
-              id,
-              name,
-              price,
-              main_image_url,
-              is_active
-            )
-          )
-        `)
-        .eq("user_id", userId);
-
-      if (error) {
-        console.error("Error al obtener cart_items de Supabase:", error);
-        return [];
-      }
-
-      if (!Array.isArray(data)) return [];
-
-      return data.map(mapCartItemRow).filter(Boolean);
-    } catch (err) {
-      console.error("Error al consultar carrito en Supabase:", err);
-      return [];
-    }
-  }, []);
-
-  // 2.1 Carga Inicial y Fusión de Sesión (Merge on Login)
+  // 1. Efecto de sincronización/fusión inicial con Supabase
   useEffect(() => {
     let isMounted = true;
 
-    async function syncCartOnUserChange() {
-      if (user?.id) {
-        if (isMergingRef.current) return;
-        isMergingRef.current = true;
-
-        try {
-          // 1. Obtener ítems locales previos (invitado) para fusionar
-          let localGuestItems = [];
-          try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-              localGuestItems = JSON.parse(stored);
-            }
-          } catch {
-            localGuestItems = [];
-          }
-
-          if (Array.isArray(localGuestItems) && localGuestItems.length > 0) {
-            // Consultar ítems existentes en la BD para este usuario para sumar cantidades
-            const { data: existingRows } = await supabase
-              .from("cart_items")
-              .select("variant_id, quantity")
-              .eq("user_id", user.id);
-
-            const existingMap = new Map(
-              (existingRows || []).map((r) => [
-                Number(r.variant_id),
-                Number(r.quantity),
-              ])
-            );
-
-            const upsertPayload = localGuestItems.map((item) => {
-              const varId = Number(item.variantId);
-              const currentDbQty = existingMap.get(varId) || 0;
-              const mergedQty = Math.max(
-                1,
-                currentDbQty + (Number(item.quantity) || 1)
-              );
-              return {
-                user_id: user.id,
-                variant_id: varId,
-                quantity: mergedQty,
-                updated_at: new Date().toISOString(),
-              };
-            });
-
-            if (upsertPayload.length > 0) {
-              await supabase
-                .from("cart_items")
-                .upsert(upsertPayload, { onConflict: "user_id,variant_id" });
-            }
-
-            // Limpiar el residuo transitorio en localStorage
-            localStorage.removeItem(STORAGE_KEY);
-          }
-
-          // 2. Consultar la tabla cart_items consolidada con product_variants y products
-          const consolidated = await fetchSupabaseCart(user.id);
-          if (isMounted) {
-            setItems(consolidated);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(consolidated));
-            } catch {
-              // ignore
-            }
-          }
-        } finally {
-          isMergingRef.current = false;
-        }
-      } else if (previousUserRef.current && !user?.id) {
-        // Cierre de sesión: limpiar memoria y localStorage
-        setItems([]);
-        try {
-          localStorage.removeItem(STORAGE_KEY);
-        } catch {
-          // ignore
-        }
+    async function syncCart() {
+      if (!user) {
+        if (isMounted) setIsInitialized(true);
+        return;
       }
 
-      previousUserRef.current = user?.id || null;
+      try {
+        // Consultar cart_items del usuario
+        const { data: cloudItems, error } = await supabase
+          .from("cart_items")
+          .select("id, variant_id, quantity, product_variants(*, products(*))")
+          .eq("user_id", user.id);
+
+        if (error) throw error;
+
+        if (isMounted) {
+          // Fusión inteligente: Si hay ítems locales y Supabase está vacío, subir los locales a Supabase
+          const currentLocal = items;
+          if ((!cloudItems || cloudItems.length === 0) && currentLocal.length > 0) {
+            // Subir a Supabase
+            const payload = currentLocal.map((it) => ({
+              user_id: user.id,
+              variant_id: Number(it.variantId),
+              quantity: Number(it.quantity) || 1,
+              updated_at: new Date().toISOString(),
+            }));
+            await supabase
+              .from("cart_items")
+              .upsert(payload, { onConflict: "user_id,variant_id" });
+          } else if (cloudItems && cloudItems.length > 0) {
+            // Mapear ítems de Supabase al formato estándar del CartContext
+            const mapped = cloudItems
+              .map((ci) => ({
+                id: ci.id,
+                variantId: Number(ci.variant_id),
+                quantity: Number(ci.quantity) || 1,
+                stock: Number(ci.product_variants?.stock) || 10,
+                name: ci.product_variants?.products?.name || "Prenda",
+                price: Number(ci.product_variants?.products?.price || 0),
+                size: ci.product_variants?.size || "M",
+                color: ci.product_variants?.color || "—",
+                imageUrl: ci.product_variants?.products?.main_image_url || null,
+              }))
+              .filter(Boolean);
+            setItems(mapped);
+          }
+          setIsInitialized(true);
+        }
+      } catch (err) {
+        console.warn("Fallo al sincronizar carrito en la nube, manteniendo local:", err);
+        if (isMounted) setIsInitialized(true);
+      }
     }
 
-    syncCartOnUserChange();
+    syncCart();
 
     return () => {
       isMounted = false;
     };
-  }, [user?.id, fetchSupabaseCart]);
+  }, [user]);
 
-  // Sincronización continua de localStorage
+  // 2. Persistencia en localStorage (SOLO se ejecuta tras inicializar)
   useEffect(() => {
+    if (!isInitialized) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("Error al persistir carrito local:", err);
     }
-  }, [items]);
+  }, [items, isInitialized]);
+
+  // 3. Debounce para persistir cambios en Supabase para usuarios logueados
+  useEffect(() => {
+    if (!isInitialized || !user) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        // Limpiar y sincronizar estado actual en cart_items
+        await supabase.from("cart_items").delete().eq("user_id", user.id);
+        if (items.length > 0) {
+          const payload = items.map((it) => ({
+            user_id: user.id,
+            variant_id: Number(it.variantId),
+            quantity: Number(it.quantity) || 1,
+            updated_at: new Date().toISOString(),
+          }));
+          await supabase.from("cart_items").insert(payload);
+        }
+      } catch (err) {
+        console.warn("Error al persistir cart_items con debounce:", err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [items, user, isInitialized]);
 
   const showAddToast = (item, addedQty, isLimited) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -224,8 +148,8 @@ export function CartProvider({ children }) {
     const maxStock = Math.max(0, Number(item?.stock) || 0);
     const cleanQty = Math.max(1, Number(quantity) || 1);
 
-    if (!item || maxStock <= 0) {
-      return { success: false, reason: "out_of_stock" };
+    if (!item) {
+      return { success: false, reason: "invalid_item" };
     }
 
     const targetVariantId = Number(item.variantId);
@@ -234,12 +158,13 @@ export function CartProvider({ children }) {
     );
     const currentQty = existingItem ? Number(existingItem.quantity) || 0 : 0;
     const requestedTotal = currentQty + cleanQty;
-    const isLimited = requestedTotal > maxStock;
+    const effectiveStock = maxStock > 0 ? maxStock : 999;
+    const isLimited = requestedTotal > effectiveStock;
     const effectiveAdded = Math.max(
       0,
-      Math.min(cleanQty, maxStock - currentQty)
+      Math.min(cleanQty, effectiveStock - currentQty)
     );
-    const finalQuantity = Math.min(requestedTotal, maxStock);
+    const finalQuantity = Math.min(requestedTotal, effectiveStock);
 
     setItems((prevItems) => {
       const existingIndex = prevItems.findIndex(
@@ -252,7 +177,7 @@ export function CartProvider({ children }) {
         updated[existingIndex] = {
           ...prevExisting,
           price: Number(item.price ?? prevExisting.price),
-          stock: maxStock,
+          stock: maxStock || prevExisting.stock || 10,
           quantity: finalQuantity,
         };
         return updated;
@@ -264,7 +189,7 @@ export function CartProvider({ children }) {
           ...item,
           variantId: targetVariantId,
           price: Number(item.price) || 0,
-          stock: maxStock,
+          stock: maxStock || 10,
           quantity: finalQuantity,
         },
       ];
@@ -272,28 +197,6 @@ export function CartProvider({ children }) {
 
     if (effectiveAdded > 0) {
       showAddToast(item, effectiveAdded, isLimited);
-    }
-
-    if (user?.id) {
-      supabase
-        .from("cart_items")
-        .upsert(
-          {
-            user_id: user.id,
-            variant_id: targetVariantId,
-            quantity: finalQuantity,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id,variant_id" }
-        )
-        .then(({ error }) => {
-          if (error) {
-            console.error("Error al persistir addItem en Supabase:", error);
-          }
-        })
-        .catch((err) => {
-          console.error("Error en upsert de addItem:", err);
-        });
     }
 
     return isLimited ? { success: true, limited: true } : { success: true };
@@ -308,42 +211,18 @@ export function CartProvider({ children }) {
       return;
     }
 
-    const currentItem = items.find(
-      (i) => Number(i.variantId) === targetVariantId
-    );
-    const maxStock = Math.max(1, Number(currentItem?.stock) || 1);
-    const effectiveQty = Math.min(parsedQty, maxStock);
-
     setItems((prevItems) =>
       prevItems.map((item) => {
         if (Number(item.variantId) === targetVariantId) {
+          const maxStock = Math.max(1, Number(item.stock) || 10);
           return {
             ...item,
-            quantity: effectiveQty,
+            quantity: Math.min(parsedQty, maxStock),
           };
         }
         return item;
       })
     );
-
-    if (user?.id) {
-      supabase
-        .from("cart_items")
-        .update({
-          quantity: effectiveQty,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", user.id)
-        .eq("variant_id", targetVariantId)
-        .then(({ error }) => {
-          if (error) {
-            console.error("Error actualizando cart_items en Supabase:", error);
-          }
-        })
-        .catch((err) => {
-          console.error("Error en updateQuantity:", err);
-        });
-    }
   };
 
   const removeItem = (variantId) => {
@@ -351,43 +230,22 @@ export function CartProvider({ children }) {
     setItems((prevItems) =>
       prevItems.filter((item) => Number(item.variantId) !== targetVariantId)
     );
-
-    if (user?.id) {
-      supabase
-        .from("cart_items")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("variant_id", targetVariantId)
-        .then(({ error }) => {
-          if (error) {
-            console.error("Error eliminando fila de cart_items en Supabase:", error);
-          }
-        })
-        .catch((err) => {
-          console.error("Error en removeItem:", err);
-        });
-    }
   };
 
   const clearCart = async () => {
     setItems([]);
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("erxidi_cart_v1");
     } catch {
       // ignore
     }
 
     if (user?.id) {
       try {
-        const { error } = await supabase
-          .from("cart_items")
-          .delete()
-          .eq("user_id", user.id);
-        if (error) {
-          console.error("Error al vaciar cart_items en Supabase:", error);
-        }
+        await supabase.from("cart_items").delete().eq("user_id", user.id);
       } catch (err) {
-        console.error("Error en clearCart:", err);
+        console.warn("Error al vaciar cart_items:", err);
       }
     }
   };

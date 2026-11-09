@@ -262,15 +262,6 @@ BEGIN
         );
     END IF;
 
-    -- B2. Validación de capacidad máxima de motorizado (máx. 30 prendas en delivery)
-    IF p_delivery_type IN ('express', 'scheduled', 'programado') AND p_total_items > 30 THEN
-        RETURN jsonb_build_object(
-            'success', false, 
-            'error_code', 'MAX_CAPACITY_EXCEEDED', 
-            'message', 'El pedido excede la capacidad máxima de una unidad motorizada (máximo 30 prendas).'
-        );
-    END IF;
-
     -- C. Validaciones exclusivas de Envío Express
     IF p_delivery_type = 'express' THEN
         IF v_emergency IS NOT NULL AND (v_emergency->>'pause_express_only')::BOOLEAN = TRUE THEN
@@ -552,7 +543,6 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "shipping_address_id" bigint,
     "assigned_delivery_id" "uuid",
     "delivery_type" character varying(20) NOT NULL,
-    "shipping_type" character varying(20),
     "delivery_cost" numeric(10,2) DEFAULT 0.00 NOT NULL,
     "subtotal" numeric(10,2) NOT NULL,
     "total_amount" numeric(10,2) NOT NULL,
@@ -573,6 +563,7 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "delivery_longitude" double precision,
     "incident_reason" character varying(100),
     "incident_comment" "text",
+    "shipping_type" "text",
     CONSTRAINT "orders_check" CHECK (("total_amount" = ("subtotal" + "delivery_cost"))),
     CONSTRAINT "orders_delivery_cost_check" CHECK (("delivery_cost" >= (0)::numeric)),
     CONSTRAINT "orders_delivery_type_check" CHECK ((("delivery_type")::"text" = ANY ((ARRAY['express'::character varying, 'programado'::character varying, 'scheduled'::character varying, 'recojo'::character varying, 'pickup'::character varying])::"text"[]))),
@@ -1240,16 +1231,6 @@ ALTER TABLE "public"."brands" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."cart_items" ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "cart_items_select_own" ON "public"."cart_items" FOR SELECT USING (("auth"."uid"() = "user_id"));
-
-CREATE POLICY "cart_items_insert_own" ON "public"."cart_items" FOR INSERT WITH CHECK (("auth"."uid"() = "user_id"));
-
-CREATE POLICY "cart_items_update_own" ON "public"."cart_items" FOR UPDATE USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
-
-CREATE POLICY "cart_items_delete_own" ON "public"."cart_items" FOR DELETE USING (("auth"."uid"() = "user_id"));
-
-CREATE INDEX IF NOT EXISTS "idx_cart_items_user_id" ON "public"."cart_items" USING "btree" ("user_id");
 
 
 ALTER TABLE "public"."categories" ENABLE ROW LEVEL SECURITY;

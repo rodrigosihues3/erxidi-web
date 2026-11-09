@@ -109,17 +109,20 @@ export async function createOrder(orderPayload) {
     const finalSubtotal = Number(verifiedSubtotal.toFixed(2));
     const finalTotalAmount = Number((finalSubtotal + deliveryCost).toFixed(2));
 
+    // Asegurar que delivery_type siempre tenga valor válido
+    const resolvedDeliveryType =
+      orderPayload.deliveryType ||
+      orderPayload.delivery_type ||
+      "scheduled";
+
     const orderData = {
       order_number: orderNumber,
       customer_id: orderPayload.userId || null,
       customer_name: orderPayload.customerName,
       customer_email: orderPayload.customerEmail,
       customer_phone: orderPayload.customerPhone,
-      delivery_type: orderPayload.deliveryType || "scheduled",
-      shipping_type:
-        orderPayload.shipping_type ||
-        orderPayload.deliveryType ||
-        "scheduled",
+      delivery_type: resolvedDeliveryType,
+      shipping_type: resolvedDeliveryType, // Soportado tras ejecutar el ALTER TABLE
       delivery_address: orderPayload.deliveryAddress,
       delivery_latitude:
         orderPayload.delivery_latitude ??
@@ -150,15 +153,33 @@ export async function createOrder(orderPayload) {
       invoice_type:
         orderPayload.invoice_type || orderPayload.invoiceType || "none",
       invoice_data: orderPayload.invoice_data || orderPayload.invoiceData || {},
-      status: "recibido",
+      status: "recibido", // Estandarizado en español para stepper de 8 fases
     };
 
-    // 1. Inserción de la orden principal
-    const { data: createdOrder, error: orderError } = await supabase
+    // 1. Inserción de la orden principal (con fallback de resiliencia si shipping_type aún no existe en BD)
+    let { data: createdOrder, error: orderError } = await supabase
       .from("orders")
       .insert([orderData])
       .select()
       .single();
+
+    if (
+      orderError &&
+      (orderError.message?.includes("shipping_type") ||
+        orderError.details?.includes("shipping_type") ||
+        orderError.code === "PGRST204" ||
+        orderError.hint?.includes("shipping_type"))
+    ) {
+      const fallbackOrderData = { ...orderData };
+      delete fallbackOrderData.shipping_type;
+      const retryResult = await supabase
+        .from("orders")
+        .insert([fallbackOrderData])
+        .select()
+        .single();
+      createdOrder = retryResult.data;
+      orderError = retryResult.error;
+    }
 
     if (orderError) {
       return { success: false, error: orderError.message };

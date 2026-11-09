@@ -79,14 +79,15 @@ function RangeMeasureInput({
   onChange,
   min,
   max,
-  step = 0.5,
+  step = 1,
   unit = "cm",
 }) {
   const [draft, setDraft] = useState(value != null ? String(value) : "");
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
-    setDraft(value != null ? String(value) : "");
-  }, [value]);
+    if (!isEditing) setDraft(value != null ? String(value) : "");
+  }, [value, isEditing]);
 
   const isSelected = value != null && value !== "" && !isNaN(Number(value));
   const numericValid = isSelected ? clampNumber(value, min, max) : null;
@@ -118,16 +119,16 @@ function RangeMeasureInput({
       onChange(null);
       return;
     }
-    if (!/^\d*\.?\d*$/.test(raw)) return;
+    if (!/^\d{0,3}(\.\d?)?$/.test(raw)) return;
     setDraft(raw);
-
     const parsed = parseFloat(raw);
-    if (!isNaN(parsed) && parsed >= min && parsed <= max) {
+    if (!isNaN(parsed) && parsed >= min && parsed <= max && !raw.endsWith(".")) {
       onChange(Number(parsed.toFixed(1)));
     }
   };
 
   const handleBlur = () => {
+    setIsEditing(false);
     if (draft === "" || isNaN(Number(draft))) {
       setDraft("");
       onChange(null);
@@ -216,7 +217,11 @@ function RangeMeasureInput({
           inputMode="decimal"
           value={draft}
           onChange={handleTextChange}
+          onFocus={() => setIsEditing(true)}
           onBlur={handleBlur}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
           placeholder="—"
           className="min-w-0 w-full flex-1 h-full text-center font-mono font-bold text-xs text-brand-primary bg-transparent outline-none px-1 placeholder:text-brand-muted placeholder:font-normal"
         />
@@ -719,7 +724,7 @@ export default function SizeMatcherModal({
                   onChange={setHeight}
                   min={120}
                   max={220}
-                  step={0.5}
+                  step={1}
                   unit="cm"
                 />
 
@@ -730,7 +735,7 @@ export default function SizeMatcherModal({
                   onChange={setWeight}
                   min={30}
                   max={160}
-                  step={0.5}
+                  step={1}
                   unit="kg"
                 />
               </div>
@@ -835,7 +840,7 @@ export default function SizeMatcherModal({
                     onChange={setWaist}
                     min={45}
                     max={120}
-                    step={0.5}
+                    step={1}
                   />
                   <RangeMeasureInput
                     id="precise-hip"
@@ -845,7 +850,7 @@ export default function SizeMatcherModal({
                     onChange={setHip}
                     min={50}
                     max={130}
-                    step={0.5}
+                    step={1}
                   />
                 </div>
               </div>
@@ -878,7 +883,7 @@ export default function SizeMatcherModal({
                     onChange={setUnderbust}
                     min={55}
                     max={110}
-                    step={0.5}
+                    step={1}
                   />
                   <RangeMeasureInput
                     id="precise-bust"
@@ -888,7 +893,7 @@ export default function SizeMatcherModal({
                     onChange={setBust}
                     min={60}
                     max={125}
-                    step={0.5}
+                    step={1}
                   />
                 </div>
               </div>
@@ -913,7 +918,7 @@ export default function SizeMatcherModal({
                   onChange={setFootLength}
                   min={14.0}
                   max={31.0}
-                  step={0.5}
+                  step={1}
                 />
               </div>
 
@@ -960,15 +965,10 @@ export default function SizeMatcherModal({
             </div>
           )}
 
-          {/* Garantía de Higiene */}
-          <div className="flex items-start gap-2.5 p-3 rounded-card bg-amber-50 border border-amber-200 text-amber-900">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
-            <p className="text-xs leading-snug">
-              <strong>Garantía de Higiene:</strong> Por protección sanitaria, la
-              ropa interior no admite cambios ni devoluciones una vez abierto el
-              empaque.
-            </p>
-          </div>
+          <p className="flex items-start gap-1.5 text-xs text-brand-secondary">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning-text" aria-hidden="true" />
+            <span>Prendas íntimas: sin cambios ni devoluciones una vez abierto el empaque.</span>
+          </p>
         </div>
 
         {saveError && (
