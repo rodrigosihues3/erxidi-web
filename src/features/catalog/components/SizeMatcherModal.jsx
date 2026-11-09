@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   X,
   AlertTriangle,
@@ -6,16 +6,28 @@ import {
   Ruler,
   Save,
   RotateCcw,
+  Info,
 } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../services/supabase";
 import { calculateShoeSize } from "../services/sizeMatcherService";
+import {
+  getBottomSize,
+  getTopSize,
+  getSockSize,
+  getQuickSize,
+  BOTTOM_LIMITS,
+  TOP_LIMITS,
+  SOCK_LIMITS,
+  HIP_FROM_WAIST_OFFSET_CM,
+  BUST_FROM_UNDERBUST_OFFSET_CM,
+} from "../utils/sizeRanges";
+import useDialogA11y from "../hooks/useDialogA11y";
 
 const STORAGE_KEY = "erxidi_size_preferences";
 const LEGACY_STORAGE_KEY = "erxidi_user_profile_measurements";
-const SIZES = ["S", "M", "L", "XL"];
 const FIT_OPTIONS = [
   { id: "Ajustado", desc: "Ceñido" },
   { id: "Regular", desc: "Estándar" },
@@ -23,12 +35,11 @@ const FIT_OPTIONS = [
 ];
 
 const mapFitToLabel = (fit) => {
-  const map = { ajustado: "Ajustado", regular: "Regular", holgado: "Holgado" };
+  const map = { ajustado: "Ajustado", tight: "Ajustado", regular: "Regular", holgado: "Holgado", loose: "Holgado" };
   return map[fit?.toLowerCase()] || "Regular";
 };
-
 const mapLabelToFit = (label) => {
-  const map = { Ajustado: "ajustado", Regular: "regular", Holgado: "holgado" };
+  const map = { Ajustado: "tight", Regular: "regular", Holgado: "loose" };
   return map[label] || "regular";
 };
 
@@ -132,7 +143,7 @@ function RangeMeasureInput({
       className={
         "p-3 rounded-card border transition-colors space-y-2 " +
         (isSelected
-          ? "bg-white border-border"
+          ? "bg-surface-card border-border"
           : "bg-surface-subtle/60 border-border/80")
       }
     >
@@ -145,7 +156,7 @@ function RangeMeasureInput({
             {label}
           </label>
           {hint && (
-            <span className="block text-[10px] text-brand-muted truncate">
+            <span className="block text-xs text-brand-muted truncate">
               {hint}
             </span>
           )}
@@ -155,7 +166,7 @@ function RangeMeasureInput({
             "px-2 py-0.5 rounded font-mono text-xs font-bold shrink-0 border " +
             (isSelected
               ? "bg-brand-primary text-white border-brand-primary"
-              : "bg-white border-border text-brand-muted")
+              : "bg-surface-card border-border text-brand-muted")
           }
         >
           {numericValid != null ? numericValid + " " + unit : "—"}
@@ -178,7 +189,7 @@ function RangeMeasureInput({
               : "accent-slate-400 bg-slate-200 opacity-40 hover:opacity-75")
           }
         />
-        <div className="flex justify-between text-[10px] font-mono text-brand-muted">
+        <div className="flex justify-between text-xs font-mono text-brand-muted">
           <span>
             {min} {unit}
           </span>
@@ -189,7 +200,7 @@ function RangeMeasureInput({
       </div>
 
       {/* Stepper con min-w-0 para que el botón [+] jamás se esconda */}
-      <div className="flex items-center border border-border rounded-button bg-white overflow-hidden h-8 w-full focus-within:border-brand-primary focus-within:ring-1 focus-within:ring-brand-primary">
+      <div className="flex items-center border border-border rounded-button bg-surface-card overflow-hidden h-8 w-full focus-within:border-brand-primary focus-within:ring-1 focus-within:ring-brand-primary">
         <button
           type="button"
           onClick={handleDecrement}
@@ -264,6 +275,7 @@ export default function SizeMatcherModal({
   );
 
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (isOpen) {
@@ -353,20 +365,8 @@ export default function SizeMatcherModal({
     const safeWeight = clampNumber(weight, 30, 160);
     const heightInMeters = safeHeight / 100;
     const computedImc = safeWeight / (heightInMeters * heightInMeters);
-
-    let baseIndex = 1;
-    if (computedImc < 20) baseIndex = 0;
-    else if (computedImc < 25) baseIndex = 1;
-    else if (computedImc < 30) baseIndex = 2;
-    else baseIndex = 3;
-
-    let finalIndex = baseIndex;
-    if (fit === "Ajustado" && finalIndex > 0) finalIndex -= 1;
-    else if (fit === "Holgado" && finalIndex < SIZES.length - 1)
-      finalIndex += 1;
-
     return {
-      size: SIZES[finalIndex],
+      size: getQuickSize(computedImc, fit),
       safeHeight,
       safeWeight,
       imc: computedImc.toFixed(1),
@@ -384,40 +384,17 @@ export default function SizeMatcherModal({
       ? Number(footLength)
       : null;
 
-    let bottom = null;
-    if (validWaist != null || validHip != null) {
-      const w = validWaist != null ? validWaist : validHip - 16;
-      const h = validHip != null ? validHip : validWaist + 16;
-      if (w <= 76 && h <= 95) bottom = "S";
-      else if (w <= 84 && h <= 101) bottom = "M";
-      else if (w <= 92 && h <= 108) bottom = "L";
-      else bottom = "XL";
-    }
-
-    let top = null;
-    if (validBust != null || validUnderbust != null) {
-      const b = validBust != null ? validBust : validUnderbust + 15;
-      if (b <= 86) top = "S";
-      else if (b <= 92) top = "M";
-      else if (b <= 98) top = "L";
-      else top = "XL";
-    }
-
-    let sock = null;
-    let shoeSizeRange = "—";
-    if (validFoot != null) {
-      shoeSizeRange = calculateShoeSize(validFoot);
-      if (validFoot < 24.5) sock = "S";
-      else if (validFoot <= 26.5) sock = "M";
-      else if (validFoot <= 29.5) sock = "L";
-      else sock = "XL";
-    }
-
+    const bottom = getBottomSize(validWaist, validHip);
+    const top = getTopSize(validBust, validUnderbust);
+    const sock = getSockSize(validFoot);
+    const shoeSizeRange = validFoot != null ? calculateShoeSize(validFoot) : "—";
     return {
       bottomSize: bottom,
       topSize: top,
       sockSize: sock,
       shoeSizeRange,
+      estimatedBottom: (validWaist != null) !== (validHip != null),
+      estimatedTop: validBust == null && validUnderbust != null,
     };
   }, [waist, hip, bust, underbust, footLength]);
 
@@ -442,6 +419,14 @@ export default function SizeMatcherModal({
     );
   }, [activeTab, garmentFamily, quickResult.size, preciseResult]);
 
+  const dialogRef = useRef(null);
+  useDialogA11y(isOpen, dialogRef);
+
+  const [showMethod, setShowMethod] = useState(false);
+  useEffect(() => {
+    if (!isOpen) setShowMethod(false);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleClearAllMeasurements = async () => {
@@ -451,7 +436,7 @@ export default function SizeMatcherModal({
       localStorage.removeItem(LEGACY_STORAGE_KEY);
 
       if (user) {
-        await supabase
+        const { error } = await supabase
           .from("profiles")
           .update({
             height_cm: null,
@@ -461,6 +446,7 @@ export default function SizeMatcherModal({
             updated_at: new Date().toISOString(),
           })
           .eq("id", user.id);
+        if (error) throw error;
         await refreshProfile();
       }
 
@@ -476,12 +462,14 @@ export default function SizeMatcherModal({
       onClose?.();
     } catch (err) {
       console.error("Error al limpiar medidas:", err);
+      setSaveError("No se pudo limpiar tu perfil. Intenta nuevamente.");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleApply = async () => {
+    setSaveError("");
     const safeHeight = isWithinRange(height, 120, 220)
       ? clampNumber(height, 120, 220)
       : null;
@@ -490,10 +478,11 @@ export default function SizeMatcherModal({
       : null;
 
     setIsSaving(true);
+    let saved = false;
     try {
       if (activeTab === "quick") {
         if (user) {
-          await supabase
+          const { error } = await supabase
             .from("profiles")
             .update({
               height_cm: safeHeight,
@@ -503,6 +492,7 @@ export default function SizeMatcherModal({
               updated_at: new Date().toISOString(),
             })
             .eq("id", user.id);
+          if (error) throw error;
           await refreshProfile();
         } else {
           localStorage.setItem(
@@ -535,7 +525,7 @@ export default function SizeMatcherModal({
         };
 
         if (user) {
-          await supabase
+          const { error } = await supabase
             .from("profiles")
             .update({
               height_cm: safeHeight,
@@ -545,6 +535,7 @@ export default function SizeMatcherModal({
               updated_at: new Date().toISOString(),
             })
             .eq("id", user.id);
+          if (error) throw error;
           await refreshProfile();
         } else {
           localStorage.setItem(
@@ -561,10 +552,14 @@ export default function SizeMatcherModal({
           );
         }
       }
+      saved = true;
     } catch (err) {
       console.error("Error al persistir mediciones:", err);
+      setSaveError("No se pudo guardar tu perfil. Intenta nuevamente.");
     } finally {
       setIsSaving(false);
+    }
+    if (saved) {
       onSizeSelected?.(applicableSelectedSize, {
         height: safeHeight,
         weight: safeWeight,
@@ -585,22 +580,26 @@ export default function SizeMatcherModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
     >
       <div className="fixed inset-0" onClick={onClose} aria-hidden="true" />
 
-      <div className="relative z-10 w-full max-w-xl bg-surface-card border border-border rounded-card shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="relative z-10 w-full max-w-xl bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden max-h-[92vh] flex flex-col"
+      >
         {/* Cabecera */}
-        <div className="px-5 py-3.5 bg-white border-b border-border flex items-center justify-between">
+        <div className="px-5 py-3.5 bg-surface-card border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Ruler className="w-4 h-4 text-accent" />
             <h2 className="text-base font-bold text-brand-primary">
               Calculador de Tallas ERXIDI
             </h2>
-            <Badge variant="neutral" className="text-[10px]">
-              NTP-ISO 8559
+            <Badge variant="neutral" className="text-xs">
+              Ref. NTP-ISO 8559-2
             </Badge>
           </div>
           <button
@@ -624,8 +623,8 @@ export default function SizeMatcherModal({
               className={
                 "p-2.5 rounded-card border text-left transition-all flex items-center gap-2.5 " +
                 (activeTab === "quick"
-                  ? "border-brand-primary bg-white ring-1 ring-brand-primary shadow-2xs"
-                  : "border-border bg-white/60 text-brand-secondary hover:bg-white")
+                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary shadow-subtle"
+                  : "border-border bg-surface-card text-brand-secondary hover:bg-surface-card")
               }
             >
               <div className="w-7 h-7 rounded-button bg-surface-subtle border border-border flex items-center justify-center shrink-0">
@@ -635,7 +634,7 @@ export default function SizeMatcherModal({
                 <span className="block text-xs font-bold text-brand-primary truncate">
                   Calculador Rápido
                 </span>
-                <span className="block text-[10px] text-brand-muted truncate">
+                <span className="block text-xs text-brand-muted truncate">
                   Por estatura y peso
                 </span>
               </div>
@@ -649,8 +648,8 @@ export default function SizeMatcherModal({
               className={
                 "p-2.5 rounded-card border text-left transition-all flex items-center gap-2.5 " +
                 (activeTab === "precise"
-                  ? "border-brand-primary bg-white ring-1 ring-brand-primary shadow-2xs"
-                  : "border-border bg-white/60 text-brand-secondary hover:bg-white")
+                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary shadow-subtle"
+                  : "border-border bg-surface-card text-brand-secondary hover:bg-surface-card")
               }
             >
               <div className="w-7 h-7 rounded-button bg-surface-subtle border border-border flex items-center justify-center shrink-0">
@@ -660,7 +659,7 @@ export default function SizeMatcherModal({
                 <span className="block text-xs font-bold text-brand-primary truncate">
                   Calculador Preciso
                 </span>
-                <span className="block text-[10px] text-brand-muted truncate">
+                <span className="block text-xs text-brand-muted truncate">
                   Por contornos en cm
                 </span>
               </div>
@@ -670,6 +669,46 @@ export default function SizeMatcherModal({
 
         {/* Cuerpo Scrollable */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
+          <div className="flex justify-end">
+            <button type="button" onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod} aria-controls="size-method-panel" className="inline-flex items-center gap-1.5 rounded-button px-2 py-1 text-xs font-semibold text-brand-secondary hover:bg-surface-subtle hover:text-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong">
+              <Info className="h-4 w-4" />
+              <span>¿Cómo calculamos esto?</span>
+            </button>
+          </div>
+          {showMethod && (
+            <section id="size-method-panel" className="space-y-3 rounded-card border border-border bg-surface-subtle p-4 text-xs text-brand-secondary">
+              <h3 className="text-sm font-semibold text-brand-primary">Cómo calculamos tu talla</h3>
+              <p>ERXIDI compara tus medidas corporales con rangos de talla, siguiendo el principio de la NTP-ISO 8559-2:2020: la talla se designa por las medidas del cuerpo y no por las de la prenda.</p>
+              <p>Los límites numéricos de la tabla son valores de referencia definidos por ERXIDI. No provienen de la norma y pueden variar según el proveedor y el lote. La norma ISO 8559-1 define cómo medir el cuerpo; las indicaciones de este calculador son simplificadas.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="mb-1 font-semibold text-brand-primary">Ropa inferior</p>
+                  <ul className="space-y-0.5 font-mono">
+                    {BOTTOM_LIMITS.map((l) => (<li key={l.size}>{l.size}: cintura hasta {l.waist}, cadera hasta {l.hip} cm</li>))}
+                    <li>XL: por encima de L</li>
+                  </ul>
+                </div>
+                <div>
+                  <p className="mb-1 font-semibold text-brand-primary">Prendas superiores</p>
+                  <ul className="space-y-0.5 font-mono">
+                    {TOP_LIMITS.map((l) => (<li key={l.size}>{l.size}: busto hasta {l.bust} cm</li>))}
+                    <li>XL: por encima de L</li>
+                  </ul>
+                </div>
+                <div>
+                  <p className="mb-1 font-semibold text-brand-primary">Calcetería</p>
+                  <ul className="space-y-0.5 font-mono">
+                    {SOCK_LIMITS.map((l) => (<li key={l.size}>{l.size}: pie {l.inclusive ? "hasta" : "menos de"} {l.foot} cm</li>))}
+                    <li>XL: por encima de L</li>
+                  </ul>
+                </div>
+              </div>
+              <p>Se elige la menor talla cuyos límites cumplan todas tus medidas.</p>
+              <p>Si ingresas solo una medida, estimamos la otra (cadera = cintura + {HIP_FROM_WAIST_OFFSET_CM} cm; cintura = cadera − {HIP_FROM_WAIST_OFFSET_CM} cm; busto = bajo busto + {BUST_FROM_UNDERBUST_OFFSET_CM} cm) y lo indicamos como "Estimado".</p>
+              <p>El modo Rápido usa tu IMC (relación entre peso y estatura al cuadrado) y tu preferencia de calce. Es una orientación, no una comparación por rangos.</p>
+            </section>
+          )}
+
           {activeTab === "quick" && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -712,13 +751,13 @@ export default function SizeMatcherModal({
                           "p-2.5 rounded-card border text-left transition-all " +
                           (isSelected
                             ? "border-brand-primary bg-brand-primary/5 ring-1 ring-brand-primary"
-                            : "border-border bg-white hover:border-border-strong")
+                            : "border-border bg-surface-card hover:border-border-strong")
                         }
                       >
                         <span className="block text-xs font-bold text-brand-primary">
                           {opt.id}
                         </span>
-                        <span className="block text-[10px] text-brand-secondary">
+                        <span className="block text-xs text-brand-secondary">
                           {opt.desc}
                         </span>
                       </button>
@@ -728,21 +767,26 @@ export default function SizeMatcherModal({
               </div>
 
               {/* Tarjeta Azul de Recomendación */}
-              <div className="p-4 rounded-card bg-slate-900 text-white flex items-center justify-between shadow-md">
+              <div className="p-4 rounded-card bg-brand-primary text-white flex items-center justify-between">
                 <div className="space-y-1">
-                  {quickResult.imc ? (
-                    <Badge variant="success" className="text-[10px]">
-                      IMC: {quickResult.imc}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {quickResult.imc ? (
+                      <Badge variant="success" className="text-xs">
+                        IMC: {quickResult.imc}
+                      </Badge>
+                    ) : (
+                      <Badge variant="neutral" className="text-xs">
+                        Sin selección
+                      </Badge>
+                    )}
+                    <Badge variant="neutral" className="text-xs">
+                      Estimación orientativa
                     </Badge>
-                  ) : (
-                    <Badge variant="neutral" className="text-[10px]">
-                      Sin selección
-                    </Badge>
-                  )}
+                  </div>
                   <h3 className="text-sm font-bold pt-0.5">
                     Tu Talla Recomendada ERXIDI
                   </h3>
-                  <p className="text-xs text-slate-300">
+                  <p className="text-xs text-brand-muted">
                     {hasQuickValues
                       ? "Calibrada para " +
                       quickResult.safeHeight +
@@ -754,7 +798,7 @@ export default function SizeMatcherModal({
                       : "Desliza o escribe tu estatura y peso para calcular."}
                   </p>
                 </div>
-                <div className="w-14 h-14 rounded-card bg-white text-brand-primary font-mono text-2xl font-black flex items-center justify-center shadow-inner shrink-0">
+                <div className="w-14 h-14 rounded-card bg-surface-card text-brand-primary font-mono text-2xl font-black flex items-center justify-center shrink-0">
                   {quickResult.size || "—"}
                 </div>
               </div>
@@ -766,13 +810,20 @@ export default function SizeMatcherModal({
               {/* Categoría: Ropa Interior Inferior */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-brand-primary">
-                    Ropa Interior Inferior (Bóxers, Trusas y Calzones)
+                  <span className="text-xs font-bold text-brand-primary">
+                    Ropa interior inferior (bóxers, trusas y calzones)
                   </span>
                   {preciseResult.bottomSize && (
-                    <Badge variant="success" className="text-[10px] font-mono">
-                      Talla {preciseResult.bottomSize}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="success" className="text-xs font-mono">
+                        Talla {preciseResult.bottomSize}
+                      </Badge>
+                      {preciseResult.estimatedBottom && (
+                        <Badge variant="warning" className="text-xs">
+                          Estimado
+                        </Badge>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -802,13 +853,20 @@ export default function SizeMatcherModal({
               {/* Categoría: Prendas Superiores */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-brand-primary">
-                    Prendas Superiores (Tops, Brasiers y Camisetas)
+                  <span className="text-xs font-bold text-brand-primary">
+                    Prendas superiores (tops, brasieres y camisetas)
                   </span>
                   {preciseResult.topSize && (
-                    <Badge variant="success" className="text-[10px] font-mono">
-                      Talla {preciseResult.topSize}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="success" className="text-xs font-mono">
+                        Talla {preciseResult.topSize}
+                      </Badge>
+                      {preciseResult.estimatedTop && (
+                        <Badge variant="warning" className="text-xs">
+                          Estimado
+                        </Badge>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -838,11 +896,11 @@ export default function SizeMatcherModal({
               {/* Categoría: Calcetería */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-brand-primary">
-                    Calcetería (Medias)
+                  <span className="text-xs font-bold text-brand-primary">
+                    Calcetería (medias)
                   </span>
                   {preciseResult.sockSize && (
-                    <Badge variant="success" className="text-[10px] font-mono">
+                    <Badge variant="success" className="text-xs font-mono">
                       Talla {preciseResult.sockSize} ({preciseResult.shoeSizeRange})
                     </Badge>
                   )}
@@ -860,40 +918,40 @@ export default function SizeMatcherModal({
               </div>
 
               {/* Tarjeta Azul de Resultado Preciso */}
-              <div className="p-4 rounded-card bg-slate-900 text-white space-y-2.5 shadow-md">
+              <div className="p-4 rounded-card bg-brand-primary text-white space-y-2.5">
                 <div className="grid grid-cols-3 gap-2.5 text-center">
                   <div className="p-2.5 bg-slate-800 rounded-card border border-slate-700">
-                    <span className="text-[10px] font-bold text-slate-300 uppercase block">
+                    <span className="text-xs font-bold text-brand-muted block">
                       Inferior
                     </span>
                     <span className="font-mono text-xl font-black text-white block my-0.5">
                       {preciseResult.bottomSize || "—"}
                     </span>
-                    <span className="text-[10px] text-slate-400 block">
+                    <span className="text-xs text-slate-400 block">
                       Bóxers / Trusas
                     </span>
                   </div>
 
                   <div className="p-2.5 bg-slate-800 rounded-card border border-slate-700">
-                    <span className="text-[10px] font-bold text-slate-300 uppercase block">
+                    <span className="text-xs font-bold text-brand-muted block">
                       Superior
                     </span>
                     <span className="font-mono text-xl font-black text-white block my-0.5">
                       {preciseResult.topSize || "—"}
                     </span>
-                    <span className="text-[10px] text-slate-400 block">
+                    <span className="text-xs text-slate-400 block">
                       Tops / Polos
                     </span>
                   </div>
 
                   <div className="p-2.5 bg-slate-800 rounded-card border border-slate-700">
-                    <span className="text-[10px] font-bold text-slate-300 uppercase block">
+                    <span className="text-xs font-bold text-brand-muted block">
                       Calcetería
                     </span>
                     <span className="font-mono text-xl font-black text-white block my-0.5">
                       {preciseResult.sockSize || "—"}
                     </span>
-                    <span className="text-[10px] text-slate-400 block">
+                    <span className="text-xs text-slate-400 block">
                       Calzado {preciseResult.shoeSizeRange}
                     </span>
                   </div>
@@ -912,6 +970,15 @@ export default function SizeMatcherModal({
             </p>
           </div>
         </div>
+
+        {saveError && (
+          <p
+            role="alert"
+            className="px-5 pt-3 text-xs font-medium text-status-danger-text"
+          >
+            {saveError}
+          </p>
+        )}
 
         {/* Footer Compacto en Una Sola Fila */}
         <div className="px-5 py-3 bg-surface-subtle border-t border-border flex items-center justify-between gap-2">

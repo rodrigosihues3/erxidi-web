@@ -103,9 +103,9 @@ export function calculateFallbackSize(heightCm, weightKg, fitPreference = 'regul
 
   let finalIndex = baseIndex;
   const fitNorm = String(fitPreference || 'regular').toLowerCase();
-  if (fitNorm.includes('ajustad') && finalIndex > 0) {
+  if ((fitNorm.includes('ajustad') || fitNorm === 'tight') && finalIndex > 0) {
     finalIndex -= 1;
-  } else if (fitNorm.includes('holgad') && finalIndex < SIZES.length - 1) {
+  } else if ((fitNorm.includes('holgad') || fitNorm === 'loose') && finalIndex < SIZES.length - 1) {
     finalIndex += 1;
   }
 

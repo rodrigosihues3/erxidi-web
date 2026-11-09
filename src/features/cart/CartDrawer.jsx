@@ -7,7 +7,7 @@ import {
   Trash2,
   Minus,
   Plus,
-  ShieldAlert,
+  AlertCircle,
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import Button from '../../components/ui/Button';
@@ -207,20 +207,21 @@ export default function CartDrawer({ isOpen, onClose }) {
         {/* Drawer Footer */}
         {items.length > 0 && (
           <div className="p-4 border-t border-border bg-surface-subtle space-y-3">
+            {totalUnits > 30 && (
+              <div className="p-2.5 rounded-button bg-amber-50/90 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-2 shadow-xs mb-3">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <span>
+                  Aviso de volumen: Los pedidos con más de 30 unidades solo pueden despacharse mediante Recojo en Tienda por capacidad de motorizado.
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-brand-secondary">
                 Subtotal ({totalUnits} {totalUnits === 1 ? 'prenda' : 'prendas'})
               </span>
               <span className="font-bold text-base text-brand-primary">
                 {formattedSubtotal}
-              </span>
-            </div>
-
-            <div className="flex items-start gap-2 p-2 rounded bg-white border border-border text-[11px] text-brand-secondary leading-snug">
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
-              <span>
-                Por motivos de higiene, la ropa interior no cuenta con cambios ni
-                devoluciones.
               </span>
             </div>
 

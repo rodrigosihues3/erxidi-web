@@ -92,9 +92,9 @@ export function calculateStandardPatternSize(userMeasurements = {}) {
 
   let finalIndex = baseIndex;
   const fit = String(fit_preference || 'regular').toLowerCase();
-  if (fit.includes('ajustad') && finalIndex > 0) {
+  if ((fit.includes('ajustad') || fit === 'tight') && finalIndex > 0) {
     finalIndex -= 1;
-  } else if (fit.includes('holgad') && finalIndex < SIZES.length - 1) {
+  } else if ((fit.includes('holgad') || fit === 'loose') && finalIndex < SIZES.length - 1) {
     finalIndex += 1;
   }
 

@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Timer,
   Info,
+  Wallet,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
@@ -87,7 +88,7 @@ const INPUT_ERROR_CLASS = "border-rose-500 focus:ring-rose-200";
 
 export default function CheckoutView() {
   const navigate = useNavigate();
-  const { items, totalUnits, subtotal, clearCart } = useCart();
+  const { items, totalUnits, subtotal, clearCart, openCartDrawer } = useCart();
   const { user, profile } = useAuth();
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -96,6 +97,7 @@ export default function CheckoutView() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isValidatingPreflight, setIsValidatingPreflight] = useState(false);
   const [preflightError, setPreflightError] = useState("");
+  const [stockWarning, setStockWarning] = useState(null);
   const [copiedAccount, setCopiedAccount] = useState("");
   const createdOrderRef = useRef(null);
 
@@ -111,6 +113,13 @@ export default function CheckoutView() {
     businessHours: {},
   });
 
+  const [paymentMethod, setPaymentMethod] = useState(null);
+  const [selectedWallet, setSelectedWallet] = useState("yape"); // 'yape' | 'plin' | 'transferencia'
+
+  useEffect(() => {
+    setStockWarning(null);
+  }, [items]);
+
   useEffect(() => {
     let isMounted = true;
     getAllStoreSettings()
@@ -125,7 +134,7 @@ export default function CheckoutView() {
 
   const isYapeEnabled = dynamicSettings.paymentMethods?.yape_enabled ?? true;
   const isPlinEnabled = dynamicSettings.paymentMethods?.plin_enabled ?? false;
-  const hasDigitalWallets = isYapeEnabled || isPlinEnabled;
+  const hasDigitalWallets = isYapeEnabled || isPlinEnabled || ((dynamicSettings.paymentMethods?.bank_accounts?.length || 0) > 0);
 
   useEffect(() => {
     if (!dynamicSettings?.paymentMethods) return;
@@ -140,16 +149,18 @@ export default function CheckoutView() {
       setSelectedWallet("plin");
     } else if (yapeOn && !plinOn && selectedWallet === "plin") {
       setSelectedWallet("yape");
+    } else if (!yapeOn && !plinOn && (selectedWallet === "yape" || selectedWallet === "plin")) {
+      setSelectedWallet("transferencia");
     }
   }, [dynamicSettings, paymentMethod, selectedWallet]);
 
   const isStoreClosed = Boolean(
     dynamicSettings.emergencyFlags?.store_closed ||
-      dynamicSettings.emergencyFlags?.close_store_today
+    dynamicSettings.emergencyFlags?.close_store_today
   );
   const isExpressPaused = Boolean(
     dynamicSettings.emergencyFlags?.pause_express ||
-      dynamicSettings.emergencyFlags?.pause_express_only
+    dynamicSettings.emergencyFlags?.pause_express_only
   );
   const isScheduledPaused = Boolean(
     dynamicSettings.emergencyFlags?.pause_scheduled
@@ -356,7 +367,9 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 2: Método de Entrega, SLA Dinámico y Direcciones
   // -------------------------------------------------------------
-  const [deliveryType, setDeliveryType] = useState("scheduled");
+  const [deliveryType, setDeliveryType] = useState(
+    totalUnits > 30 ? "pickup" : "scheduled"
+  );
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
   const [selectedZoneId, setSelectedZoneId] = useState(
     defaultDeliveryZones[0]?.id || 1
@@ -706,6 +719,10 @@ export default function CheckoutView() {
 
   const isStep2Valid = useMemo(() => {
     if (isStoreClosed) return false;
+
+    // Regla de capacidad física en moto
+    if (totalUnits > 30 && deliveryType !== "pickup") return false;
+
     if (deliveryType === "pickup") return !isPickupPaused;
     if (deliveryType === "express" && !isExpressAvailable) return false;
     if (deliveryType === "scheduled" && isScheduledPaused) return false;
@@ -717,6 +734,7 @@ export default function CheckoutView() {
     return true;
   }, [
     isStoreClosed,
+    totalUnits,
     deliveryType,
     isPickupPaused,
     isExpressAvailable,
@@ -729,6 +747,13 @@ export default function CheckoutView() {
 
   useEffect(() => {
     if (isStoreClosed) return;
+
+    // Si supera 30 prendas, forzar a 'pickup' (recojo en tienda) de forma automática
+    if (totalUnits > 30 && deliveryType !== "pickup") {
+      setDeliveryType("pickup");
+      return;
+    }
+
     if (deliveryType === "express" && !isExpressAvailable) {
       if (!isScheduledPaused) {
         setDeliveryType("scheduled");
@@ -749,8 +774,9 @@ export default function CheckoutView() {
       }
     }
   }, [
-    isStoreClosed,
+    totalUnits,
     deliveryType,
+    isStoreClosed,
     isExpressAvailable,
     isScheduledPaused,
     isPickupPaused,
@@ -769,6 +795,7 @@ export default function CheckoutView() {
 
     setIsValidatingPreflight(true);
     setPreflightError("");
+    setStockWarning(null);
 
     let activeToken =
       reservationToken && reservationTimeLeft > 0 ? reservationToken : null;
@@ -784,7 +811,7 @@ export default function CheckoutView() {
       if (!initialPreflight?.success) {
         throw new Error(
           initialPreflight?.message ||
-            "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
+          "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
         );
       }
 
@@ -792,9 +819,38 @@ export default function CheckoutView() {
       if (!activeToken) {
         const reserveResult = await reserveStock(items, user?.id || null);
         if (!reserveResult?.success || !reserveResult?.reservation_token) {
+          if (
+            reserveResult?.error_code === "INSUFFICIENT_STOCK" ||
+            reserveResult?.variant_id
+          ) {
+            const problemItem = items.find(
+              (i) => Number(i.variantId) === Number(reserveResult.variant_id)
+            );
+            const itemName = problemItem?.name || "Prenda seleccionada";
+            const variantsText = [problemItem?.size, problemItem?.color]
+              .filter(Boolean)
+              .join("/");
+            const garmentLabel = variantsText
+              ? `${itemName} - ${variantsText}`
+              : itemName;
+            const availableStock = Number(reserveResult?.available_stock) || 0;
+
+            if (availableStock <= 0) {
+              setStockWarning(
+                `Stock no disponible: La prenda ${garmentLabel} acaba de ser adquirida por completo por otros usuarios. Por favor, modifica tu carrito para continuar.`
+              );
+            } else {
+              const requestedUnits = problemItem?.quantity || "las";
+              setStockWarning(
+                `Stock insuficiente: La prenda ${garmentLabel} acaba de recibir compras y quedan menos de las ${requestedUnits} unidades que elegiste.`
+              );
+            }
+            return;
+          }
+
           throw new Error(
             reserveResult?.message ||
-              "Inventario insuficiente para una o más prendas seleccionadas."
+            "Inventario insuficiente para una o más prendas seleccionadas."
           );
         }
 
@@ -813,7 +869,7 @@ export default function CheckoutView() {
       if (!preflightResult?.success) {
         throw new Error(
           preflightResult?.message ||
-            "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
+          "No se pudo habilitar el despacho bajo las condiciones seleccionadas."
         );
       }
 
@@ -835,8 +891,8 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 3: Pago y Comprobante
   // -------------------------------------------------------------
-  const [paymentMethod, setPaymentMethod] = useState("yape_plin");
-  const [selectedWallet, setSelectedWallet] = useState("yape"); // 'yape' | 'plin'
+  // const [paymentMethod, setPaymentMethod] = useState("yape_plin");
+  // const [selectedWallet, setSelectedWallet] = useState("yape"); // 'yape' | 'plin'
   const [yapeOpNumber, setYapeOpNumber] = useState("");
   const [culqiError, setCulqiError] = useState(null);
 
@@ -1005,11 +1061,13 @@ export default function CheckoutView() {
     setFiscalAddress("");
   };
 
-  const handleCopyAccount = (text, label) => {
+  const handleCopy = (text, label) => {
     navigator.clipboard?.writeText(text);
     setCopiedAccount(label);
     setTimeout(() => setCopiedAccount(""), 2000);
   };
+  const handleCopyAccount = handleCopy;
+  const copiedState = copiedAccount;
 
   const orderContextRef = useRef({});
   orderContextRef.current = {
@@ -1193,6 +1251,8 @@ export default function CheckoutView() {
       customerEmail: ctx.email.trim(),
       customerPhone: ctx.phone.trim(),
       deliveryType: ctx.deliveryType,
+      delivery_type: ctx.deliveryType,
+      shipping_type: ctx.deliveryType, // Homologación para vistas de tracking
       deliveryAddress: finalAddress,
       delivery_latitude: resolvedLat,
       deliveryLatitude: resolvedLat,
@@ -1270,7 +1330,7 @@ export default function CheckoutView() {
 
       triggerOrderConfirmationEmail(finalOrderObject, ctx.items);
 
-      clearCart();
+      await clearCart();
       navigate("/seguimiento/" + orderToCharge.order_number, {
         state: {
           order: finalOrderObject,
@@ -1320,9 +1380,16 @@ export default function CheckoutView() {
   const isCashOnDeliveryAllowed = Boolean(user && user.email_confirmed_at);
 
   const isStep3Valid = useMemo(() => {
+    if (!paymentMethod) return false;
+
     if (paymentMethod === "yape_plin") {
-      const cleanOp = yapeOpNumber.trim().replace(/\D/g, "");
-      if (cleanOp.length < 6 || cleanOp.length > 8) return false;
+      const cleanOp = yapeOpNumber.trim();
+      if (selectedWallet === "transferencia") {
+        if (cleanOp.length < 4) return false;
+      } else {
+        const digitsOnly = cleanOp.replace(/\D/g, "");
+        if (digitsOnly.length < 6 || digitsOnly.length > 8) return false;
+      }
     } else if (paymentMethod === "cash_on_delivery") {
       if (!isCashOnDeliveryAllowed) return false;
     }
@@ -1347,6 +1414,7 @@ export default function CheckoutView() {
     return true;
   }, [
     paymentMethod,
+    selectedWallet,
     yapeOpNumber,
     isCashOnDeliveryAllowed,
     receiptType,
@@ -1444,7 +1512,7 @@ export default function CheckoutView() {
           orderContextRef.current.items
         );
 
-        clearCart();
+        await clearCart();
         navigate("/seguimiento/" + createdOrderRef.current.order_number, {
           state: { order: updatedOrderObj },
         });
@@ -1464,7 +1532,7 @@ export default function CheckoutView() {
         orderContextRef.current.items
       );
 
-      clearCart();
+      await clearCart();
       navigate("/seguimiento/" + result.order.order_number, {
         state: { order: result.order },
       });
@@ -1931,7 +1999,29 @@ export default function CheckoutView() {
                 </p>
               </div>
 
-              {preflightError && (
+              {stockWarning ? (
+                <div className="rounded-card border border-amber-200 bg-amber-50/90 p-4 shadow-subtle animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="flex items-start gap-2.5 text-xs text-amber-950">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-medium leading-relaxed">
+                        {stockWarning}
+                      </p>
+                      <div className="pt-2 flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openCartDrawer?.()}
+                          className="text-xs font-semibold border-amber-300 hover:bg-amber-100 text-amber-900"
+                        >
+                          Gestionar Carrito
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : preflightError ? (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <div>
@@ -1941,9 +2031,23 @@ export default function CheckoutView() {
                     <span>{preflightError}</span>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div className="space-y-6">
+                {totalUnits > 30 && (
+                  <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-card flex items-start gap-2.5 text-xs text-amber-900 animate-in fade-in duration-200">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold">
+                        Capacidad de despacho en moto excedida ({totalUnits} prendas)
+                      </strong>
+                      <span>
+                        Por restricciones de volumen y seguridad del motorizado, los pedidos superiores a 30 unidades no pueden enviarse por delivery estándar. Tu pedido ha sido asignado automáticamente a <strong>Recojo en Tienda</strong>.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {deliveryType !== "pickup" && isOutOfCoverage && (
                   <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-card flex items-start gap-2.5 text-xs text-rose-900">
                     <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -2005,11 +2109,14 @@ export default function CheckoutView() {
 
                   <label
                     onClick={() =>
-                      isExpressAvailable && !isExpressPaused && setDeliveryType("express")
+                      isExpressAvailable &&
+                      !isExpressPaused &&
+                      totalUnits <= 30 &&
+                      setDeliveryType("express")
                     }
                     className={
                       "p-3.5 rounded-card border transition-all flex flex-col justify-between select-none " +
-                      (!isExpressAvailable || isExpressPaused
+                      (!isExpressAvailable || isExpressPaused || totalUnits > 30
                         ? "opacity-50 cursor-not-allowed pointer-events-none border-border bg-surface-card"
                         : deliveryType === "express"
                           ? "cursor-pointer border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
@@ -2020,11 +2127,12 @@ export default function CheckoutView() {
                       type="radio"
                       name="delivery-type"
                       value="express"
-                      disabled={!isExpressAvailable || isExpressPaused}
+                      disabled={!isExpressAvailable || isExpressPaused || totalUnits > 30}
                       checked={deliveryType === "express"}
                       onChange={() =>
                         isExpressAvailable &&
                         !isExpressPaused &&
+                        totalUnits <= 30 &&
                         setDeliveryType("express")
                       }
                       className="sr-only"
@@ -2032,7 +2140,11 @@ export default function CheckoutView() {
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Zap className="w-5 h-5 text-accent" />
-                        {isExpressPaused ? (
+                        {totalUnits > 30 ? (
+                          <Badge variant="warning" className="text-[10px]">
+                            Excede cap. moto (&gt;30)
+                          </Badge>
+                        ) : isExpressPaused ? (
                           <Badge variant="warning" className="text-[10px]">
                             Pausado temporalmente
                           </Badge>
@@ -2056,10 +2168,14 @@ export default function CheckoutView() {
                   </label>
 
                   <label
-                    onClick={() => !isScheduledPaused && setDeliveryType("scheduled")}
+                    onClick={() =>
+                      !isScheduledPaused &&
+                      totalUnits <= 30 &&
+                      setDeliveryType("scheduled")
+                    }
                     className={
                       "p-3.5 rounded-card border transition-all flex flex-col justify-between select-none " +
-                      (isScheduledPaused
+                      (isScheduledPaused || totalUnits > 30
                         ? "opacity-50 cursor-not-allowed pointer-events-none border-border bg-surface-card"
                         : deliveryType === "scheduled"
                           ? "cursor-pointer border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
@@ -2069,15 +2185,23 @@ export default function CheckoutView() {
                     <input
                       type="radio"
                       name="delivery-type"
-                      disabled={isScheduledPaused}
+                      disabled={isScheduledPaused || totalUnits > 30}
                       checked={deliveryType === "scheduled"}
-                      onChange={() => !isScheduledPaused && setDeliveryType("scheduled")}
+                      onChange={() =>
+                        !isScheduledPaused &&
+                        totalUnits <= 30 &&
+                        setDeliveryType("scheduled")
+                      }
                       className="sr-only"
                     />
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Calendar className="w-5 h-5 text-accent" />
-                        {isScheduledPaused ? (
+                        {totalUnits > 30 ? (
+                          <Badge variant="warning" className="text-[10px]">
+                            Excede cap. moto (&gt;30)
+                          </Badge>
+                        ) : isScheduledPaused ? (
                           <Badge variant="warning" className="text-[10px]">
                             Pausado temporalmente
                           </Badge>
@@ -2110,7 +2234,7 @@ export default function CheckoutView() {
                         retirar tu pedido sin costo de envío.
                       </span>
                     </div>
-                )}
+                  )}
 
                 {deliveryType === "pickup" && (
                   <div className="p-4 bg-surface-subtle border border-border rounded-card space-y-3 text-xs">
@@ -2643,7 +2767,7 @@ export default function CheckoutView() {
                                   onBlur={() => markTouched("boletaDni")}
                                   className={
                                     touched.boletaDni &&
-                                    !/^\d{8}$/.test(boletaDni)
+                                      !/^\d{8}$/.test(boletaDni)
                                       ? INPUT_ERROR_CLASS
                                       : ""
                                   }
@@ -2852,7 +2976,7 @@ export default function CheckoutView() {
                   </label>
 
                   <div className="space-y-3">
-                    {/* Billeteras Digitales y Transferencias Dinámicas */}
+                    {/* Tarjeta 1: Billeteras Digitales y Transferencias */}
                     {hasDigitalWallets && (
                       <div
                         className={
@@ -2880,232 +3004,290 @@ export default function CheckoutView() {
                             )}
                           </div>
                           <div className="flex-1">
-                            <span className="text-sm font-bold text-brand-primary">
-                              {isYapeEnabled && isPlinEnabled
-                                ? "Yape / Plin o Transferencia Bancaria Directa"
-                                : isYapeEnabled
-                                ? "Yape o Transferencia Bancaria Directa"
-                                : "Plin o Transferencia Bancaria Directa"}
-                            </span>
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <span className="text-sm font-bold text-brand-primary">
+                                Billeteras Digitales y Transferencias
+                              </span>
+                              <Badge variant="neutral" className="text-[10px]">
+                                {isYapeEnabled && isPlinEnabled
+                                  ? "Yape / Plin / Bancos"
+                                  : isYapeEnabled
+                                    ? "Yape / Bancos"
+                                    : "Plin / Bancos"}
+                              </Badge>
+                            </div>
                             <p className="text-xs text-brand-secondary mt-1">
-                              Paga escaneando nuestro QR o mediante transferencia
-                              a nuestras cuentas oficiales autorizadas.
+                              Paga escaneando nuestro QR oficial o mediante transferencia
+                              directa a nuestras cuentas autorizadas.
                             </p>
                           </div>
                         </button>
 
-                        {paymentMethod === "yape_plin" && (() => {
-                          const yapeQrUrl = dynamicSettings.paymentMethods?.yape_qr_url;
-                          const yapePhone =
-                            dynamicSettings.paymentMethods?.yape_phone ||
-                            dynamicSettings.paymentMethods?.digital_wallets?.yape_number ||
-                            "987 654 321";
-                          const yapeHolder =
-                            dynamicSettings.paymentMethods?.yape_holder_name ||
-                            dynamicSettings.paymentMethods?.digital_wallets?.holder_name ||
-                            "ERXIDI Oficial";
+                        <div
+                          className={`transition-all duration-300 ease-in-out overflow-hidden ${paymentMethod === "yape_plin"
+                            ? "max-h-[800px] opacity-100 border-t border-border"
+                            : "max-h-0 opacity-0"
+                            }`}
+                        >
+                          {(() => {
+                            const yapeQrUrl =
+                              dynamicSettings.paymentMethods?.yape_qr_url;
+                            const yapeHolder =
+                              dynamicSettings.paymentMethods?.yape_holder_name ||
+                              dynamicSettings.paymentMethods?.digital_wallets
+                                ?.holder_name ||
+                              "ERXIDI Oficial";
 
-                          const plinQrUrl = dynamicSettings.paymentMethods?.plin_qr_url;
-                          const plinPhone =
-                            dynamicSettings.paymentMethods?.plin_phone ||
-                            dynamicSettings.paymentMethods?.digital_wallets?.plin_number ||
-                            "";
-                          const plinHolder =
-                            dynamicSettings.paymentMethods?.plin_holder_name ||
-                            dynamicSettings.paymentMethods?.digital_wallets?.holder_name ||
-                            "ERXIDI Oficial";
+                            const plinQrUrl =
+                              dynamicSettings.paymentMethods?.plin_qr_url;
+                            const plinHolder =
+                              dynamicSettings.paymentMethods?.plin_holder_name ||
+                              dynamicSettings.paymentMethods?.digital_wallets
+                                ?.holder_name ||
+                              "ERXIDI Oficial";
 
-                          const activeWallet =
-                            (selectedWallet === "plin" && isPlinEnabled) || !isYapeEnabled
-                              ? "plin"
-                              : "yape";
+                            const currentWalletName =
+                              selectedWallet === "plin" ? "Plin" : "Yape";
+                            const currentQrUrl =
+                              selectedWallet === "plin" ? plinQrUrl : yapeQrUrl;
+                            const currentHolder =
+                              selectedWallet === "plin" ? plinHolder : yapeHolder;
 
-                          return (
-                            <div className="p-4 bg-surface-subtle border-t border-border space-y-4">
-                              {/* Selector entre billeteras solo cuando ambas están habilitadas */}
-                              {isYapeEnabled && isPlinEnabled && (
-                                <div className="flex items-center gap-1.5 p-1 bg-white border border-border rounded-button w-fit">
+                            return (
+                              <div className="p-4 bg-surface-subtle space-y-4">
+                                {/* 4.1 Selector de Pestañas Segmentadas */}
+                                <div className="flex flex-wrap items-center gap-1.5 p-1 bg-white border border-border rounded-button w-fit">
+                                  {isYapeEnabled && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedWallet("yape")}
+                                      className={`px-3 py-1.5 text-xs rounded transition-colors ${selectedWallet === "yape"
+                                        ? "bg-brand-primary text-white font-bold shadow-xs"
+                                        : "text-brand-secondary hover:text-brand-primary font-medium"
+                                        }`}
+                                    >
+                                      Yape
+                                    </button>
+                                  )}
+                                  {isPlinEnabled && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedWallet("plin")}
+                                      className={`px-3 py-1.5 text-xs rounded transition-colors ${selectedWallet === "plin"
+                                        ? "bg-brand-primary text-white font-bold shadow-xs"
+                                        : "text-brand-secondary hover:text-brand-primary font-medium"
+                                        }`}
+                                    >
+                                      Plin
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
-                                    onClick={() => setSelectedWallet("yape")}
-                                    className={`px-3 py-1 text-xs font-bold rounded transition-colors ${
-                                      activeWallet === "yape"
-                                        ? "bg-brand-primary text-white shadow-sm"
-                                        : "text-brand-secondary hover:text-brand-primary"
-                                    }`}
+                                    onClick={() =>
+                                      setSelectedWallet("transferencia")
+                                    }
+                                    className={`px-3 py-1.5 text-xs rounded transition-colors ${selectedWallet === "transferencia"
+                                      ? "bg-brand-primary text-white font-bold shadow-xs"
+                                      : "text-brand-secondary hover:text-brand-primary font-medium"
+                                      }`}
                                   >
-                                    Yape
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedWallet("plin")}
-                                    className={`px-3 py-1 text-xs font-bold rounded transition-colors ${
-                                      activeWallet === "plin"
-                                        ? "bg-brand-primary text-white shadow-sm"
-                                        : "text-brand-secondary hover:text-brand-primary"
-                                    }`}
-                                  >
-                                    Plin
+                                    Transferencia Bancaria Directa
                                   </button>
                                 </div>
-                              )}
 
-                              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
-                                {/* Tarjeta de Billetera Digital Activa */}
-                                <div className="md:col-span-5 p-4 bg-white border border-border rounded-card flex flex-col items-center justify-center text-center space-y-2">
-                                  {activeWallet === "yape" ? (
-                                    <>
-                                      {yapeQrUrl && yapeQrUrl.trim() ? (
-                                        <div className="w-32 h-32 aspect-square rounded-card border border-border bg-white flex items-center justify-center p-1.5 shadow-sm">
+                                {/* 4.2 Esquema a 2 Columnas para Yape y Plin */}
+                                {selectedWallet !== "transferencia" ? (
+                                  <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-stretch p-4 bg-surface-subtle">
+                                    {/* Columna Izquierda (md:col-span-5): Visualizador de Código QR */}
+                                    <div className="md:col-span-5 flex flex-col items-center justify-center">
+                                      <div className="bg-white border border-border rounded-card p-2 flex items-center justify-center aspect-square max-w-[220px] w-full mx-auto shadow-xs">
+                                        {currentQrUrl && currentQrUrl.trim() ? (
                                           <img
-                                            src={yapeQrUrl}
-                                            alt="Código QR de Yape"
+                                            src={currentQrUrl}
+                                            alt={`Código QR de ${currentWalletName}`}
                                             className="w-full h-full object-contain"
                                           />
+                                        ) : (
+                                          <div className="flex flex-col items-center justify-center p-3 text-center space-y-2">
+                                            <Wallet className="w-10 h-10 text-brand-secondary" />
+                                            <span className="text-[11px] text-brand-secondary leading-snug">
+                                              Escaneo no requerido. Realiza el pago por transferencia directa al número telefónico.
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Columna Derecha (md:col-span-7): Datos de Recepción y Voucher */}
+                                    <div className="md:col-span-7 flex flex-col justify-between space-y-3">
+                                      <div className="space-y-3">
+                                        <div>
+                                          <span className="text-xs text-brand-secondary block">
+                                            Titular de la cuenta:
+                                          </span>
+                                          <span className="text-sm font-bold text-brand-primary block">
+                                            {currentHolder}
+                                          </span>
                                         </div>
-                                      ) : (
-                                        <div className="w-28 h-28 rounded-card border border-border bg-surface-subtle flex items-center justify-center p-2">
-                                          <QrCode className="w-20 h-20 text-brand-primary" />
+
+                                        <div className="p-3 bg-white border border-border rounded-card space-y-0.5">
+                                          <span className="text-xs text-brand-secondary block">
+                                            Monto exacto a transferir:
+                                          </span>
+                                          <span className="text-xl font-mono font-extrabold text-brand-primary block">
+                                            {formatCurrency(totalAmount)}
+                                          </span>
                                         </div>
-                                      )}
-                                      <div className="space-y-1">
-                                        <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-brand-primary">
-                                          <span>Yape:</span>
-                                          <span className="font-mono">{yapePhone}</span>
-                                          {yapePhone && (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleCopyAccount(yapePhone, "yape_phone")}
-                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline ml-1"
-                                              title="Copiar número"
-                                            >
-                                              <Copy className="w-3 h-3" />
-                                              {copiedAccount === "yape_phone" ? "¡Copiado!" : "Copiar"}
-                                            </button>
-                                          )}
-                                        </div>
-                                        <span className="block text-[11px] text-brand-secondary">
-                                          Titular: {yapeHolder}
+                                      </div>
+
+                                      <div>
+                                        <Input
+                                          label={
+                                            <>
+                                              {selectedWallet === "yape"
+                                                ? "Número de Operación de Yape (6 a 8 dígitos)"
+                                                : "Número de Operación de Plin"}
+                                              {REQUIRED_MARK}
+                                            </>
+                                          }
+                                          id="checkout-wallet-op"
+                                          placeholder={
+                                            selectedWallet === "yape"
+                                              ? "Ej. 12345678"
+                                              : "Ej. 87654321"
+                                          }
+                                          value={yapeOpNumber}
+                                          onChange={(e) =>
+                                            setYapeOpNumber(
+                                              e.target.value
+                                                .replace(/\D/g, "")
+                                                .slice(0, 8)
+                                            )
+                                          }
+                                          required={paymentMethod === "yape_plin" && selectedWallet !== "transferencia"}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* 4.3 Pestaña Transferencia Bancaria (Cuentas BCP / Interbank) */
+                                  <div className="space-y-3">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                      <div className="flex items-center gap-1.5 text-xs font-bold text-brand-primary">
+                                        <Landmark className="w-4 h-4 text-accent" />
+                                        <span>
+                                          Cuentas Corrientes Corporativas (Soles)
                                         </span>
                                       </div>
-                                    </>
-                                  ) : (
-                                    <>
-                                      {Boolean(plinQrUrl && plinQrUrl.trim()) && (
-                                        <div className="w-32 h-32 aspect-square rounded-card border border-border bg-white flex items-center justify-center p-1.5 shadow-sm">
-                                          <img
-                                            src={plinQrUrl}
-                                            alt="Código QR de Plin"
-                                            className="w-full h-full object-contain"
-                                          />
-                                        </div>
-                                      )}
-                                      <div className="space-y-1">
-                                        <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-brand-primary">
-                                          <span>Plin:</span>
-                                          <span className="font-mono">{plinPhone || "No configurado"}</span>
-                                          {plinPhone && (
+                                      <div className="p-2 bg-white border border-border rounded-card flex items-center gap-2">
+                                        <span className="text-xs text-brand-secondary">
+                                          Monto exacto:
+                                        </span>
+                                        <span className="text-sm font-mono font-extrabold text-brand-primary">
+                                          {formatCurrency(totalAmount)}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-2.5">
+                                      {(
+                                        dynamicSettings.paymentMethods
+                                          ?.bank_accounts || []
+                                      ).map((b, idx) => (
+                                        <div
+                                          key={idx}
+                                          className="p-3 bg-white border border-border rounded-card text-xs space-y-2 shadow-xs"
+                                        >
+                                          <div className="flex items-center justify-between">
+                                            <span className="font-bold text-brand-primary text-sm">
+                                              {b.bank}
+                                            </span>
+                                            {b.holder_name && (
+                                              <span className="text-[11px] text-brand-secondary">
+                                                Titular: {b.holder_name}
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs">
+                                            <div className="space-y-0.5">
+                                              <span className="text-[10px] uppercase font-bold text-brand-secondary block">
+                                                Número de Cuenta Corriente ({b.bank})
+                                              </span>
+                                              <span className="font-mono font-semibold text-brand-primary">
+                                                {b.account_number}
+                                              </span>
+                                            </div>
                                             <button
                                               type="button"
-                                              onClick={() => handleCopyAccount(plinPhone, "plin_phone")}
-                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline ml-1"
-                                              title="Copiar número"
+                                              onClick={() =>
+                                                handleCopy(
+                                                  b.account_number,
+                                                  `acc_${idx}`
+                                                )
+                                              }
+                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline self-start sm:self-auto"
                                             >
                                               <Copy className="w-3 h-3" />
-                                              {copiedAccount === "plin_phone" ? "¡Copiado!" : "Copiar"}
+                                              {copiedState === `acc_${idx}`
+                                                ? "¡Copiado!"
+                                                : "Copiar Cuenta"}
                                             </button>
-                                          )}
+                                          </div>
+
+                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs">
+                                            <div className="space-y-0.5">
+                                              <span className="text-[10px] uppercase font-bold text-brand-secondary block">
+                                                Código Interbancario (CCI)
+                                              </span>
+                                              <span className="font-mono text-brand-secondary">
+                                                {b.cci}
+                                              </span>
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleCopy(b.cci, `cci_${idx}`)
+                                              }
+                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline self-start sm:self-auto"
+                                            >
+                                              <Copy className="w-3 h-3" />
+                                              {copiedState === `cci_${idx}`
+                                                ? "¡Copiado!"
+                                                : "Copiar CCI"}
+                                            </button>
+                                          </div>
                                         </div>
-                                        {plinHolder && (
-                                          <span className="block text-[11px] text-brand-secondary">
-                                            Titular: {plinHolder}
-                                          </span>
-                                        )}
-                                        {!Boolean(plinQrUrl && plinQrUrl.trim()) && (
-                                          <span className="block text-[10px] text-brand-secondary">
-                                            Transfiere directamente a este número desde tu app Plin.
-                                          </span>
-                                        )}
-                                      </div>
-                                    </>
-                                  )}
+                                      ))}
+                                    </div>
 
-                                  <div className="px-3 py-1 rounded-badge bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold">
-                                    Monto: {formatCurrency(totalAmount)}
+                                    <div className="pt-2">
+                                      <Input
+                                        label={
+                                          <>
+                                            Número de Operación o Constancia de Transferencia
+                                            {REQUIRED_MARK}
+                                          </>
+                                        }
+                                        id="checkout-bank-op"
+                                        placeholder="Ingresa el código o número de constancia emitido por tu banco"
+                                        value={yapeOpNumber}
+                                        onChange={(e) =>
+                                          setYapeOpNumber(e.target.value.trim())
+                                        }
+                                        required={paymentMethod === "yape_plin" && selectedWallet === "transferencia"}
+                                      />
+                                    </div>
                                   </div>
-                                </div>
-
-                                <div className="md:col-span-7 space-y-2.5">
-                                  <div className="flex items-center gap-1.5 text-xs font-bold text-brand-primary">
-                                    <Landmark className="w-4 h-4 text-accent" />
-                                    <span>
-                                      Cuentas Corrientes Corporativas (Soles)
-                                    </span>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    {(
-                                      dynamicSettings.paymentMethods?.bank_accounts ||
-                                      []
-                                    ).map((b, idx) => (
-                                      <div
-                                        key={idx}
-                                        className="p-2.5 bg-white border border-border rounded-button text-xs space-y-1"
-                                      >
-                                        <div className="flex items-center justify-between">
-                                          <span className="font-bold text-brand-primary">
-                                            {b.bank}
-                                          </span>
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              handleCopyAccount(
-                                                b.account_number,
-                                                b.bank
-                                              )
-                                            }
-                                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
-                                          >
-                                            <Copy className="w-3 h-3" />
-                                            {copiedAccount === b.bank
-                                              ? "¡Copiado!"
-                                              : "Copiar N°"}
-                                          </button>
-                                        </div>
-                                        <p className="font-mono text-[11px] text-brand-primary">
-                                          Cuenta:{" "}
-                                          <strong>{b.account_number}</strong>
-                                        </p>
-                                        <p className="font-mono text-[10px] text-brand-muted">
-                                          CCI: {b.cci}
-                                        </p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
+                                )}
                               </div>
-
-                              <div className="pt-3 border-t border-border">
-                                <Input
-                                  label={<>Número de Operación / Voucher (6 a 8 dígitos){REQUIRED_MARK}</>}
-                                  id="checkout-yape-op"
-                                  placeholder="Ingresa el N° de operación de tu transferencia o Yape"
-                                  value={yapeOpNumber}
-                                  onChange={(e) =>
-                                    setYapeOpNumber(
-                                      e.target.value.replace(/\D/g, "").slice(0, 8)
-                                    )
-                                  }
-                                  required
-                                />
-                              </div>
-                            </div>
-                          );
-                        })()}
+                            );
+                          })()}
+                        </div>
                       </div>
                     )}
 
-                    {/* Pasarela Culqi */}
+                    {/* Tarjeta 2: Pasarela Culqi */}
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("culqi_gateway")}
@@ -3132,7 +3314,7 @@ export default function CheckoutView() {
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-brand-primary">
-                              Tarjetas de Crédito/Débito o Yape
+                              Tarjetas de Débito / Crédito
                             </span>
                             <Badge variant="success" className="text-[10px]">
                               <ShieldCheck className="w-3 h-3" /> Pago seguro
@@ -3148,7 +3330,7 @@ export default function CheckoutView() {
                       </div>
                     </button>
 
-                    {/* Pago Contra Entrega */}
+                    {/* Tarjeta 3: Pago Contra Entrega */}
                     <button
                       type="button"
                       disabled={!isCashOnDeliveryAllowed}
@@ -3183,17 +3365,20 @@ export default function CheckoutView() {
 
                       <div className="flex-1">
                         <div className="flex items-center justify-between flex-wrap gap-2">
-                          <span className="text-sm font-bold text-brand-primary">
-                            Pago Contra Entrega (Efectivo al recibir)
-                          </span>
-                          {!isCashOnDeliveryAllowed && (
-                            <Badge variant="warning" className="text-[10px]">
-                              Solo cuentas verificadas
-                            </Badge>
-                          )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-brand-primary">
+                              Pago Contra Entrega
+                            </span>
+                            {!isCashOnDeliveryAllowed && (
+                              <Badge variant="warning" className="text-[10px]">
+                                Solo cuentas verificadas
+                              </Badge>
+                            )}
+                          </div>
+                          <Banknote className="w-4 h-4 text-brand-secondary" />
                         </div>
                         <p className="text-xs text-brand-secondary mt-1">
-                          Paga al repartidor al recibir tu pedido en la puerta
+                          Paga en efectivo al repartidor al recibir tu pedido en la puerta
                           de tu domicilio.
                         </p>
                       </div>
@@ -3238,6 +3423,7 @@ export default function CheckoutView() {
                     variant="primary"
                     size="md"
                     disabled={
+                      !paymentMethod ||
                       !isStep3Valid ||
                       isSubmitting ||
                       isProcessing ||
@@ -3247,11 +3433,13 @@ export default function CheckoutView() {
                     isLoading={isSubmitting || isProcessing}
                     className="bg-accent hover:bg-accent-hover text-white px-8"
                   >
-                    {isProcessing
-                      ? "Procesando..."
-                      : paymentMethod === "culqi_gateway"
-                        ? "Pagar con Culqi " + formatCurrency(totalAmount)
-                        : "Confirmar Pedido " + formatCurrency(totalAmount)}
+                    {!paymentMethod
+                      ? "Selecciona un método de pago"
+                      : isProcessing
+                        ? "Procesando..."
+                        : paymentMethod === "culqi_gateway"
+                          ? "Pagar con Culqi " + formatCurrency(totalAmount)
+                          : "Confirmar Pedido " + formatCurrency(totalAmount)}
                   </Button>
                 </div>
               </form>

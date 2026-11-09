@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import { useCart } from "../../context/CartContext";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import SizeMatcherModal from "../../features/catalog/components/SizeMatcherModal";
@@ -8,7 +9,7 @@ import CartDrawer from "../../features/cart/CartDrawer";
 
 export default function MainLayout() {
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
-  const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
+  const { isCartOpen, openCartDrawer, closeCartDrawer } = useCart();
   const { profile, role, isDelivery: authIsDelivery } = useAuth();
   const location = useLocation();
 
@@ -23,7 +24,7 @@ export default function MainLayout() {
       {!isDelivery && (
         <Navbar
           onOpenSizeMatcher={() => setIsSizeMatcherOpen(true)}
-          onOpenCartDrawer={() => setIsCartDrawerOpen(true)}
+          onOpenCartDrawer={openCartDrawer}
         />
       )}
 
@@ -43,8 +44,8 @@ export default function MainLayout() {
 
       {/* Global Cart Drawer */}
       <CartDrawer
-        isOpen={isCartDrawerOpen}
-        onClose={() => setIsCartDrawerOpen(false)}
+        isOpen={isCartOpen}
+        onClose={closeCartDrawer}
       />
     </div>
   );

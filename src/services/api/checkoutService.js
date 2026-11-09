@@ -116,6 +116,10 @@ export async function createOrder(orderPayload) {
       customer_email: orderPayload.customerEmail,
       customer_phone: orderPayload.customerPhone,
       delivery_type: orderPayload.deliveryType || "scheduled",
+      shipping_type:
+        orderPayload.shipping_type ||
+        orderPayload.deliveryType ||
+        "scheduled",
       delivery_address: orderPayload.deliveryAddress,
       delivery_latitude:
         orderPayload.delivery_latitude ??
@@ -146,7 +150,7 @@ export async function createOrder(orderPayload) {
       invoice_type:
         orderPayload.invoice_type || orderPayload.invoiceType || "none",
       invoice_data: orderPayload.invoice_data || orderPayload.invoiceData || {},
-      status: "received",
+      status: "recibido",
     };
 
     // 1. Inserción de la orden principal
