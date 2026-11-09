@@ -1,11 +1,11 @@
 import { supabase } from "../supabase";
 
 const PRODUCT_RELATIONAL_FIELDS = [
-  "id, name, slug, description, price, main_image_url, gallery_urls, target_gender, is_featured, is_active, brand_id, category_id, material_id,",
+  "id, name, slug, description, price, main_image_url, gallery_urls, target_gender, is_featured, is_active, created_at, brand_id, category_id, material_id,",
   "categories!inner(id, name, slug, parent_id, is_active),",
   "materials(id, name, is_active),",
   "brands(id, name, slug, is_active),",
-  "product_variants(id, size_id, color, color_hex, stock, sku, image_url, is_active, sizes(id, name, display_order)),",
+  "product_variants(id, product_id, size_id, color, color_hex, stock, sku, image_url, is_active, sizes(id, name, display_order)),",
   "product_color_images(id, product_id, color, image_url, is_cover, display_order),",
   "size_guides(id, size_id, measurements, sizes(id, name, display_order))",
 ].join(" ");

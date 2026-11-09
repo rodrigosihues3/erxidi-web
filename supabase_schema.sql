@@ -625,6 +625,8 @@ CREATE TABLE IF NOT EXISTS "public"."product_variants" (
     CONSTRAINT "product_variants_stock_check" CHECK (("stock" >= 0))
 );
 
+ALTER TABLE ONLY "public"."product_variants" REPLICA IDENTITY FULL;
+
 
 ALTER TABLE "public"."product_variants" OWNER TO "postgres";
 
@@ -1231,6 +1233,26 @@ ALTER TABLE "public"."brands" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."cart_items" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "cart_items_anon_select" ON "public"."cart_items" FOR SELECT TO "anon" USING (("user_id" IS NULL));
+
+
+
+CREATE POLICY "cart_items_delete_own" ON "public"."cart_items" FOR DELETE TO "authenticated" USING (("auth"."uid"() = "user_id"));
+
+
+
+CREATE POLICY "cart_items_insert_own" ON "public"."cart_items" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() = "user_id"));
+
+
+
+CREATE POLICY "cart_items_select_own" ON "public"."cart_items" FOR SELECT TO "authenticated" USING (("auth"."uid"() = "user_id"));
+
+
+
+CREATE POLICY "cart_items_update_own" ON "public"."cart_items" FOR UPDATE TO "authenticated" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
+
 
 
 ALTER TABLE "public"."categories" ENABLE ROW LEVEL SECURITY;

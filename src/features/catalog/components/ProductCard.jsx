@@ -1,110 +1,128 @@
-import React from "react";
-import { ShoppingCart } from "lucide-react";
-import Badge from "../../../components/ui/Badge";
+import React, { useState, useMemo } from "react";
+import { ShoppingBag } from "lucide-react";
 import Button from "../../../components/ui/Button";
+import Badge from "../../../components/ui/Badge";
 
 export default function ProductCard({ product, onSelect, onQuickAdd }) {
-  if (!product) return null;
+  const [activeColor, setActiveColor] = useState(null);
 
-  const {
-    name,
-    price,
-    main_image_url,
-    materials,
-    product_variants = [],
-  } = product;
+  // Muestras de color únicas
+  const colorSwatches = useMemo(() => {
+    const map = new Map();
+    (product?.product_variants || []).forEach((v) => {
+      if (v.is_active !== false && !map.has(v.color)) {
+        map.set(v.color, { color: v.color, color_hex: v.color_hex });
+      }
+    });
+    return Array.from(map.values());
+  }, [product]);
 
-  // Compute total stock by summing up all variants' stock
-  const totalStock = product_variants.reduce(
-    (acc, variant) => acc + (variant.is_active ? variant.stock || 0 : 0),
-    0,
-  );
-  const isOutOfStock = totalStock === 0;
+  // Imagen activa según color en hover o principal
+  const currentImageUrl = useMemo(() => {
+    if (activeColor && product?.product_color_images) {
+      const match = product.product_color_images.find(
+        (img) => img.color?.toLowerCase() === activeColor.toLowerCase()
+      );
+      if (match?.image_url) return match.image_url;
+    }
+    return product?.main_image_url;
+  }, [activeColor, product]);
 
-  // Garantizar renderizado estricto en Soles (S/)
-  const formattedPrice = `S/ ${Number(price || 0).toFixed(2)}`;
+  const hasGlobalStock = useMemo(() => {
+    return (product?.product_variants || []).some(
+      (v) => v.is_active !== false && Number(v.stock) > 0
+    );
+  }, [product]);
 
   return (
-    <div className="group flex flex-col bg-surface-card border border-border rounded-card overflow-hidden hover:shadow-subtle transition-shadow duration-300 h-full">
-      {/* Image Container */}
-      <div
-        className="relative aspect-[4/5] bg-surface-subtle overflow-hidden cursor-pointer"
-        onClick={() => onSelect?.(product)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onSelect?.(product);
-          }
-        }}
-      >
-        {main_image_url ? (
+    <div
+      onClick={() => onSelect?.(product)}
+      className="group bg-surface-card border border-border rounded-card overflow-hidden hover:border-brand-primary transition-all flex flex-col justify-between cursor-pointer select-none"
+    >
+      <div>
+        {/* Contenedor Cuadrado 1:1 para evitar franjas verticales excesivas */}
+        <div className="relative aspect-square bg-surface-subtle overflow-hidden flex items-center justify-center p-2">
           <img
-            src={main_image_url}
-            alt={name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
+            src={currentImageUrl}
+            alt={product.name}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             loading="lazy"
           />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-brand-secondary bg-surface-subtle">
-            Sin imagen
-          </div>
-        )}
 
-        {/* Floating Badges */}
-        <div className="absolute top-3 left-3 flex flex-col gap-2 items-start">
-          {isOutOfStock && <Badge variant="danger">Agotado</Badge>}
-        </div>
-      </div>
-
-      {/* Card Content */}
-      <div className="p-4 flex flex-col flex-grow">
-        <div className="mb-2 flex items-center flex-wrap gap-2">
-          {materials?.name && <Badge variant="neutral">{materials.name}</Badge>}
-
-          {!isOutOfStock && totalStock > 0 && totalStock <= 3 && (
-            <Badge variant="warning">Quedan {totalStock}</Badge>
+          {!hasGlobalStock && (
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-2">
+              <Badge className="text-[10px] sm:text-xs font-bold uppercase tracking-wider" variant="danger">
+                Agotado
+              </Badge>
+            </div>
           )}
         </div>
 
-        {product.categories?.name && (
-          <span className="text-[11px] font-mono uppercase tracking-wider text-brand-secondary mb-1 block">
-            {product.categories.name}
-          </span>
-        )}
-        
-        <h3
-          className="text-sm md:text-base font-bold text-brand-primary line-clamp-2 cursor-pointer hover:underline mb-2"
-          onClick={() => onSelect?.(product)}
-        >
-          {name}
-        </h3>
+        {/* Detalles */}
+        <div className="p-3 sm:p-3.5 space-y-2">
+          {/* Swatches de Color */}
+          {colorSwatches.length > 0 && (
+            <div className="flex items-center gap-1.5 h-4">
+              {colorSwatches.slice(0, 4).map((c) => (
+                <button
+                  key={c.color}
+                  type="button"
+                  onMouseEnter={() => setActiveColor(c.color)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveColor(c.color);
+                  }}
+                  title={c.color}
+                  className={`w-3.5 h-3.5 rounded-full border border-black/20 transition-transform ${activeColor?.toLowerCase() === c.color?.toLowerCase()
+                    ? "scale-125 ring-1 ring-brand-primary"
+                    : "hover:scale-110"
+                    }`}
+                  style={{ backgroundColor: c.color_hex || "#000000" }}
+                />
+              ))}
+              {colorSwatches.length > 4 && (
+                <span className="text-[10px] text-brand-muted font-mono font-medium">
+                  +{colorSwatches.length - 4}
+                </span>
+              )}
+            </div>
+          )}
 
-        <div className="mt-auto pt-3 flex items-center justify-between border-t border-border">
-          <span className="text-lg font-bold text-brand-primary">
-            {formattedPrice}
-          </span>
-
-          <Button
-            variant={isOutOfStock ? "outline" : "primary"}
-            size="sm"
-            disabled={isOutOfStock}
-            onClick={() => !isOutOfStock && onQuickAdd?.(product)}
-            aria-label={
-              isOutOfStock ? "Producto agotado" : "Agregar al carrito"
-            }
-          >
-            {isOutOfStock ? (
-              "Agotado"
-            ) : (
-              <>
-                <ShoppingCart className="w-4 h-4 mr-2" />
-                Agregar
-              </>
-            )}
-          </Button>
+          <div className="space-y-0.5">
+            <span className="block text-[10px] uppercase font-bold text-brand-muted tracking-wider truncate">
+              {product.brands?.name || product.categories?.name || "ERXIDI"}
+            </span>
+            <h3
+              className="text-xs sm:text-sm font-semibold text-brand-primary truncate hover:underline"
+              title={product.name}
+            >
+              {product.name}
+            </h3>
+          </div>
         </div>
+      </div>
+
+      {/* Pie: Precio Destacado y Botón Agregar */}
+      <div className="px-3 sm:px-3.5 pb-3 sm:pb-3.5 pt-1.5 flex items-center justify-between gap-2 border-t border-border/50">
+        <span className="font-mono font-extrabold text-sm sm:text-lg text-brand-primary">
+          S/ {Number(product.price).toFixed(2)}
+        </span>
+
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={!hasGlobalStock}
+          onClick={(e) => {
+            e.stopPropagation();
+            onQuickAdd?.(product, activeColor);
+          }}
+          className="text-xs px-2.5 sm:px-3.5 h-8 gap-1 shrink-0"
+          title={hasGlobalStock ? "Agregar prenda" : "Producto agotado"}
+        >
+          <ShoppingBag className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Agregar</span>
+        </Button>
       </div>
     </div>
   );

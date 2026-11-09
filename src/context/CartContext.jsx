@@ -212,7 +212,8 @@ export function CartProvider({ children }) {
   const addItem = (item, quantity = 1) => {
     const rawStock = item?.availableStock ?? item?.stock;
     const maxStock = Math.max(0, Number(rawStock) || 0);
-    const cleanQty = Math.max(1, Number(quantity) || 1);
+    const requestedQty = Number(quantity !== 1 ? quantity : item?.quantity || 1);
+    const cleanQty = Math.max(1, requestedQty || 1);
 
     if (!item) {
       return { success: false, reason: "invalid_item" };
@@ -357,8 +358,10 @@ export function CartProvider({ children }) {
     totalUnits,
     subtotal,
     addItem,
+    addToCart: addItem, // Alias para compatibilidad con QuickAddModal
     updateQuantity,
     removeItem,
+    removeFromCart: removeItem,
     clearCart,
     isCartOpen,
     setIsCartOpen,
