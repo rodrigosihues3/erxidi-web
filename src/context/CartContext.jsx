@@ -14,7 +14,19 @@ export function CartProvider({ children }) {
       const local =
         localStorage.getItem(STORAGE_KEY) ||
         localStorage.getItem("erxidi_cart_v1");
-      return local ? JSON.parse(local) : [];
+      const parsed = local ? JSON.parse(local) : [];
+      return parsed.map((item) => {
+        const rawStock = item.availableStock ?? item.stock;
+        const numStock = rawStock !== undefined ? Number(rawStock) : 10;
+        return {
+          ...item,
+          productId: item.productId || item.product_id || null,
+          availableStock: numStock,
+          stock: numStock,
+          isOutOfStock: item.isOutOfStock ?? (numStock <= 0),
+          isShortStock: numStock < (Number(item.quantity) || 1),
+        };
+      });
     } catch {
       return [];
     }
@@ -28,7 +40,49 @@ export function CartProvider({ children }) {
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
-  // 1. Efecto de sincronización/fusión inicial con Supabase
+  // 1. Suscripción Supabase Realtime a cambios de inventario
+  useEffect(() => {
+    const channel = supabase
+      .channel("public:product_variants_cart")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "product_variants",
+        },
+        (payload) => {
+          const updated = payload.new;
+          if (!updated) return;
+
+          setItems((prevItems) => {
+            let hasChanges = false;
+            const next = prevItems.map((item) => {
+              if (Number(item.variantId) === Number(updated.id)) {
+                hasChanges = true;
+                const newStock = Number(updated.stock);
+                return {
+                  ...item,
+                  stock: newStock,
+                  availableStock: newStock,
+                  isOutOfStock: newStock <= 0,
+                  isShortStock: newStock < Number(item.quantity),
+                };
+              }
+              return item;
+            });
+            return hasChanges ? next : prevItems;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // 2. Efecto de sincronización/fusión inicial con Supabase
   useEffect(() => {
     let isMounted = true;
 
@@ -64,17 +118,28 @@ export function CartProvider({ children }) {
           } else if (cloudItems && cloudItems.length > 0) {
             // Mapear ítems de Supabase al formato estándar del CartContext
             const mapped = cloudItems
-              .map((ci) => ({
-                id: ci.id,
-                variantId: Number(ci.variant_id),
-                quantity: Number(ci.quantity) || 1,
-                stock: Number(ci.product_variants?.stock) || 10,
-                name: ci.product_variants?.products?.name || "Prenda",
-                price: Number(ci.product_variants?.products?.price || 0),
-                size: ci.product_variants?.size || "M",
-                color: ci.product_variants?.color || "—",
-                imageUrl: ci.product_variants?.products?.main_image_url || null,
-              }))
+              .map((ci) => {
+                const stockVal = Number(ci.product_variants?.stock ?? 10);
+                const qtyVal = Number(ci.quantity) || 1;
+                return {
+                  id: ci.id,
+                  variantId: Number(ci.variant_id),
+                  productId:
+                    ci.product_variants?.product_id ||
+                    ci.product_variants?.products?.id ||
+                    null,
+                  name: ci.product_variants?.products?.name || "Prenda",
+                  price: Number(ci.product_variants?.products?.price || 0),
+                  size: ci.product_variants?.size || "M",
+                  color: ci.product_variants?.color || "—",
+                  quantity: qtyVal,
+                  imageUrl: ci.product_variants?.products?.main_image_url || null,
+                  stock: stockVal,
+                  availableStock: stockVal,
+                  isOutOfStock: stockVal <= 0,
+                  isShortStock: stockVal < qtyVal,
+                };
+              })
               .filter(Boolean);
             setItems(mapped);
           }
@@ -93,7 +158,7 @@ export function CartProvider({ children }) {
     };
   }, [user]);
 
-  // 2. Persistencia en localStorage (SOLO se ejecuta tras inicializar)
+  // 3. Persistencia en localStorage (SOLO se ejecuta tras inicializar)
   useEffect(() => {
     if (!isInitialized) return;
     try {
@@ -103,7 +168,7 @@ export function CartProvider({ children }) {
     }
   }, [items, isInitialized]);
 
-  // 3. Debounce para persistir cambios en Supabase para usuarios logueados
+  // 4. Debounce para persistir cambios en Supabase para usuarios logueados
   useEffect(() => {
     if (!isInitialized || !user) return;
 
@@ -145,7 +210,8 @@ export function CartProvider({ children }) {
   };
 
   const addItem = (item, quantity = 1) => {
-    const maxStock = Math.max(0, Number(item?.stock) || 0);
+    const rawStock = item?.availableStock ?? item?.stock;
+    const maxStock = Math.max(0, Number(rawStock) || 0);
     const cleanQty = Math.max(1, Number(quantity) || 1);
 
     if (!item) {
@@ -153,6 +219,12 @@ export function CartProvider({ children }) {
     }
 
     const targetVariantId = Number(item.variantId);
+    const targetProductId =
+      item.productId ||
+      item.product_id ||
+      item.product?.id ||
+      null;
+
     const existingItem = items.find(
       (i) => Number(i.variantId) === targetVariantId
     );
@@ -174,22 +246,33 @@ export function CartProvider({ children }) {
       if (existingIndex > -1) {
         const prevExisting = prevItems[existingIndex];
         const updated = [...prevItems];
+        const currentStock =
+          maxStock || prevExisting.availableStock || prevExisting.stock || 10;
         updated[existingIndex] = {
           ...prevExisting,
+          productId: targetProductId || prevExisting.productId,
           price: Number(item.price ?? prevExisting.price),
-          stock: maxStock || prevExisting.stock || 10,
+          stock: currentStock,
+          availableStock: currentStock,
+          isOutOfStock: currentStock <= 0,
+          isShortStock: currentStock < finalQuantity,
           quantity: finalQuantity,
         };
         return updated;
       }
 
+      const initialStock = maxStock || 10;
       return [
         ...prevItems,
         {
           ...item,
           variantId: targetVariantId,
+          productId: targetProductId,
           price: Number(item.price) || 0,
-          stock: maxStock || 10,
+          stock: initialStock,
+          availableStock: initialStock,
+          isOutOfStock: initialStock <= 0,
+          isShortStock: initialStock < finalQuantity,
           quantity: finalQuantity,
         },
       ];
@@ -214,10 +297,15 @@ export function CartProvider({ children }) {
     setItems((prevItems) =>
       prevItems.map((item) => {
         if (Number(item.variantId) === targetVariantId) {
-          const maxStock = Math.max(1, Number(item.stock) || 10);
+          const maxStock = Math.max(
+            1,
+            Number(item.availableStock ?? item.stock) || 10
+          );
+          const finalQty = Math.min(parsedQty, maxStock);
           return {
             ...item,
-            quantity: Math.min(parsedQty, maxStock),
+            quantity: finalQty,
+            isShortStock: (item.availableStock ?? item.stock) < finalQty,
           };
         }
         return item;

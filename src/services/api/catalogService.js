@@ -128,22 +128,29 @@ export async function getProducts({ categorySlug, targetGender } = {}) {
 }
 
 /**
- * Consulta relacional por slug único del producto.
+ * Consulta relacional por slug único o ID numérico del producto.
  */
-export async function getProductBySlug(slug) {
+export async function getProductBySlug(slugOrId) {
   try {
-    const { data, error } = await supabase
+    const isNumeric = /^\d+$/.test(String(slugOrId).trim());
+    let query = supabase
       .from("products")
       .select(PRODUCT_RELATIONAL_FIELDS)
-      .eq("is_active", true)
-      .eq("slug", slug)
-      .single();
+      .eq("is_active", true);
+
+    if (isNumeric) {
+      query = query.eq("id", Number(slugOrId));
+    } else {
+      query = query.eq("slug", slugOrId);
+    }
+
+    const { data, error } = await query.single();
 
     if (error) throw error;
     return sanitizeProductVariants(data);
   } catch (error) {
     console.error(
-      'Error al obtener producto con slug "' + slug + '":',
+      'Error al obtener producto "' + slugOrId + '":',
       error.message || error,
     );
     throw error;

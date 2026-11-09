@@ -44,7 +44,8 @@ import { DeliveryOnlyRoute, ShopCustomerRoute } from "./components/RoleRoute";
 import DeliveryDashboard from "./features/delivery/DeliveryDashboard";
 
 function ProductDetailRouteWrapper() {
-  const { slug } = useParams();
+  const { slug, productId } = useParams();
+  const identifier = slug || productId;
   const navigate = useNavigate();
   const { addItem } = useCart();
 
@@ -57,7 +58,7 @@ function ProductDetailRouteWrapper() {
     setLoading(true);
     setError(null);
 
-    getProductBySlug(slug)
+    getProductBySlug(identifier)
       .then((data) => {
         if (isMounted) {
           if (!data) {
@@ -78,7 +79,7 @@ function ProductDetailRouteWrapper() {
     return () => {
       isMounted = false;
     };
-  }, [slug]);
+  }, [identifier]);
 
   if (loading) {
     return (
@@ -159,6 +160,10 @@ export default function App() {
               >
                 <Route path="/" element={<HomeView />} />
                 <Route path="/catalogo" element={<CatalogView />} />
+                <Route
+                  path="/catalogo/:productId"
+                  element={<ProductDetailRouteWrapper />}
+                />
                 <Route
                   path="/producto/:slug"
                   element={<ProductDetailRouteWrapper />}

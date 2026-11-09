@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   ShoppingCart,
   X,
@@ -8,6 +8,7 @@ import {
   Minus,
   Plus,
   AlertCircle,
+  Package,
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import Button from '../../components/ui/Button';
@@ -42,6 +43,26 @@ export default function CartDrawer({ isOpen, onClose }) {
       document.body.style.overflow = '';
     };
   }, [isOpen]);
+
+  // Partición de prendas disponibles y agotadas
+  const { availableItems, outOfStockItems } = useMemo(() => {
+    const available = [];
+    const outOfStock = [];
+
+    items.forEach((item) => {
+      const isDepleted =
+        item.isOutOfStock ||
+        (item.availableStock !== undefined && Number(item.availableStock) <= 0) ||
+        (item.stock !== undefined && Number(item.stock) <= 0);
+      if (isDepleted) {
+        outOfStock.push(item);
+      } else {
+        available.push(item);
+      }
+    });
+
+    return { availableItems: available, outOfStockItems: outOfStock };
+  }, [items]);
 
   if (!isOpen) return null;
 
@@ -115,91 +136,173 @@ export default function CartDrawer({ isOpen, onClose }) {
               </Button>
             </div>
           ) : (
-            <div className="space-y-3">
-              {items.map((item) => (
-                <div
-                  key={item.variantId}
-                  className="flex gap-3 p-3 rounded-card border border-border bg-surface-card hover:border-border-strong transition-colors"
-                >
-                  {/* Product Thumbnail */}
-                  <div className="w-16 h-20 rounded bg-surface-subtle border border-border overflow-hidden flex-shrink-0">
-                    {item.imageUrl ? (
-                      <img
-                        src={item.imageUrl}
-                        alt={item.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[10px] text-brand-muted">
-                        Prenda
-                      </div>
-                    )}
-                  </div>
+            <div className="space-y-4">
+              {/* Prendas Disponibles */}
+              {availableItems.length > 0 && (
+                <div className="space-y-3">
+                  {availableItems.map((item) => (
+                    <div
+                      key={item.variantId}
+                      className="flex gap-3 p-3 rounded-card border border-border bg-surface-card hover:border-border-strong transition-colors"
+                    >
+                      {/* Product Thumbnail */}
+                      <Link
+                        to={item.productId ? `/catalogo/${item.productId}` : '/catalogo'}
+                        onClick={onClose}
+                        className="w-16 aspect-[4/5] rounded bg-surface-subtle border border-border overflow-hidden flex-shrink-0 flex items-center justify-center cursor-pointer"
+                      >
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-brand-muted">
+                            Prenda
+                          </div>
+                        )}
+                      </Link>
 
-                  {/* Product Details */}
-                  <div className="flex-1 min-w-0 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-start justify-between gap-1">
-                        <h4 className="text-xs font-bold text-brand-primary truncate">
-                          {item.name}
-                        </h4>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.variantId)}
-                          className="text-brand-muted hover:text-rose-500 transition-colors p-0.5 focus:outline-none"
-                          title="Eliminar prenda"
-                          aria-label="Eliminar prenda"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-[11px] text-brand-secondary">
-                        <span>
-                          Talla:{' '}
-                          <strong className="font-mono text-brand-primary">
-                            {item.size}
-                          </strong>
-                        </span>
-                        {item.color && <span>&bull; {item.color}</span>}
+                      {/* Product Details */}
+                      <div className="flex-1 min-w-0 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-start justify-between gap-1">
+                            <Link
+                              to={item.productId ? `/catalogo/${item.productId}` : '/catalogo'}
+                              onClick={onClose}
+                              className="hover:underline text-xs font-semibold text-brand-primary truncate block"
+                            >
+                              {item.name}
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => removeItem(item.variantId)}
+                              className="text-brand-muted hover:text-rose-500 transition-colors p-0.5 focus:outline-none"
+                              title="Eliminar prenda"
+                              aria-label="Eliminar prenda"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 text-[11px] text-brand-secondary">
+                            <span>
+                              Talla:{' '}
+                              <strong className="font-mono text-brand-primary">
+                                {item.size}
+                              </strong>
+                            </span>
+                            {item.color && <span>&bull; {item.color}</span>}
+                          </div>
+                        </div>
+
+                        {/* Quantity and Price */}
+                        <div className="flex items-center justify-between pt-2">
+                          <div className="flex items-center border border-border rounded-button bg-surface-card overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateQuantity(item.variantId, item.quantity - 1)
+                              }
+                              className="w-6 h-6 flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle transition-colors focus:outline-none"
+                              aria-label="Disminuir cantidad"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="w-7 text-center font-mono text-xs font-bold text-brand-primary">
+                              {item.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={
+                                item.quantity >=
+                                (item.availableStock ?? item.stock ?? 999)
+                              }
+                              onClick={() =>
+                                updateQuantity(item.variantId, item.quantity + 1)
+                              }
+                              className="w-6 h-6 flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus:outline-none"
+                              aria-label="Aumentar cantidad"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+
+                          <span className="font-bold text-xs text-brand-primary">
+                            S/ {(item.price * item.quantity).toFixed(2)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-
-                    {/* Quantity and Price */}
-                    <div className="flex items-center justify-between pt-2">
-                      <div className="flex items-center border border-border rounded-button bg-surface-card overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateQuantity(item.variantId, item.quantity - 1)
-                          }
-                          className="w-6 h-6 flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle transition-colors focus:outline-none"
-                          aria-label="Disminuir cantidad"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <span className="w-7 text-center font-mono text-xs font-bold text-brand-primary">
-                          {item.quantity}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={item.quantity >= item.stock}
-                          onClick={() =>
-                            updateQuantity(item.variantId, item.quantity + 1)
-                          }
-                          className="w-6 h-6 flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-surface-subtle disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus:outline-none"
-                          aria-label="Aumentar cantidad"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <span className="font-bold text-xs text-brand-primary">
-                        S/ {(item.price * item.quantity).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Prendas Sin Inventario (Al fondo del drawer) */}
+              {outOfStockItems.length > 0 && (
+                <div className="pt-4 border-t border-border space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600">
+                      Prendas sin inventario ({outOfStockItems.length})
+                    </span>
+                    <span className="text-[10px] text-brand-muted">
+                      Retira o cambia la talla
+                    </span>
+                  </div>
+
+                  {outOfStockItems.map((item) => (
+                    <div
+                      key={item.variantId}
+                      className="p-3 rounded-card border border-rose-200 bg-rose-50/40 opacity-75 grayscale flex items-center justify-between gap-3 text-xs"
+                    >
+                      <Link
+                        className="w-12 aspect-[4/5] shrink-0 rounded border border-border bg-white overflow-hidden flex items-center justify-center cursor-pointer"
+                        onClick={onClose}
+                        to={item.productId ? `/catalogo/${item.productId}` : '/catalogo'}
+                      >
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <Package className="w-4 h-4 text-brand-muted" />
+                        )}
+                      </Link>
+
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <Link
+                          className="font-bold text-brand-primary truncate hover:underline block"
+                          onClick={onClose}
+                          to={item.productId ? `/catalogo/${item.productId}` : '/catalogo'}
+                        >
+                          {item.name}
+                        </Link>
+                        <div className="flex items-center gap-1.5">
+                          <Badge className="text-[9px] px-1.5 py-0" variant="danger">
+                            Agotado
+                          </Badge>
+                          <span className="text-[10px] text-brand-secondary">
+                            Talla: {item.size} &bull; Color: {item.color}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Botón de eliminación siempre activo para desatascar el carrito */}
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.variantId)}
+                        className="p-1.5 rounded text-rose-600 hover:bg-rose-100 transition-colors"
+                        title="Eliminar prenda sin stock"
+                        aria-label="Eliminar prenda sin stock"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -228,13 +331,17 @@ export default function CartDrawer({ isOpen, onClose }) {
             <Button
               variant="primary"
               size="md"
+              disabled={outOfStockItems.length > 0}
               onClick={() => {
+                if (outOfStockItems.length > 0) return;
                 onClose?.();
                 navigate('/checkout');
               }}
-              className="w-full bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-10"
+              className="w-full bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-10 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Continuar al Checkout
+              {outOfStockItems.length > 0
+                ? 'Elimina las prendas agotadas para continuar'
+                : 'Continuar al Checkout'}
             </Button>
           </div>
         )}
