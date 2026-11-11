@@ -44,6 +44,7 @@ const initial = {
   has_size_guide: true,
   is_featured: false,
   is_active: true,
+  is_on_sale: false,
   target_gender: "hombre",
 };
 
@@ -137,6 +138,7 @@ export default function ProductFormView() {
             has_size_guide: product.has_size_guide,
             is_featured: product.is_featured,
             is_active: product.is_active,
+            is_on_sale: Boolean(product.is_on_sale),
             target_gender: product.target_gender || "hombre",
           });
 
@@ -704,6 +706,7 @@ export default function ProductFormView() {
       has_size_guide: Boolean(form.has_size_guide),
       is_featured: Boolean(form.is_featured),
       is_active: Boolean(form.is_active),
+      is_on_sale: Boolean(form.is_on_sale),
       target_gender: form.target_gender,
       variants: cleanVariants,
       color_images: colorImages.map((ci, idx) => ({
@@ -772,6 +775,11 @@ export default function ProductFormView() {
             checked={form.is_featured}
             label="Destacado"
             onChange={(v) => update("is_featured", v)}
+          />
+          <Check
+            checked={form.is_on_sale}
+            label="Promoción"
+            onChange={(v) => update("is_on_sale", v)}
           />
           <Check
             checked={form.has_size_guide}

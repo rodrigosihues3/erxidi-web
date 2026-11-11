@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Filter,
@@ -12,12 +12,11 @@ import {
 } from "lucide-react";
 import ProductCard from "./components/ProductCard";
 import FilterSidebar from "./components/FilterSidebar";
-import QuickAddModal from "./components/QuickAddModal";
 import { useCatalog } from "./hooks/useCatalog";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 
-const AUDIENCE_TABS = [
+const AUDIENCE_CIRCLES = [
   { id: "all", label: "Todos" },
   { id: "hombre", label: "Hombres" },
   { id: "mujer", label: "Mujeres" },
@@ -56,18 +55,19 @@ export default function CatalogView() {
     brandIds: [],
     materialIds: [],
     inStockOnly: false,
+    onSaleOnly: false,
   });
 
   // Ordenamiento y paginación
   const [sortBy, setSortBy] = useState("featured");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Modales
+  // Modal de filtros móvil
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
-  const [quickAddConfig, setQuickAddConfig] = useState(null); // { product, initialColor }
 
   // Reiniciar a página 1 al alterar cualquier filtro u orden
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentPage(1);
   }, [selectedGender, selectedFilters, sortBy]);
 
@@ -111,6 +111,11 @@ export default function CatalogView() {
           (v) => v.is_active !== false && Number(v.stock) > 0
         );
         if (!hasStock) return false;
+      }
+
+      // 6. Solo en promoción
+      if (selectedFilters.onSaleOnly && !product.is_on_sale) {
+        return false;
       }
 
       return true;
@@ -163,6 +168,7 @@ export default function CatalogView() {
       brandIds: [],
       materialIds: [],
       inStockOnly: false,
+      onSaleOnly: false,
     });
   };
 
@@ -171,26 +177,40 @@ export default function CatalogView() {
     selectedFilters.categoryIds.length +
     selectedFilters.brandIds.length +
     selectedFilters.materialIds.length +
-    (selectedFilters.inStockOnly ? 1 : 0);
+    (selectedFilters.inStockOnly ? 1 : 0) +
+    (selectedFilters.onSaleOnly ? 1 : 0);
 
   return (
-    <div ref={catalogTopRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* 1. Selector Superior de Público (Pestañas Planas Sobrias) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none border-b border-border">
-        {AUDIENCE_TABS.map((tab) => {
+    <div ref={catalogTopRef} className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* 1. Selector Circular Superior de Público (Estilo iOS y Centrado) */}
+      <div className="flex items-center justify-center gap-4 sm:gap-6 w-full py-4 border-b border-border overflow-x-auto scrollbar-none">
+        {AUDIENCE_CIRCLES.map((tab) => {
           const isSelected = selectedGender === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
               onClick={() => setSelectedGender(tab.id)}
-              className={`px-4 py-2 rounded-button text-xs font-bold transition-all shrink-0 select-none ${
-                isSelected
-                  ? "bg-brand-primary text-white shadow-xs"
-                  : "bg-surface-subtle text-brand-secondary hover:text-brand-primary hover:bg-surface-card border border-border"
-              }`}
+              className="flex flex-col items-center gap-2 group focus:outline-none select-none shrink-0"
             >
-              {tab.label}
+              <div
+                className={`w-14 h-14 sm:w-16 sm:h-16 shrink-0 aspect-square rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ease-out ${
+                  isSelected
+                    ? "bg-brand-primary text-white shadow-md scale-105 ring-4 ring-brand-primary/20"
+                    : "bg-surface-card border border-border text-brand-secondary hover:border-brand-primary hover:text-brand-primary hover:scale-102"
+                }`}
+              >
+                {tab.label.slice(0, 3)}
+              </div>
+              <span
+                className={`text-xs transition-colors duration-200 ${
+                  isSelected
+                    ? "font-bold text-brand-primary"
+                    : "font-medium text-brand-secondary group-hover:text-brand-primary"
+                }`}
+              >
+                {tab.label}
+              </span>
             </button>
           );
         })}
@@ -210,7 +230,7 @@ export default function CatalogView() {
         />
 
         {/* Contenedor Principal Garantizado a Ancho Completo */}
-        <main className="flex-1 min-w-0 w-full space-y-5">
+        <section className="flex-1 min-w-0 w-full space-y-5">
           {/* Barra de Control de Resultados */}
           <div className="flex items-center justify-between gap-3 bg-surface-subtle border border-border px-4 py-2.5 rounded-card text-xs">
             <div className="flex items-center gap-2">
@@ -285,8 +305,8 @@ export default function CatalogView() {
             </div>
           ) : sortedProducts.length === 0 ? (
             /* Estado Vacío a Ancho Completo */
-            <div className="w-full py-20 text-center space-y-4 border border-dashed border-border rounded-card bg-surface-card p-8">
-              <div className="w-12 h-12 rounded-full bg-surface-subtle border border-border flex items-center justify-center mx-auto text-brand-muted">
+            <div className="w-full flex-1 min-w-full py-20 px-4 text-center border border-dashed border-border rounded-card bg-surface-card flex flex-col items-center justify-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-surface-subtle border border-border flex items-center justify-center text-brand-muted">
                 <PackageOpen className="w-6 h-6" />
               </div>
               <div className="space-y-1">
@@ -297,7 +317,7 @@ export default function CatalogView() {
                   Prueba seleccionando otro público o restableciendo los filtros laterales.
                 </p>
               </div>
-              <Button variant="outline" size="sm" onClick={handleResetFilters}>
+              <Button onClick={handleResetFilters} size="sm" variant="outline">
                 Restablecer todos los filtros
               </Button>
             </div>
@@ -309,8 +329,10 @@ export default function CatalogView() {
                   <ProductCard
                     key={product.id}
                     product={product}
-                    onSelect={(p) => navigate(`/producto/${p.slug}`)}
-                    onQuickAdd={(p, color) => setQuickAddConfig({ product: p, initialColor: color })}
+                    onSelect={(p, color) => {
+                      const query = color ? `?color=${encodeURIComponent(color)}` : "";
+                      navigate(`/producto/${p.slug}${query}`);
+                    }}
                   />
                 ))}
               </div>
@@ -388,16 +410,8 @@ export default function CatalogView() {
               )}
             </>
           )}
-        </main>
+        </section>
       </div>
-
-      {/* Quick-Add Modal */}
-      <QuickAddModal
-        product={quickAddConfig?.product}
-        initialColor={quickAddConfig?.initialColor}
-        isOpen={Boolean(quickAddConfig)}
-        onClose={() => setQuickAddConfig(null)}
-      />
     </div>
   );
 }

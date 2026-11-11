@@ -6,8 +6,6 @@ ENVIRONMENT: Run all terminal operations under standard Windows Command Prompt (
 
 SKILLS IN EFFECT: Strictly adhere to frontend-design and vercel-composition-patterns. Apply composition over prop-drilling and maintain clean component boundaries.
 
-PROHIBITED: Do not run build commands (npm run build, npm.cmd run build) or test suites in the terminal. The developer validates compilation locally.
-
 ZERO FLUFF: Generate or edit code directly in the target files. Respond strictly with the modified code blocks, unified diffs, or a one-line operational confirmation. Introductory pleasantries, commentary, and concluding summaries are strictly forbidden.
 
 ICONS & VISUAL TOKENS: Strictly import and use native SVG icons from lucide-react. The use of decorative emojis (e.g., 📦, ⚡, 📅, ★) in badges, buttons, headers, or text labels is strictly PROHIBITED.

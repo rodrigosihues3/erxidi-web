@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { X, Filter, RotateCcw, Check, ChevronDown, ChevronRight } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
@@ -12,6 +12,7 @@ export default function FilterSidebar({
     brandIds: [],
     materialIds: [],
     inStockOnly: false,
+    onSaleOnly: false,
   },
   onFilterChange,
   onResetFilters,
@@ -25,7 +26,19 @@ export default function FilterSidebar({
     const roots = [];
     const childrenMap = {};
 
-    categories.forEach((cat) => {
+    // Excluir cualquier categoría espuria denominada "Promociones" o similar de la lista de prendas
+    const validCategories = (categories || []).filter((cat) => {
+      const slug = (cat.slug || "").toLowerCase();
+      const name = (cat.name || "").toLowerCase();
+      return (
+        slug !== "promociones" &&
+        slug !== "promocion" &&
+        !name.includes("promoción") &&
+        !name.includes("promocion")
+      );
+    });
+
+    validCategories.forEach((cat) => {
       if (cat.parent_id == null) {
         roots.push(cat);
       } else {
@@ -52,6 +65,9 @@ export default function FilterSidebar({
       count += selectedFilters.materialIds.length;
     }
     if (selectedFilters?.inStockOnly) {
+      count += 1;
+    }
+    if (selectedFilters?.onSaleOnly) {
       count += 1;
     }
     return count;
@@ -114,6 +130,13 @@ export default function FilterSidebar({
     onFilterChange?.({
       ...selectedFilters,
       inStockOnly: !selectedFilters?.inStockOnly,
+    });
+  };
+
+  const handleToggleOnSale = () => {
+    onFilterChange?.({
+      ...selectedFilters,
+      onSaleOnly: !selectedFilters?.onSaleOnly,
     });
   };
 
@@ -305,9 +328,34 @@ export default function FilterSidebar({
         </div>
       )}
 
-      {/* 4. Disponibilidad en Stock */}
-      <div className="pt-4 border-t border-border">
+      {/* 4. Disponibilidad y Ofertas */}
+      <div className="pt-4 border-t border-border space-y-3">
         <label className="flex items-center justify-between py-1 cursor-pointer select-none group">
+          <div className="space-y-0.5 pr-2">
+            <span className="text-sm font-semibold text-brand-primary block">
+              Solo en promoción
+            </span>
+            <span className="text-xs text-brand-secondary block">
+              Ver únicamente productos con descuento
+            </span>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={Boolean(selectedFilters?.onSaleOnly)}
+            onClick={handleToggleOnSale}
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${selectedFilters?.onSaleOnly ? "bg-brand-primary" : "bg-border"
+              }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${selectedFilters?.onSaleOnly ? "translate-x-4" : "translate-x-0"
+                }`}
+            />
+          </button>
+        </label>
+
+        <label className="flex items-center justify-between py-1 cursor-pointer select-none group pt-2 border-t border-border/50">
           <div className="space-y-0.5 pr-2">
             <span className="text-sm font-semibold text-brand-primary block">
               Solo en stock

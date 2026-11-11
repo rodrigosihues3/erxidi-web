@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ShoppingCart,
@@ -30,6 +31,9 @@ export default function ProductDetailView({
   const { items: cartItems, addItem } = useCart();
   const { profile } = useAuth();
 
+  const [searchParams] = useSearchParams();
+  const initialColorParam = searchParams.get("color");
+
   const activeVariants = useMemo(
     () =>
       (currentProduct?.product_variants || []).filter(
@@ -38,13 +42,38 @@ export default function ProductDetailView({
     [currentProduct]
   );
 
+  const availableColors = useMemo(() => {
+    const map = new Map();
+    activeVariants.forEach((v) => {
+      if (v.color && !map.has(v.color.toLowerCase())) {
+        map.set(v.color.toLowerCase(), {
+          color: v.color,
+          color_hex: v.color_hex || "#111827",
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [activeVariants]);
+
   const initialVariant = useMemo(() => {
+    if (initialColorParam) {
+      const matchWithStock = activeVariants.find(
+        (v) =>
+          v.color?.toLowerCase() === initialColorParam.toLowerCase() &&
+          (Number(v.stock) || 0) > 0
+      );
+      if (matchWithStock) return matchWithStock;
+      const matchAny = activeVariants.find(
+        (v) => v.color?.toLowerCase() === initialColorParam.toLowerCase()
+      );
+      if (matchAny) return matchAny;
+    }
     return (
       activeVariants.find((v) => (Number(v.stock) || 0) > 0) ||
       activeVariants[0] ||
       null
     );
-  }, [activeVariants]);
+  }, [activeVariants, initialColorParam]);
 
   const [selectedVariant, setSelectedVariant] = useState(initialVariant);
   const [selectedImage, setSelectedImage] = useState(
@@ -130,16 +159,67 @@ export default function ProductDetailView({
   }, [currentProduct]);
 
   useEffect(() => {
-    setSelectedVariant(initialVariant);
-    setSelectedImage(currentProduct?.main_image_url || "");
-    setQuantity(1);
-  }, [currentProduct, initialVariant]);
+    if (availableColors && availableColors.length > 0) {
+      const matchedColor = initialColorParam
+        ? availableColors.find(
+            (c) => c.color?.toLowerCase() === initialColorParam.toLowerCase()
+          )
+        : null;
+
+      const targetColor = matchedColor ? matchedColor.color : availableColors[0].color;
+      const targetVariant =
+        activeVariants.find(
+          (v) =>
+            v.color?.toLowerCase() === targetColor.toLowerCase() &&
+            Number(v.stock) > 0
+        ) ||
+        activeVariants.find(
+          (v) => v.color?.toLowerCase() === targetColor.toLowerCase()
+        ) ||
+        initialVariant;
+
+      if (targetVariant) {
+        setSelectedVariant(targetVariant);
+      }
+
+      let colorImg = null;
+      if (Array.isArray(currentProduct?.product_color_images)) {
+        colorImg =
+          currentProduct.product_color_images.find(
+            (ci) =>
+              ci.color?.toLowerCase() === targetColor.toLowerCase() &&
+              ci.is_cover
+          )?.image_url ||
+          currentProduct.product_color_images.find(
+            (ci) => ci.color?.toLowerCase() === targetColor.toLowerCase()
+          )?.image_url;
+      }
+      setSelectedImage(colorImg || currentProduct?.main_image_url || "");
+      setQuantity(1);
+    }
+  }, [availableColors, initialColorParam, activeVariants, currentProduct, initialVariant]);
 
   const galleryImages = useMemo(() => {
     const list = [];
-    if (currentProduct?.main_image_url) {
+    const activeColorName = selectedVariant?.color?.toLowerCase();
+
+    // 1. Imágenes correspondientes al color seleccionado
+    if (activeColorName && Array.isArray(currentProduct?.product_color_images)) {
+      currentProduct.product_color_images
+        .filter((ci) => ci.color?.toLowerCase() === activeColorName && ci.image_url)
+        .forEach((ci) => {
+          if (!list.includes(ci.image_url)) {
+            list.push(ci.image_url);
+          }
+        });
+    }
+
+    // 2. Imagen principal del producto
+    if (currentProduct?.main_image_url && !list.includes(currentProduct.main_image_url)) {
       list.push(currentProduct.main_image_url);
     }
+
+    // 3. URLs de galería adicionales
     if (Array.isArray(currentProduct?.gallery_urls)) {
       currentProduct.gallery_urls.forEach((url) => {
         if (!list.includes(url)) {
@@ -147,6 +227,8 @@ export default function ProductDetailView({
         }
       });
     }
+
+    // 4. Resto de imágenes de color
     if (Array.isArray(currentProduct?.product_color_images)) {
       currentProduct.product_color_images.forEach((ci) => {
         if (ci.image_url && !list.includes(ci.image_url)) {
@@ -154,8 +236,9 @@ export default function ProductDetailView({
         }
       });
     }
+
     return list;
-  }, [currentProduct]);
+  }, [currentProduct, selectedVariant?.color]);
 
   // Cantidad ya presente en el carrito para esta variante
   const inCartQuantity = useMemo(() => {

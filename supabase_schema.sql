@@ -655,6 +655,7 @@ CREATE TABLE IF NOT EXISTS "public"."products" (
     "has_size_guide" boolean DEFAULT true NOT NULL,
     "is_featured" boolean DEFAULT false NOT NULL,
     "is_active" boolean DEFAULT true NOT NULL,
+    "is_on_sale" boolean DEFAULT false NOT NULL,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "target_gender" character varying(10) DEFAULT 'unisex'::character varying NOT NULL,

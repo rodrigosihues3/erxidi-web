@@ -6,7 +6,7 @@ export async function listProducts({ search = "", activeOnly = false } = {}) {
     .select(`
       id, category_id, material_id, brand_id, name, slug, description, price,
       main_image_url, gallery_urls, has_size_guide, is_featured,
-      is_active, target_gender, created_at, updated_at,
+      is_active, is_on_sale, target_gender, created_at, updated_at,
       categories:category_id (id, name, parent_id),
       materials:material_id (id, name),
       brands:brand_id (id, name),
@@ -32,7 +32,7 @@ export async function getProduct(id) {
     .select(`
       id, category_id, material_id, brand_id, name, slug, description, price,
       main_image_url, gallery_urls, has_size_guide, is_featured,
-      is_active, target_gender, created_at, updated_at,
+      is_active, is_on_sale, target_gender, created_at, updated_at,
       product_variants (id, size_id, color, color_hex, stock, sku, image_url, is_active,
         sizes:size_id (id, name, display_order)),
       product_color_images (id, product_id, color, image_url, is_cover, display_order),
@@ -105,9 +105,13 @@ export async function uploadProductImage(file) {
 
 export async function createProduct(payload) {
   const { variants = [], color_images = [], ...product } = payload;
+  const productData = {
+    ...product,
+    is_on_sale: Boolean(product.is_on_sale),
+  };
   const { data, error } = await supabase
     .from("products")
-    .insert(product)
+    .insert(productData)
     .select("id")
     .single();
 
@@ -176,6 +180,7 @@ export async function updateProduct(id, payload) {
     .from("products")
     .update({
       ...product,
+      is_on_sale: Boolean(product.is_on_sale),
       updated_at: now,
     })
     .eq("id", id);

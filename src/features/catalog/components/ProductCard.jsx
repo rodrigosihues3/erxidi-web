@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { ShoppingBag } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
 
-export default function ProductCard({ product, onSelect, onQuickAdd }) {
+export default function ProductCard({ product, onSelect }) {
+  const navigate = useNavigate();
   const [activeColor, setActiveColor] = useState(null);
 
   // Muestras de color únicas
@@ -34,21 +36,37 @@ export default function ProductCard({ product, onSelect, onQuickAdd }) {
     );
   }, [product]);
 
+  const handleAction = (e) => {
+    e.stopPropagation();
+    if (onSelect) {
+      onSelect(product, activeColor);
+    } else {
+      const query = activeColor ? `?color=${encodeURIComponent(activeColor)}` : "";
+      navigate(`/producto/${product.slug}${query}`);
+    }
+  };
+
   return (
     <div
-      onClick={() => onSelect?.(product)}
+      onClick={() => {
+        if (onSelect) {
+          onSelect(product, activeColor);
+        } else {
+          const query = activeColor ? `?color=${encodeURIComponent(activeColor)}` : "";
+          navigate(`/producto/${product.slug}${query}`);
+        }
+      }}
       className="group bg-surface-card border border-border rounded-card overflow-hidden hover:border-brand-primary transition-all flex flex-col justify-between cursor-pointer select-none"
     >
       <div>
-        {/* Contenedor Cuadrado 1:1 para evitar franjas verticales excesivas */}
-        <div className="relative aspect-square bg-surface-subtle overflow-hidden flex items-center justify-center p-2">
+        {/* Contenedor de Imagen a Ancho Completo */}
+        <div className="relative aspect-square w-full bg-surface-subtle overflow-hidden">
           <img
             src={currentImageUrl}
             alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 ease-out"
             loading="lazy"
           />
-
           {!hasGlobalStock && (
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-2">
               <Badge className="text-[10px] sm:text-xs font-bold uppercase tracking-wider" variant="danger">
@@ -67,15 +85,15 @@ export default function ProductCard({ product, onSelect, onQuickAdd }) {
                 <button
                   key={c.color}
                   type="button"
-                  onMouseEnter={() => setActiveColor(c.color)}
                   onClick={(e) => {
                     e.stopPropagation();
                     setActiveColor(c.color);
                   }}
                   title={c.color}
-                  className={`w-3.5 h-3.5 rounded-full border border-black/20 transition-transform ${activeColor?.toLowerCase() === c.color?.toLowerCase()
-                    ? "scale-125 ring-1 ring-brand-primary"
-                    : "hover:scale-110"
+                  className={`w-3.5 h-3.5 rounded-full border border-black/20 hover:scale-110 transition-transform duration-200 ${
+                    activeColor?.toLowerCase() === c.color?.toLowerCase()
+                      ? "scale-125 ring-1 ring-brand-primary"
+                      : ""
                     }`}
                   style={{ backgroundColor: c.color_hex || "#000000" }}
                 />
@@ -102,7 +120,7 @@ export default function ProductCard({ product, onSelect, onQuickAdd }) {
         </div>
       </div>
 
-      {/* Pie: Precio Destacado y Botón Agregar */}
+      {/* Pie: Precio Destacado y Botón Elegir Talla */}
       <div className="px-3 sm:px-3.5 pb-3 sm:pb-3.5 pt-1.5 flex items-center justify-between gap-2 border-t border-border/50">
         <span className="font-mono font-extrabold text-sm sm:text-lg text-brand-primary">
           S/ {Number(product.price).toFixed(2)}
@@ -115,13 +133,13 @@ export default function ProductCard({ product, onSelect, onQuickAdd }) {
           disabled={!hasGlobalStock}
           onClick={(e) => {
             e.stopPropagation();
-            onQuickAdd?.(product, activeColor);
+            onSelect?.(product, activeColor);
           }}
           className="text-xs px-2.5 sm:px-3.5 h-8 gap-1 shrink-0"
-          title={hasGlobalStock ? "Agregar prenda" : "Producto agotado"}
+          title={hasGlobalStock ? "Elegir talla" : "Producto agotado"}
         >
           <ShoppingBag className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Agregar</span>
+          <span className="hidden sm:inline">Elegir talla</span>
         </Button>
       </div>
     </div>

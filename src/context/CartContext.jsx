@@ -15,18 +15,34 @@ export function CartProvider({ children }) {
         localStorage.getItem(STORAGE_KEY) ||
         localStorage.getItem("erxidi_cart_v1");
       const parsed = local ? JSON.parse(local) : [];
-      return parsed.map((item) => {
-        const rawStock = item.availableStock ?? item.stock;
+
+      // Garantizar deduplicación estricta por variantId en la hidratación
+      const deduplicatedMap = new Map();
+      parsed.forEach((raw) => {
+        const vId = Number(raw.variantId || raw.variant_id);
+        if (!vId) return;
+        const rawStock = raw.availableStock ?? raw.stock;
         const numStock = rawStock !== undefined ? Number(rawStock) : 10;
-        return {
-          ...item,
-          productId: item.productId || item.product_id || null,
-          availableStock: numStock,
-          stock: numStock,
-          isOutOfStock: item.isOutOfStock ?? (numStock <= 0),
-          isShortStock: numStock < (Number(item.quantity) || 1),
-        };
+        const qty = Number(raw.quantity) || 1;
+
+        if (deduplicatedMap.has(vId)) {
+          const prev = deduplicatedMap.get(vId);
+          prev.quantity += qty;
+        } else {
+          deduplicatedMap.set(vId, {
+            ...raw,
+            variantId: vId,
+            productId: raw.productId || raw.product_id || null,
+            availableStock: numStock,
+            stock: numStock,
+            isOutOfStock: raw.isOutOfStock ?? (numStock <= 0),
+            isShortStock: numStock < qty,
+            quantity: qty,
+          });
+        }
       });
+
+      return Array.from(deduplicatedMap.values());
     } catch {
       return [];
     }
@@ -116,14 +132,20 @@ export function CartProvider({ children }) {
               .from("cart_items")
               .upsert(payload, { onConflict: "user_id,variant_id" });
           } else if (cloudItems && cloudItems.length > 0) {
-            // Mapear ítems de Supabase al formato estándar del CartContext
-            const mapped = cloudItems
-              .map((ci) => {
-                const stockVal = Number(ci.product_variants?.stock ?? 10);
-                const qtyVal = Number(ci.quantity) || 1;
-                return {
+            // Consolidar por variantId para evitar duplicados provenientes de la nube
+            const cloudMap = new Map();
+            cloudItems.forEach((ci) => {
+              const vId = Number(ci.variant_id);
+              if (!vId) return;
+              const stockVal = Number(ci.product_variants?.stock ?? 10);
+              const qtyVal = Number(ci.quantity) || 1;
+
+              if (cloudMap.has(vId)) {
+                cloudMap.get(vId).quantity += qtyVal;
+              } else {
+                cloudMap.set(vId, {
                   id: ci.id,
-                  variantId: Number(ci.variant_id),
+                  variantId: vId,
                   productId:
                     ci.product_variants?.product_id ||
                     ci.product_variants?.products?.id ||
@@ -138,10 +160,10 @@ export function CartProvider({ children }) {
                   availableStock: stockVal,
                   isOutOfStock: stockVal <= 0,
                   isShortStock: stockVal < qtyVal,
-                };
-              })
-              .filter(Boolean);
-            setItems(mapped);
+                });
+              }
+            });
+            setItems(Array.from(cloudMap.values()));
           }
           setIsInitialized(true);
         }
@@ -177,10 +199,17 @@ export function CartProvider({ children }) {
         // Limpiar y sincronizar estado actual en cart_items
         await supabase.from("cart_items").delete().eq("user_id", user.id);
         if (items.length > 0) {
-          const payload = items.map((it) => ({
+          const uniquePayload = new Map();
+          items.forEach((it) => {
+            const vId = Number(it.variantId);
+            const q = Number(it.quantity) || 1;
+            uniquePayload.set(vId, (uniquePayload.get(vId) || 0) + q);
+          });
+
+          const payload = Array.from(uniquePayload.entries()).map(([vId, q]) => ({
             user_id: user.id,
-            variant_id: Number(it.variantId),
-            quantity: Number(it.quantity) || 1,
+            variant_id: vId,
+            quantity: q,
             updated_at: new Date().toISOString(),
           }));
           await supabase.from("cart_items").insert(payload);
@@ -210,14 +239,14 @@ export function CartProvider({ children }) {
   };
 
   const addItem = (item, quantity = 1) => {
-    const rawStock = item?.availableStock ?? item?.stock;
-    const maxStock = Math.max(0, Number(rawStock) || 0);
-    const requestedQty = Number(quantity !== 1 ? quantity : item?.quantity || 1);
-    const cleanQty = Math.max(1, requestedQty || 1);
-
     if (!item) {
       return { success: false, reason: "invalid_item" };
     }
+
+    const rawStock = item.availableStock ?? item.stock;
+    const maxStock = rawStock !== undefined ? Math.max(0, Number(rawStock) || 0) : undefined;
+    const requestedQty = Number(quantity !== 1 ? quantity : item.quantity || 1);
+    const cleanQty = Math.max(1, requestedQty || 1);
 
     const targetVariantId = Number(item.variantId);
     const targetProductId =
@@ -226,43 +255,60 @@ export function CartProvider({ children }) {
       item.product?.id ||
       null;
 
-    const existingItem = items.find(
-      (i) => Number(i.variantId) === targetVariantId
-    );
-    const currentQty = existingItem ? Number(existingItem.quantity) || 0 : 0;
-    const requestedTotal = currentQty + cleanQty;
-    const effectiveStock = maxStock > 0 ? maxStock : 999;
-    const isLimited = requestedTotal > effectiveStock;
-    const effectiveAdded = Math.max(
-      0,
-      Math.min(cleanQty, effectiveStock - currentQty)
-    );
-    const finalQuantity = Math.min(requestedTotal, effectiveStock);
+    let toastAddedQty = cleanQty;
+    let toastIsLimited = false;
 
     setItems((prevItems) => {
+      // 1. Unicidad por variantId
       const existingIndex = prevItems.findIndex(
-        (i) => Number(i.variantId) === targetVariantId
+        (it) => Number(it.variantId) === targetVariantId
       );
 
+      // 2. Regla de Acumulación
       if (existingIndex > -1) {
         const prevExisting = prevItems[existingIndex];
-        const updated = [...prevItems];
+        const existingQty = Number(prevExisting.quantity) || 0;
         const currentStock =
-          maxStock || prevExisting.availableStock || prevExisting.stock || 10;
+          maxStock !== undefined
+            ? maxStock
+            : Number(prevExisting.availableStock ?? prevExisting.stock ?? 999);
+
+        const requestedTotal = existingQty + cleanQty;
+        const finalQuantity = currentStock > 0
+          ? Math.min(requestedTotal, currentStock)
+          : requestedTotal;
+
+        toastAddedQty = Math.max(0, finalQuantity - existingQty);
+        toastIsLimited = requestedTotal > currentStock && currentStock > 0;
+
+        const effectiveStock = maxStock !== undefined
+          ? maxStock
+          : prevExisting.availableStock || prevExisting.stock || 10;
+
+        const updated = [...prevItems];
         updated[existingIndex] = {
           ...prevExisting,
           productId: targetProductId || prevExisting.productId,
           price: Number(item.price ?? prevExisting.price),
-          stock: currentStock,
-          availableStock: currentStock,
-          isOutOfStock: currentStock <= 0,
-          isShortStock: currentStock < finalQuantity,
+          stock: effectiveStock,
+          availableStock: effectiveStock,
+          isOutOfStock: effectiveStock <= 0,
+          isShortStock: effectiveStock < finalQuantity,
           quantity: finalQuantity,
         };
         return updated;
       }
 
-      const initialStock = maxStock || 10;
+      // Si no existe (existingIndex === -1), agregar el nuevo objeto
+      const effectiveStock = maxStock !== undefined ? maxStock : 999;
+      const finalQuantity = effectiveStock > 0
+        ? Math.min(cleanQty, effectiveStock)
+        : cleanQty;
+
+      toastAddedQty = finalQuantity;
+      toastIsLimited = cleanQty > effectiveStock && effectiveStock > 0;
+
+      const initialStock = maxStock !== undefined ? maxStock : 10;
       return [
         ...prevItems,
         {
@@ -279,11 +325,11 @@ export function CartProvider({ children }) {
       ];
     });
 
-    if (effectiveAdded > 0) {
-      showAddToast(item, effectiveAdded, isLimited);
+    if (toastAddedQty > 0) {
+      showAddToast(item, toastAddedQty, toastIsLimited);
     }
 
-    return isLimited ? { success: true, limited: true } : { success: true };
+    return toastIsLimited ? { success: true, limited: true } : { success: true };
   };
 
   const updateQuantity = (variantId, newQuantity) => {

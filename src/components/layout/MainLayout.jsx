@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useCart } from "../../context/CartContext";
@@ -28,7 +28,7 @@ export default function MainLayout() {
         />
       )}
 
-      <main className="flex-1 flex flex-col">
+      <main className="flex-1 flex flex-col w-full">
         <Outlet />
       </main>
 

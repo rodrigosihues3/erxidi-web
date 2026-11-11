@@ -1,7 +1,7 @@
 import { supabase } from "../supabase";
 
 const PRODUCT_RELATIONAL_FIELDS = [
-  "id, name, slug, description, price, main_image_url, gallery_urls, target_gender, is_featured, is_active, created_at, brand_id, category_id, material_id,",
+  "id, name, slug, description, price, main_image_url, gallery_urls, target_gender, is_featured, is_active, is_on_sale, created_at, brand_id, category_id, material_id,",
   "categories!inner(id, name, slug, parent_id, is_active),",
   "materials(id, name, is_active),",
   "brands(id, name, slug, is_active),",

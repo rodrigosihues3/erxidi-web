@@ -31,6 +31,7 @@ export const mockProducts = [
     has_size_guide: true,
     is_featured: true,
     is_active: true,
+    is_on_sale: false,
     categories: { id: 1, name: "Bóxers", slug: "boxers" },
     materials: { id: 1, name: "100% Algodón Pima" },
     size_guides: [
@@ -118,6 +119,7 @@ export const mockProducts = [
     has_size_guide: true,
     is_featured: true,
     is_active: true,
+    is_on_sale: true,
     categories: { id: 3, name: "Calzones / Trusas", slug: "calzones" },
     materials: { id: 2, name: "Modal Ultra-Suave" },
     size_guides: [
@@ -205,6 +207,7 @@ export const mockProducts = [
     has_size_guide: true,
     is_featured: true,
     is_active: true,
+    is_on_sale: false,
     categories: { id: 4, name: "Brasiers / Tops", slug: "brasiers" },
     materials: { id: 3, name: "Bambú Antibacteriano" },
     size_guides: [
@@ -303,6 +306,7 @@ export const mockProducts = [
     has_size_guide: true,
     is_featured: false,
     is_active: true,
+    is_on_sale: true,
     categories: { id: 5, name: "Medias", slug: "medias" },
     materials: { id: 3, name: "Bambú Antibacteriano" },
     size_guides: [
@@ -377,6 +381,7 @@ export const mockProducts = [
     has_size_guide: true,
     is_featured: false,
     is_active: true,
+    is_on_sale: false,
     categories: { id: 1, name: "Bóxers", slug: "boxers" },
     materials: { id: 1, name: "100% Algodón Pima" },
     size_guides: [
