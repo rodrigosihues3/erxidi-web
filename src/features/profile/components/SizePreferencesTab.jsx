@@ -19,6 +19,7 @@ import {
 import { useAuth } from "../../../context/AuthContext";
 import { supabase } from "../../../services/supabase";
 import { calcularCalzado } from "../../catalog/services/sizeMatcherService";
+import { getBottomSize, getTopSize, getSockSize, getQuickSize } from "../../catalog/utils/sizeRanges";
 
 const STORAGE_KEY = "erxidi_size_preferences";
 const LEGACY_STORAGE_KEY = "erxidi_user_profile_measurements";
@@ -28,6 +29,8 @@ const FIT_OPTIONS = [
   { id: "regular", label: "Regular", desc: "Estándar" },
   { id: "holgado", label: "Holgado", desc: "Suelto" },
 ];
+const FIT_TO_DB = { ajustado: "tight", regular: "regular", holgado: "loose" };
+const FIT_FROM_DB = { tight: "ajustado", ajustado: "ajustado", regular: "regular", loose: "holgado", holgado: "holgado" };
 
 function clampNumber(val, min, max) {
   const num = Number(val);
@@ -49,14 +52,13 @@ function ProfileRangeInput({
   onChange,
   min,
   max,
-  step = 0.5,
+  step = 1,
   unit = "cm",
 }) {
   const [draft, setDraft] = useState(value != null ? String(value) : "");
+  const [isEditing, setIsEditing] = useState(false);
 
-  useEffect(() => {
-    setDraft(value != null ? String(value) : "");
-  }, [value]);
+  useEffect(() => { if (!isEditing) setDraft(value != null ? String(value) : ""); }, [value, isEditing]);
 
   const isSelected = isWithinRange(value, min, max);
   const numericValid = isSelected ? Number(Number(value).toFixed(1)) : null;
@@ -88,16 +90,16 @@ function ProfileRangeInput({
       onChange(null);
       return;
     }
-    if (!/^\d*\.?\d*$/.test(raw)) return;
+    if (!/^\d{0,3}(\.\d?)?$/.test(raw)) return;
     setDraft(raw);
-
     const parsed = parseFloat(raw);
-    if (!isNaN(parsed) && parsed >= min && parsed <= max) {
+    if (!isNaN(parsed) && parsed >= min && parsed <= max && !raw.endsWith(".")) {
       onChange(Number(parsed.toFixed(1)));
     }
   };
 
   const handleBlur = () => {
+    setIsEditing(false);
     if (draft === "" || isNaN(Number(draft))) {
       setDraft("");
       onChange(null);
@@ -183,7 +185,9 @@ function ProfileRangeInput({
           inputMode="decimal"
           value={draft}
           onChange={handleTextChange}
+          onFocus={() => setIsEditing(true)}
           onBlur={handleBlur}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
           placeholder="—"
           className="min-w-0 w-full flex-1 h-full text-center font-mono font-bold text-xs text-brand-primary bg-transparent outline-none px-1 placeholder:text-brand-muted placeholder:font-normal"
         />
@@ -212,7 +216,7 @@ export default function SizePreferencesTab() {
       weight: isWithinRange(profile?.weight_kg, 30, 160)
         ? Number(profile.weight_kg)
         : null,
-      fitPreference: profile?.fit_preference || "regular",
+      fitPreference: FIT_FROM_DB[String(profile?.fit_preference || "regular").toLowerCase()] || "regular",
       waist: isWithinRange(bm.waist, 45, 120) ? Number(bm.waist) : null,
       hip: isWithinRange(bm.hip, 50, 130) ? Number(bm.hip) : null,
       bust: isWithinRange(bm.bust, 60, 125) ? Number(bm.bust) : null,
@@ -276,56 +280,23 @@ export default function SizePreferencesTab() {
     if (isWithinRange(height, 120, 220) && isWithinRange(weight, 30, 160)) {
       const hm = Number(height) / 100;
       const imc = Number(weight) / (hm * hm);
-      const list = ["S", "M", "L", "XL"];
-      let idx = imc < 20 ? 0 : imc < 25 ? 1 : imc < 30 ? 2 : 3;
-      if (fitPreference === "ajustado" && idx > 0) idx -= 1;
-      if (fitPreference === "holgado" && idx < 3) idx += 1;
-      quickGeneral = list[idx];
+      const fitLabel = { ajustado: "Ajustado", regular: "Regular", holgado: "Holgado" }[fitPreference] || "Regular";
+      quickGeneral = getQuickSize(imc, fitLabel);
     }
-
-    let bottom = null;
     const validW = isWithinRange(waist, 45, 120) ? Number(waist) : null;
     const validH = isWithinRange(hip, 50, 130) ? Number(hip) : null;
-    if (validW != null || validH != null) {
-      const w = validW != null ? validW : validH - 16;
-      const h = validH != null ? validH : validW + 16;
-      if (w <= 76 && h <= 95) bottom = "S";
-      else if (w <= 84 && h <= 101) bottom = "M";
-      else if (w <= 92 && h <= 108) bottom = "L";
-      else bottom = "XL";
-    }
-
-    let top = null;
+    const bottom = getBottomSize(validW, validH);
     const validB = isWithinRange(bust, 60, 125) ? Number(bust) : null;
-    const validUB = isWithinRange(underBust, 55, 110)
-      ? Number(underBust)
-      : null;
-    if (validB != null || validUB != null) {
-      const b = validB != null ? validB : validUB + 15;
-      if (b <= 86) top = "S";
-      else if (b <= 92) top = "M";
-      else if (b <= 98) top = "L";
-      else top = "XL";
-    }
-
+    const validUB = isWithinRange(underBust, 55, 110) ? Number(underBust) : null;
+    const top = getTopSize(validB, validUB);
     let sock = null;
     let shoeRange = "—";
     if (isWithinRange(footLength, 14, 31)) {
       const f = Number(footLength);
       shoeRange = calcularCalzado(f);
-      if (f < 24.5) sock = "S (" + shoeRange + ")";
-      else if (f <= 26.5) sock = "M (" + shoeRange + ")";
-      else if (f <= 29.5) sock = "L (" + shoeRange + ")";
-      else sock = "XL (" + shoeRange + ")";
+      sock = getSockSize(f) + " (" + shoeRange + ")";
     }
-
-    return {
-      quickGeneral,
-      bottom: bottom || quickGeneral,
-      top: top || quickGeneral,
-      sock,
-      shoeRange,
-    };
+    return { quickGeneral, bottom: bottom || quickGeneral, top: top || quickGeneral, sock, shoeRange };
   }, [height, weight, fitPreference, waist, hip, bust, underBust, footLength]);
 
   const handleClearProfileMeasurements = async () => {
@@ -383,7 +354,7 @@ export default function SizePreferencesTab() {
     const payload = {
       height_cm: isWithinRange(height, 120, 220) ? Number(height) : null,
       weight_kg: isWithinRange(weight, 30, 160) ? Number(weight) : null,
-      fit_preference: fitPreference,
+      fit_preference: FIT_TO_DB[fitPreference] || "regular",
       body_measurements: {
         waist: isWithinRange(waist, 45, 120) ? Number(waist) : null,
         hip: isWithinRange(hip, 50, 130) ? Number(hip) : null,
@@ -500,7 +471,7 @@ export default function SizePreferencesTab() {
                       onChange={setHeight}
                       min={120}
                       max={220}
-                      step={0.5}
+                      step={1}
                       unit="cm"
                     />
                     <ProfileRangeInput
@@ -510,7 +481,7 @@ export default function SizePreferencesTab() {
                       onChange={setWeight}
                       min={30}
                       max={160}
-                      step={0.5}
+                      step={1}
                       unit="kg"
                     />
                   </div>
@@ -561,7 +532,7 @@ export default function SizePreferencesTab() {
                       onChange={setWaist}
                       min={45}
                       max={120}
-                      step={0.5}
+                      step={1}
                     />
                     <ProfileRangeInput
                       id="profile-hip"
@@ -571,7 +542,7 @@ export default function SizePreferencesTab() {
                       onChange={setHip}
                       min={50}
                       max={130}
-                      step={0.5}
+                      step={1}
                     />
                   </div>
                 </div>
@@ -590,7 +561,7 @@ export default function SizePreferencesTab() {
                       onChange={setUnderBust}
                       min={55}
                       max={110}
-                      step={0.5}
+                      step={1}
                     />
                     <ProfileRangeInput
                       id="profile-bust"
@@ -600,7 +571,7 @@ export default function SizePreferencesTab() {
                       onChange={setBust}
                       min={60}
                       max={125}
-                      step={0.5}
+                      step={1}
                     />
                   </div>
                 </div>
@@ -618,7 +589,7 @@ export default function SizePreferencesTab() {
                     onChange={setFootLength}
                     min={14.0}
                     max={31.0}
-                    step={0.5}
+                    step={1}
                   />
                 </div>
 

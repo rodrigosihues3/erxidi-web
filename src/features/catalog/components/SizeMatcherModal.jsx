@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   X,
   AlertTriangle,
-  Zap,
   Ruler,
   Save,
   RotateCcw,
@@ -98,18 +97,16 @@ function RangeMeasureInput({
     onChange(next);
   };
 
-  const handleDecrement = () => {
-    const base = numericValid != null ? numericValid : min;
-    const next = clampNumber(base - step, min, max);
-    setDraft(String(next));
-    onChange(next);
-  };
-
-  const handleIncrement = () => {
-    const base = numericValid != null ? numericValid : min;
-    const next = clampNumber(base + step, min, max);
-    setDraft(String(next));
-    onChange(next);
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") { e.currentTarget.blur(); return; }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = !isSelected
+        ? min
+        : clampNumber(Number(numericValid) + (e.shiftKey ? 0.1 : step) * (e.key === "ArrowUp" ? 1 : -1), min, max);
+      setDraft(String(next));
+      onChange(next);
+    }
   };
 
   const handleTextChange = (e) => {
@@ -140,14 +137,7 @@ function RangeMeasureInput({
   };
 
   return (
-    <div
-      className={
-        "p-3 rounded-card border transition-colors space-y-2 " +
-        (isSelected
-          ? "bg-surface-card border-border"
-          : "bg-surface-subtle/60 border-border/80")
-      }
-    >
+    <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <label
@@ -157,24 +147,29 @@ function RangeMeasureInput({
             {label}
           </label>
           {hint && (
-            <span className="block text-xs text-brand-muted truncate">
+            <span className="block text-xs text-brand-secondary truncate">
               {hint}
             </span>
           )}
         </div>
-        <span
-          className={
-            "px-2 py-0.5 rounded font-mono text-xs font-bold shrink-0 border " +
-            (isSelected
-              ? "bg-brand-primary text-white border-brand-primary"
-              : "bg-surface-card border-border text-brand-muted")
-          }
-        >
-          {numericValid != null ? numericValid + " " + unit : "—"}
-        </span>
+        <div className="flex h-8 items-center gap-1 rounded-button border border-border bg-surface-subtle px-2 transition-colors hover:border-border-strong focus-within:border-brand-primary focus-within:ring-1 focus-within:ring-brand-primary">
+          <input
+            id={id}
+            type="text"
+            inputMode="decimal"
+            value={draft}
+            onChange={handleTextChange}
+            onFocus={(e) => { setIsEditing(true); e.target.select(); }}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            placeholder="—"
+            className="w-14 bg-transparent text-right font-mono text-sm font-semibold text-brand-primary outline-none placeholder:font-normal placeholder:text-brand-muted"
+          />
+          <span className="text-xs text-brand-secondary" aria-hidden="true">{unit}</span>
+        </div>
       </div>
 
-      {/* Slider: gris y en el extremo izquierdo si está en blanco; azul activo cuando tiene valor */}
+      {/* Slider: tenue y en el extremo izquierdo si está en blanco */}
       <div className="space-y-1 pt-0.5">
         <input
           type="range"
@@ -186,11 +181,11 @@ function RangeMeasureInput({
           className={
             "w-full cursor-pointer h-1.5 rounded-lg transition-opacity " +
             (isSelected
-              ? "accent-brand-primary bg-slate-200 opacity-100"
-              : "accent-slate-400 bg-slate-200 opacity-40 hover:opacity-75")
+              ? "accent-brand-primary bg-border opacity-100"
+              : "accent-brand-muted bg-border opacity-40 hover:opacity-75")
           }
         />
-        <div className="flex justify-between text-xs font-mono text-brand-muted">
+        <div className="flex justify-between text-xs font-mono text-brand-secondary">
           <span>
             {min} {unit}
           </span>
@@ -198,42 +193,6 @@ function RangeMeasureInput({
             {max} {unit}
           </span>
         </div>
-      </div>
-
-      {/* Stepper con min-w-0 para que el botón [+] jamás se esconda */}
-      <div className="flex items-center border border-border rounded-button bg-surface-card overflow-hidden h-8 w-full focus-within:border-brand-primary focus-within:ring-1 focus-within:ring-brand-primary">
-        <button
-          type="button"
-          onClick={handleDecrement}
-          disabled={isSelected && numericValid <= min}
-          className="w-8 h-full flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-slate-100 disabled:opacity-30 font-bold border-r border-border shrink-0 select-none"
-          aria-label={"Disminuir " + label}
-        >
-          -
-        </button>
-        <input
-          id={id}
-          type="text"
-          inputMode="decimal"
-          value={draft}
-          onChange={handleTextChange}
-          onFocus={() => setIsEditing(true)}
-          onBlur={handleBlur}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-          }}
-          placeholder="—"
-          className="min-w-0 w-full flex-1 h-full text-center font-mono font-bold text-xs text-brand-primary bg-transparent outline-none px-1 placeholder:text-brand-muted placeholder:font-normal"
-        />
-        <button
-          type="button"
-          onClick={handleIncrement}
-          disabled={isSelected && numericValid >= max}
-          className="w-8 h-full flex items-center justify-center text-brand-secondary hover:text-brand-primary hover:bg-slate-100 disabled:opacity-30 font-bold border-l border-border shrink-0 select-none"
-          aria-label={"Aumentar " + label}
-        >
-          +
-        </button>
       </div>
     </div>
   );
@@ -257,7 +216,7 @@ export default function SizeMatcherModal({
   const [weight, setWeight] = useState(
     isWithinRange(saved.weight, 30, 160) ? Number(saved.weight) : null
   );
-  const [fit, setFit] = useState(saved.fit ?? "Regular");
+  const [fit, setFit] = useState(saved.fit ? mapFitToLabel(saved.fit) : "Regular");
 
   const [waist, setWaist] = useState(
     isWithinRange(saved.waist, 45, 120) ? Number(saved.waist) : null
@@ -322,7 +281,7 @@ export default function SizeMatcherModal({
               ? Number(stored.weight)
               : null
           );
-          if (stored.fit) setFit(stored.fit);
+          if (stored.fit) setFit(mapFitToLabel(stored.fit));
           setWaist(
             isWithinRange(stored.waist, 45, 120) ? Number(stored.waist) : null
           );
@@ -432,45 +391,63 @@ export default function SizeMatcherModal({
     if (!isOpen) setShowMethod(false);
   }, [isOpen]);
 
+  const [pendingClear, setPendingClear] = useState({ quick: false, precise: false });
+  const [clearHintVisible, setClearHintVisible] = useState(false);
+  const clearHintTimer = useRef(null);
+  useEffect(() => {
+    if (!isOpen) { setPendingClear({ quick: false, precise: false }); setClearHintVisible(false); }
+  }, [isOpen]);
+  useEffect(() => () => clearTimeout(clearHintTimer.current), []);
+
   if (!isOpen) return null;
 
-  const handleClearAllMeasurements = async () => {
-    setIsSaving(true);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
+  const hasValuesInView =
+    activeTab === "quick"
+      ? height != null || weight != null || fit !== "Regular"
+      : waist != null || hip != null || underbust != null || bust != null || footLength != null;
 
+  const handleResetCurrentView = () => {
+    setSaveError("");
+    if (activeTab === "quick") { setHeight(null); setWeight(null); setFit("Regular"); }
+    else { setWaist(null); setHip(null); setUnderbust(null); setBust(null); setFootLength(null); }
+    setPendingClear((p) => ({ ...p, [activeTab]: true }));
+    setClearHintVisible(true);
+    clearTimeout(clearHintTimer.current);
+    clearHintTimer.current = setTimeout(() => setClearHintVisible(false), 4500);
+  };
+
+  const handleSaveClear = async () => {
+    setSaveError("");
+    setIsSaving(true);
+    let done = false;
+    try {
       if (user) {
-        const { error } = await supabase
-          .from("profiles")
-          .update({
-            height_cm: null,
-            weight_kg: null,
-            fit_preference: "regular",
-            body_measurements: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", user.id);
+        const patch = activeTab === "quick"
+          ? { height_cm: null, weight_kg: null, fit_preference: "regular" }
+          : { body_measurements: null };
+        const { error } = await supabase.from("profiles").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", user.id);
         if (error) throw error;
         await refreshProfile();
       }
-
-      setHeight(null);
-      setWeight(null);
-      setWaist(null);
-      setHip(null);
-      setUnderbust(null);
-      setBust(null);
-      setFootLength(null);
-
-      onSizeSelected?.(null, null);
-      onClose?.();
+      // Copia local (la pestaña de preferencias guarda ahí también, con sesión iniciada): limpiar ambas claves.
+      const localPatch = activeTab === "quick"
+        ? { height: null, weight: null, fit: "Regular" }
+        : { waist: null, hip: null, under_bust: null, underbust: null, bust: null, foot_length: null, footLength: null };
+      [STORAGE_KEY, LEGACY_STORAGE_KEY].forEach((key) => {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return;
+          localStorage.setItem(key, JSON.stringify({ ...JSON.parse(raw), ...localPatch, updatedAt: new Date().toISOString() }));
+        } catch { /* datos locales corruptos: ignorar */ }
+      });
+      done = true;
     } catch (err) {
-      console.error("Error al limpiar medidas:", err);
-      setSaveError("No se pudo limpiar tu perfil. Intenta nuevamente.");
+      console.error("Error al borrar medidas guardadas:", err);
+      setSaveError("No se pudieron borrar tus medidas. Intenta nuevamente.");
     } finally {
       setIsSaving(false);
     }
+    if (done) { onSizeSelected?.(null, null); onClose?.(); }
   };
 
   const handleApply = async () => {
@@ -580,8 +557,9 @@ export default function SizeMatcherModal({
     }
   };
 
+  const canClearSave = !hasValuesInView && pendingClear[activeTab];
   const canSave =
-    activeTab === "quick" ? hasQuickValues : hasPreciseValues;
+    (activeTab === "quick" ? hasQuickValues : hasPreciseValues) || canClearSave;
 
   return (
     <div
@@ -597,15 +575,17 @@ export default function SizeMatcherModal({
         className="relative z-10 w-full max-w-xl bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden max-h-[92vh] flex flex-col"
       >
         {/* Cabecera */}
-        <div className="px-5 py-3.5 bg-surface-card border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="px-5 py-3.5 bg-surface-card border-b border-border flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Ruler className="w-4 h-4 text-accent" />
             <h2 className="text-base font-bold text-brand-primary">
               Calculador de Tallas ERXIDI
             </h2>
-            <Badge variant="neutral" className="text-xs">
-              Ref. NTP-ISO 8559-2
-            </Badge>
+            <button type="button" onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod} aria-controls="size-method-panel" title="¿Cómo calculamos esto?"
+              className="inline-flex items-center gap-1 rounded-badge border border-border bg-surface-subtle px-2 py-0.5 text-xs font-semibold text-brand-secondary transition-colors hover:border-border-strong hover:text-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong">
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>NTP-ISO 8559-2</span>
+            </button>
           </div>
           <button
             type="button"
@@ -618,68 +598,20 @@ export default function SizeMatcherModal({
         </div>
 
         {/* Pestañas: Calculador Rápido y Calculador Preciso */}
-        <div className="px-5 py-2.5 bg-surface-subtle border-b border-border">
-          <div className="grid grid-cols-2 gap-2.5" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "quick"}
-              onClick={() => setActiveTab("quick")}
-              className={
-                "p-2.5 rounded-card border text-left transition-all flex items-center gap-2.5 " +
-                (activeTab === "quick"
-                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary shadow-subtle"
-                  : "border-border bg-surface-card text-brand-secondary hover:bg-surface-card")
-              }
-            >
-              <div className="w-7 h-7 rounded-button bg-surface-subtle border border-border flex items-center justify-center shrink-0">
-                <Zap className="w-3.5 h-3.5 text-accent" />
-              </div>
-              <div className="min-w-0">
-                <span className="block text-xs font-bold text-brand-primary truncate">
-                  Calculador Rápido
-                </span>
-                <span className="block text-xs text-brand-muted truncate">
-                  Por estatura y peso
-                </span>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "precise"}
-              onClick={() => setActiveTab("precise")}
-              className={
-                "p-2.5 rounded-card border text-left transition-all flex items-center gap-2.5 " +
-                (activeTab === "precise"
-                  ? "border-brand-primary bg-surface-card ring-1 ring-brand-primary shadow-subtle"
-                  : "border-border bg-surface-card text-brand-secondary hover:bg-surface-card")
-              }
-            >
-              <div className="w-7 h-7 rounded-button bg-surface-subtle border border-border flex items-center justify-center shrink-0">
-                <Ruler className="w-3.5 h-3.5 text-accent" />
-              </div>
-              <div className="min-w-0">
-                <span className="block text-xs font-bold text-brand-primary truncate">
-                  Calculador Preciso
-                </span>
-                <span className="block text-xs text-brand-muted truncate">
-                  Por contornos en cm
-                </span>
-              </div>
-            </button>
+        <div className="bg-surface-card px-5 pb-1 pt-3">
+          <div role="tablist" aria-label="Tipo de calculador" className="grid grid-cols-2 gap-1 rounded-card bg-surface-subtle p-1">
+            {[{ key: "quick", title: "Rápido", sub: "Por estatura y peso" }, { key: "precise", title: "Preciso", sub: "Por contornos en cm" }].map((tab) => (
+              <button key={tab.key} type="button" role="tab" aria-selected={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}
+                className={"rounded-button px-3 py-1.5 text-left transition-colors duration-200 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong " + (activeTab === tab.key ? "bg-surface-card shadow-subtle" : "hover:bg-surface-card/60")}>
+                <span className={"block text-sm font-semibold " + (activeTab === tab.key ? "text-brand-primary" : "text-brand-secondary")}>{tab.title}</span>
+                <span className="block text-xs text-brand-secondary">{tab.sub}</span>
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Cuerpo Scrollable */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
-          <div className="flex justify-end">
-            <button type="button" onClick={() => setShowMethod((v) => !v)} aria-expanded={showMethod} aria-controls="size-method-panel" className="inline-flex items-center gap-1.5 rounded-button px-2 py-1 text-xs font-semibold text-brand-secondary hover:bg-surface-subtle hover:text-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong">
-              <Info className="h-4 w-4" />
-              <span>¿Cómo calculamos esto?</span>
-            </button>
-          </div>
           {showMethod && (
             <section id="size-method-panel" className="space-y-3 rounded-card border border-border bg-surface-subtle p-4 text-xs text-brand-secondary">
               <h3 className="text-sm font-semibold text-brand-primary">Cómo calculamos tu talla</h3>
@@ -716,7 +648,7 @@ export default function SizeMatcherModal({
 
           {activeTab === "quick" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <RangeMeasureInput
                   id="quick-height"
                   label="Estatura"
@@ -770,43 +702,6 @@ export default function SizeMatcherModal({
                   })}
                 </div>
               </div>
-
-              {/* Tarjeta Azul de Recomendación */}
-              <div className="p-4 rounded-card bg-brand-primary text-white flex items-center justify-between">
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {quickResult.imc ? (
-                      <Badge variant="success" className="text-xs">
-                        IMC: {quickResult.imc}
-                      </Badge>
-                    ) : (
-                      <Badge variant="neutral" className="text-xs">
-                        Sin selección
-                      </Badge>
-                    )}
-                    <Badge variant="neutral" className="text-xs">
-                      Estimación orientativa
-                    </Badge>
-                  </div>
-                  <h3 className="text-sm font-bold pt-0.5">
-                    Tu Talla Recomendada ERXIDI
-                  </h3>
-                  <p className="text-xs text-brand-muted">
-                    {hasQuickValues
-                      ? "Calibrada para " +
-                      quickResult.safeHeight +
-                      " cm, " +
-                      quickResult.safeWeight +
-                      " kg y calce " +
-                      fit.toLowerCase() +
-                      "."
-                      : "Desliza o escribe tu estatura y peso para calcular."}
-                  </p>
-                </div>
-                <div className="w-14 h-14 rounded-card bg-surface-card text-brand-primary font-mono text-2xl font-black flex items-center justify-center shrink-0">
-                  {quickResult.size || "—"}
-                </div>
-              </div>
             </div>
           )}
 
@@ -831,7 +726,7 @@ export default function SizeMatcherModal({
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <RangeMeasureInput
                     id="precise-waist"
                     label="Contorno de Cintura"
@@ -874,7 +769,7 @@ export default function SizeMatcherModal({
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <RangeMeasureInput
                     id="precise-underbust"
                     label="Bajo Busto / Tórax"
@@ -921,47 +816,6 @@ export default function SizeMatcherModal({
                   step={1}
                 />
               </div>
-
-              {/* Tarjeta Azul de Resultado Preciso */}
-              <div className="p-4 rounded-card bg-brand-primary text-white space-y-2.5">
-                <div className="grid grid-cols-3 gap-2.5 text-center">
-                  <div className="p-2.5 bg-slate-800 rounded-card border border-slate-700">
-                    <span className="text-xs font-bold text-brand-muted block">
-                      Inferior
-                    </span>
-                    <span className="font-mono text-xl font-black text-white block my-0.5">
-                      {preciseResult.bottomSize || "—"}
-                    </span>
-                    <span className="text-xs text-slate-400 block">
-                      Bóxers / Trusas
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-800 rounded-card border border-slate-700">
-                    <span className="text-xs font-bold text-brand-muted block">
-                      Superior
-                    </span>
-                    <span className="font-mono text-xl font-black text-white block my-0.5">
-                      {preciseResult.topSize || "—"}
-                    </span>
-                    <span className="text-xs text-slate-400 block">
-                      Tops / Polos
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-800 rounded-card border border-slate-700">
-                    <span className="text-xs font-bold text-brand-muted block">
-                      Calcetería
-                    </span>
-                    <span className="font-mono text-xl font-black text-white block my-0.5">
-                      {preciseResult.sockSize || "—"}
-                    </span>
-                    <span className="text-xs text-slate-400 block">
-                      Calzado {preciseResult.shoeSizeRange}
-                    </span>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -969,6 +823,89 @@ export default function SizeMatcherModal({
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning-text" aria-hidden="true" />
             <span>Prendas íntimas: sin cambios ni devoluciones una vez abierto el empaque.</span>
           </p>
+        </div>
+
+        {/* Resultado fijo */}
+        <div className="border-t border-border bg-surface-card px-5 py-3">
+          {activeTab === "quick" && (
+            <div className="p-4 rounded-card bg-brand-primary text-white flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {quickResult.imc ? (
+                    <Badge variant="neutral" className="text-xs">
+                      IMC: {quickResult.imc}
+                    </Badge>
+                  ) : (
+                    <Badge variant="neutral" className="text-xs">
+                      Sin selección
+                    </Badge>
+                  )}
+                  <Badge variant="neutral" className="text-xs">
+                    Estimación orientativa
+                  </Badge>
+                </div>
+                <h3 className="text-sm font-bold pt-0.5">
+                  Tu Talla Recomendada ERXIDI
+                </h3>
+                <p className="text-xs text-brand-muted">
+                  {hasQuickValues
+                    ? "Calibrada para " +
+                    quickResult.safeHeight +
+                    " cm, " +
+                    quickResult.safeWeight +
+                    " kg y calce " +
+                    fit.toLowerCase() +
+                    "."
+                    : "Desliza o escribe tu estatura y peso para calcular."}
+                </p>
+              </div>
+              <div className="w-14 h-14 rounded-card bg-surface-card text-brand-primary font-mono text-2xl font-black flex items-center justify-center shrink-0">
+                {quickResult.size || "—"}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "precise" && (
+            <div className="p-4 rounded-card bg-brand-primary text-white space-y-2.5">
+              <div className="grid grid-cols-3 gap-2.5 text-center">
+                <div className="p-2.5 bg-white/10 rounded-card border border-white/10">
+                  <span className="text-xs font-bold text-brand-muted block">
+                    Inferior
+                  </span>
+                  <span className="font-mono text-xl font-black text-white block my-0.5">
+                    {preciseResult.bottomSize || "—"}
+                  </span>
+                  <span className="text-xs text-brand-muted block">
+                    Bóxers / Trusas
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-white/10 rounded-card border border-white/10">
+                  <span className="text-xs font-bold text-brand-muted block">
+                    Superior
+                  </span>
+                  <span className="font-mono text-xl font-black text-white block my-0.5">
+                    {preciseResult.topSize || "—"}
+                  </span>
+                  <span className="text-xs text-brand-muted block">
+                    Tops / Polos
+                  </span>
+                </div>
+
+                <div className="p-2.5 bg-white/10 rounded-card border border-white/10">
+                  <span className="text-xs font-bold text-brand-muted block">
+                    Calcetería
+                  </span>
+                  <span className="font-mono text-xl font-black text-white block my-0.5">
+                    {preciseResult.sockSize || "—"}
+                  </span>
+                  <span className="text-xs text-brand-muted block">
+                    Calzado {preciseResult.shoeSizeRange}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {saveError && (
@@ -980,17 +917,22 @@ export default function SizeMatcherModal({
           </p>
         )}
 
+        <p role="status" aria-live="polite"
+          className={"px-5 text-xs text-brand-secondary transition-all duration-300 ease-out motion-reduce:transition-none " +
+            (clearHintVisible ? "max-h-12 py-2 opacity-100" : "max-h-0 overflow-hidden py-0 opacity-0")}>
+          Medidas borradas de esta vista. Pulsa «Guardar cambios» para quitarlas también de {user ? "tu perfil" : "este dispositivo"}.
+        </p>
+
         {/* Footer Compacto en Una Sola Fila */}
         <div className="px-5 py-3 bg-surface-subtle border-t border-border flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={handleClearAllMeasurements}
-            disabled={isSaving}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-button text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-            title="Dejar en blanco y desactivar sugerencias automáticas"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Limpiar</span>
+          <button type="button" onClick={handleResetCurrentView} disabled={isSaving || !hasValuesInView}
+            title="Vacía los campos de esta vista. No guarda nada hasta que pulses el botón naranja."
+            className={"inline-flex shrink-0 items-center gap-1.5 rounded-button border px-2.5 py-1.5 text-xs font-semibold transition-all duration-200 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong " +
+              (hasValuesInView
+                ? "border-status-danger-border bg-status-danger-bg text-status-danger-text hover:border-status-danger-text"
+                : "cursor-not-allowed border-transparent bg-transparent text-brand-muted opacity-60")}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>Borrar medidas</span>
           </button>
 
           <div className="flex items-center gap-2">
@@ -1005,15 +947,17 @@ export default function SizeMatcherModal({
             <Button
               variant="primary"
               size="sm"
-              onClick={handleApply}
+              onClick={canClearSave ? handleSaveClear : handleApply}
               isLoading={isSaving}
               disabled={isSaving || !canSave}
               className="bg-accent hover:bg-accent-hover text-white"
             >
               <Save className="w-4 h-4 mr-1.5" />
-              {applicableSelectedSize
-                ? "Aplicar Talla " + applicableSelectedSize
-                : "Guardar"}
+              {canClearSave
+                ? "Guardar cambios"
+                : (applicableSelectedSize
+                  ? "Aplicar Talla " + applicableSelectedSize
+                  : "Guardar")}
             </Button>
           </div>
         </div>
