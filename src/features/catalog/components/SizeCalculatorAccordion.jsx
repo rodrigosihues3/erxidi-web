@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { HelpCircle, RotateCcw, Save, Trash2 } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import { useAuth } from "../../../context/AuthContext";
@@ -310,12 +310,25 @@ export default function SizeCalculatorAccordion({
     footLength,
   ]);
 
-  // Emisión reactiva inmediata
+  // Emisión exclusiva por interacción del usuario (evita disparo pasivo por render)
+  const prevSizeRef = useRef(null);
+  const isFirstMount = useRef(true);
+
   useEffect(() => {
-    if (currentSuggestedSize && isOpen) {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      prevSizeRef.current = currentSuggestedSize;
+      return;
+    }
+    if (
+      currentSuggestedSize &&
+      currentSuggestedSize !== prevSizeRef.current &&
+      isOpen
+    ) {
+      prevSizeRef.current = currentSuggestedSize;
       onSizeCalculated?.(currentSuggestedSize);
     }
-  }, [currentSuggestedSize, isOpen, onSizeCalculated]);
+  }, [currentSuggestedSize, isOpen]);
 
   // Guardado explícito (sin debounce automático)
   const handleSave = async () => {
@@ -478,7 +491,7 @@ export default function SizeCalculatorAccordion({
               : "text-brand-muted hover:text-brand-secondary"
           }`}
         >
-          Con cinta métrica
+          Preciso (con cinta métrica)
         </button>
       </div>
 

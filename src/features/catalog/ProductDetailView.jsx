@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -235,7 +235,7 @@ export default function ProductDetailView({
         setSearchParams({ color: targetColor }, { replace: true });
       }
     }
-  }, [availableColors, initialColorParam, activeVariants, currentProduct, initialVariant, selectedVariant, setSearchParams]);
+  }, [availableColors, initialColorParam, activeVariants, currentProduct, initialVariant, setSearchParams]);
 
   const galleryImages = useMemo(() => {
     const activeColorName = selectedVariant?.color?.toLowerCase();
@@ -374,23 +374,28 @@ export default function ProductDetailView({
     setIsSizeMatcherOpen(false);
   };
 
-  const handleAutoSelectSuggestedSize = (suggestedSize) => {
-    if (!suggestedSize) return;
-    setAutoSuggestedSize(suggestedSize);
+  const handleAutoSelectSuggestedSize = useCallback(
+    (suggestedSize) => {
+      if (!suggestedSize) return;
+      setAutoSuggestedSize(suggestedSize);
 
-    const currentColor = selectedVariant?.color;
-    const matchedVariant = activeVariants.find(
-      (v) =>
-        v.color?.toLowerCase() === currentColor?.toLowerCase() &&
-        v.sizes?.name === suggestedSize &&
-        Number(v.stock) > 0
-    );
+      const currentColor = selectedVariant?.color?.toLowerCase();
+      const matchedVariant = activeVariants.find(
+        (v) =>
+          v.color?.toLowerCase() === currentColor &&
+          v.sizes?.name === suggestedSize &&
+          Number(v.stock) > 0
+      );
 
-    if (matchedVariant) {
-      setSelectionSource("recommended");
-      handleVariantChange(matchedVariant);
-    }
-  };
+      if (matchedVariant && matchedVariant.id !== selectedVariant?.id) {
+        setSelectionSource("recommended");
+        // Al conmutar por recomendación dentro del mismo color, NO resetear selectedImage
+        setSelectedVariant(matchedVariant);
+        setQuantity(1);
+      }
+    },
+    [activeVariants, selectedVariant?.color, selectedVariant?.id]
+  );
 
   const handleIncrement = () => {
     if (quantity < stockAfterCart && !isCartLimitReached && !isOutOfStock) {
@@ -405,24 +410,31 @@ export default function ProductDetailView({
   };
 
   const handleVariantChange = (newVariant) => {
+    const isColorChange =
+      newVariant?.color?.toLowerCase() !==
+      selectedVariant?.color?.toLowerCase();
+
     setSelectedVariant(newVariant);
     setQuantity(1);
 
-    const activeColorName = newVariant?.color?.toLowerCase();
-    const resolvedImage =
-      currentProduct?.product_color_images?.find(
-        (ci) => ci.color?.toLowerCase() === activeColorName && ci.is_cover
-      )?.image_url ||
-      currentProduct?.product_color_images?.find(
-        (ci) =>
-          ci.color?.toLowerCase() === activeColorName && Boolean(ci.image_url)
-      )?.image_url ||
-      null;
+    if (isColorChange) {
+      const activeColorName = newVariant?.color?.toLowerCase();
+      const resolvedImage =
+        currentProduct?.product_color_images?.find(
+          (ci) => ci.color?.toLowerCase() === activeColorName && ci.is_cover
+        )?.image_url ||
+        currentProduct?.product_color_images?.find(
+          (ci) =>
+            ci.color?.toLowerCase() === activeColorName &&
+            Boolean(ci.image_url)
+        )?.image_url ||
+        null;
 
-    setSelectedImage(resolvedImage);
+      setSelectedImage(resolvedImage);
 
-    if (newVariant?.color) {
-      setSearchParams({ color: newVariant.color }, { replace: true });
+      if (newVariant?.color) {
+        setSearchParams({ color: newVariant.color }, { replace: true });
+      }
     }
   };
 
@@ -525,12 +537,11 @@ export default function ProductDetailView({
                       key={index}
                       type="button"
                       onClick={() => setSelectedImage(imgUrl)}
-                      className={
-                        "relative w-20 h-24 rounded-card overflow-hidden border transition-all flex-shrink-0 focus:outline-none " +
-                        (isSelected
-                          ? "border-brand-primary ring-2 ring-brand-primary ring-offset-1"
-                          : "border-border hover:border-border-strong opacity-75 hover:opacity-100")
-                      }
+                      className={`relative w-20 h-24 rounded-card overflow-hidden transition-all flex-shrink-0 focus:outline-none ${
+                        isSelected
+                          ? "border-2 border-brand-primary shadow-xs opacity-100"
+                          : "border border-border hover:border-brand-primary/50 opacity-70 hover:opacity-100"
+                      }`}
                     >
                       <img
                         src={imgUrl}
