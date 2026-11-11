@@ -112,7 +112,7 @@ export function CartProvider({ children }) {
         // Consultar cart_items del usuario
         const { data: cloudItems, error } = await supabase
           .from("cart_items")
-          .select("id, variant_id, quantity, product_variants(*, products(*))")
+          .select("id, variant_id, quantity, product_variants(*, products(*, product_color_images(*)))")
           .eq("user_id", user.id);
 
         if (error) throw error;
@@ -140,6 +140,23 @@ export function CartProvider({ children }) {
               const stockVal = Number(ci.product_variants?.stock ?? 10);
               const qtyVal = Number(ci.quantity) || 1;
 
+              // Obtener el color de la variante en minúsculas
+              const vColor = ci.product_variants?.color?.toLowerCase();
+
+              // Filtrar las imágenes del producto que pertenezcan a ese color exacto
+              const colorImages = Array.isArray(ci.product_variants?.products?.product_color_images)
+                ? ci.product_variants.products.product_color_images.filter(
+                    (img) => img.color?.toLowerCase() === vColor && Boolean(img.image_url)
+                  )
+                : [];
+
+              // Prioridad: foto de portada del color -> cualquier foto de ese color -> variant.image_url -> null
+              const resolvedImageUrl =
+                colorImages.find((img) => img.is_cover)?.image_url ||
+                colorImages[0]?.image_url ||
+                ci.product_variants?.image_url ||
+                null;
+
               if (cloudMap.has(vId)) {
                 cloudMap.get(vId).quantity += qtyVal;
               } else {
@@ -155,7 +172,7 @@ export function CartProvider({ children }) {
                   size: ci.product_variants?.size || "M",
                   color: ci.product_variants?.color || "—",
                   quantity: qtyVal,
-                  imageUrl: ci.product_variants?.products?.main_image_url || null,
+                  imageUrl: resolvedImageUrl,
                   stock: stockVal,
                   availableStock: stockVal,
                   isOutOfStock: stockVal <= 0,

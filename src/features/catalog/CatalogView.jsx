@@ -9,6 +9,11 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
+  Sparkles,
+  User,
+  Users,
+  Smile,
+  Heart,
 } from "lucide-react";
 import ProductCard from "./components/ProductCard";
 import FilterSidebar from "./components/FilterSidebar";
@@ -17,12 +22,101 @@ import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 
 const AUDIENCE_CIRCLES = [
-  { id: "all", label: "Todos" },
-  { id: "hombre", label: "Hombres" },
-  { id: "mujer", label: "Mujeres" },
-  { id: "nino", label: "Niños" },
-  { id: "nina", label: "Niñas" },
+  {
+    id: "all",
+    label: "Todos",
+    icon: Sparkles,
+    imageUrl:
+      "https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?auto=format&fit=crop&w=200&h=200&q=80",
+  },
+  {
+    id: "hombre",
+    label: "Hombres",
+    icon: User,
+    imageUrl:
+      "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&crop=faces&w=200&h=200&q=80",
+  },
+  {
+    id: "mujer",
+    label: "Mujeres",
+    icon: Users,
+    imageUrl:
+      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&crop=faces&w=200&h=200&q=80",
+  },
+  {
+    id: "nino",
+    label: "Niños",
+    icon: Smile,
+    imageUrl:
+      "https://images.unsplash.com/photo-1499081589563-7c400fcd94e8?auto=format&fit=crop&crop=faces&w=200&h=200&q=80",
+  },
+  {
+    id: "nina",
+    label: "Niñas",
+    icon: Heart,
+    imageUrl:
+      "https://images.unsplash.com/photo-1636485426024-aa436369585d?auto=format&fit=crop&crop=faces&w=200&h=200&q=80",
+  },
 ];
+
+function AudienceCircleItem({ tab, isSelected, onClick }) {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const IconComponent = tab.icon;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-center gap-2 group focus:outline-none select-none shrink-0"
+    >
+      <div
+        className={`relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 aspect-square rounded-full overflow-hidden flex items-center justify-center transition-all duration-300 ease-out ${
+          isSelected
+            ? "ring-2 ring-brand-primary ring-offset-2 ring-offset-surface-app shadow-md scale-105"
+            : "border border-border hover:border-brand-primary hover:scale-102"
+        }`}
+      >
+        {/* Capa de Icono Vectorial Inicial (0ms / Fallback) */}
+        <div
+          className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${
+            isLoaded && !hasError ? "opacity-0 pointer-events-none" : "opacity-100"
+          } ${
+            isSelected
+              ? "bg-brand-primary text-white"
+              : "bg-surface-card text-brand-secondary group-hover:text-brand-primary"
+          }`}
+        >
+          <IconComponent className="w-6 h-6 sm:w-7 sm:h-7 stroke-[1.75]" />
+        </div>
+
+        {/* Capa Fotográfica Editorial con Fade-In Suave */}
+        {!hasError && tab.imageUrl && (
+          <img
+            src={tab.imageUrl}
+            alt={tab.label}
+            onLoad={() => setIsLoaded(true)}
+            onError={() => setHasError(true)}
+            className={`w-full h-full object-cover object-center transition-all duration-500 ease-out group-hover:scale-110 ${
+              isLoaded ? "opacity-100" : "opacity-0"
+            }`}
+            loading="lazy"
+          />
+        )}
+      </div>
+
+      <span
+        className={`text-xs sm:text-sm transition-colors duration-200 ${
+          isSelected
+            ? "font-bold text-brand-primary"
+            : "font-medium text-brand-secondary group-hover:text-brand-primary"
+        }`}
+      >
+        {tab.label}
+      </span>
+    </button>
+  );
+}
 
 const SORT_OPTIONS = [
   { id: "featured", label: "Destacados" },
@@ -182,38 +276,16 @@ export default function CatalogView() {
 
   return (
     <div ref={catalogTopRef} className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* 1. Selector Circular Superior de Público (Estilo iOS y Centrado) */}
+      {/* 1. Selector Circular Superior de Público (Estilo iOS y Centrado con Carga Progresiva) */}
       <div className="flex items-center justify-center gap-4 sm:gap-6 w-full py-4 border-b border-border overflow-x-auto scrollbar-none">
-        {AUDIENCE_CIRCLES.map((tab) => {
-          const isSelected = selectedGender === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setSelectedGender(tab.id)}
-              className="flex flex-col items-center gap-2 group focus:outline-none select-none shrink-0"
-            >
-              <div
-                className={`w-14 h-14 sm:w-16 sm:h-16 shrink-0 aspect-square rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ease-out ${
-                  isSelected
-                    ? "bg-brand-primary text-white shadow-md scale-105 ring-4 ring-brand-primary/20"
-                    : "bg-surface-card border border-border text-brand-secondary hover:border-brand-primary hover:text-brand-primary hover:scale-102"
-                }`}
-              >
-                {tab.label.slice(0, 3)}
-              </div>
-              <span
-                className={`text-xs transition-colors duration-200 ${
-                  isSelected
-                    ? "font-bold text-brand-primary"
-                    : "font-medium text-brand-secondary group-hover:text-brand-primary"
-                }`}
-              >
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
+        {AUDIENCE_CIRCLES.map((tab) => (
+          <AudienceCircleItem
+            key={tab.id}
+            tab={tab}
+            isSelected={selectedGender === tab.id}
+            onClick={() => setSelectedGender(tab.id)}
+          />
+        ))}
       </div>
 
       {/* 2. Estructura Principal: Sidebar + Grilla */}
