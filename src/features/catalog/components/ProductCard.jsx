@@ -20,8 +20,23 @@ export default function ProductCard({ product, onSelect }) {
     return Array.from(map.values());
   }, [product]);
 
-  // Lista ordenada de imágenes del color activo o fallback inicial
+  // Color asociado a la portada global del producto (main_image_url)
+  const defaultGlobalColor = useMemo(() => {
+    if (!product?.main_image_url || !Array.isArray(product?.product_color_images)) {
+      return null;
+    }
+    const match = product.product_color_images.find(
+      (img) => img.image_url === product.main_image_url
+    );
+    return match?.color || null;
+  }, [product]);
+
+  // Color efectivo a considerar (seleccionado por el usuario o portada global)
+  const effectiveActiveColor = activeColor || defaultGlobalColor;
+
+  // Lista ordenada de imágenes del color activo o portada global inicial
   const activeColorImages = useMemo(() => {
+    // 1. Si el usuario seleccionó un color explícitamente:
     if (activeColor) {
       if (Array.isArray(product?.product_color_images)) {
         const filtered = product.product_color_images.filter(
@@ -39,11 +54,31 @@ export default function ProductCard({ product, onSelect }) {
           return Array.from(new Set(sorted.map((item) => item.image_url)));
         }
       }
-      // Color sin imágenes asociadas en BD
       return [];
     }
 
-    // Estado inicial: buscar cover o imágenes del primer color registrado
+    // 2. Estado inicial por defecto: Prioridad a main_image_url (Portada de Catálogo)
+    if (product?.main_image_url) {
+      const list = [product.main_image_url];
+      if (defaultGlobalColor && Array.isArray(product?.product_color_images)) {
+        const siblingImages = product.product_color_images
+          .filter(
+            (img) =>
+              img.color?.toLowerCase() === defaultGlobalColor.toLowerCase() &&
+              img.image_url &&
+              img.image_url !== product.main_image_url
+          )
+          .sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0))
+          .map((img) => img.image_url);
+
+        siblingImages.forEach((url) => {
+          if (!list.includes(url)) list.push(url);
+        });
+      }
+      return list;
+    }
+
+    // 3. Fallback: buscar cover o imágenes del primer color registrado
     if (Array.isArray(product?.product_color_images) && product.product_color_images.length > 0) {
       const coverItem = product.product_color_images.find((img) => img.is_cover && img.image_url);
       const initialColor = coverItem?.color || product.product_color_images[0]?.color;
@@ -67,13 +102,8 @@ export default function ProductCard({ product, onSelect }) {
       }
     }
 
-    // Fallback: imagen principal global del producto
-    if (product?.main_image_url) {
-      return [product.main_image_url];
-    }
-
     return [];
-  }, [activeColor, product]);
+  }, [activeColor, defaultGlobalColor, product]);
 
   const currentImageUrl = activeColorImages[currentImageIndex] || activeColorImages[0] || null;
 
@@ -99,9 +129,9 @@ export default function ProductCard({ product, onSelect }) {
 
   const handleCardClick = () => {
     if (onSelect) {
-      onSelect(product, activeColor);
+      onSelect(product, effectiveActiveColor);
     } else {
-      const query = activeColor ? `?color=${encodeURIComponent(activeColor)}` : "";
+      const query = effectiveActiveColor ? `?color=${encodeURIComponent(effectiveActiveColor)}` : "";
       navigate(`/producto/${product.slug}${query}`);
     }
   };
@@ -129,9 +159,9 @@ export default function ProductCard({ product, onSelect }) {
               <span className="text-[11px] font-semibold text-brand-secondary">
                 Sin imagen disponible
               </span>
-              {activeColor && (
+              {effectiveActiveColor && (
                 <span className="text-[10px] text-brand-muted capitalize">
-                  Color {activeColor}
+                  Color {effectiveActiveColor}
                 </span>
               )}
             </div>
@@ -183,57 +213,65 @@ export default function ProductCard({ product, onSelect }) {
           )}
         </div>
 
-        {/* Detalles */}
-        <div className="p-3 sm:p-3.5 space-y-2">
-          {/* Swatches de Color */}
-          {colorSwatches.length > 0 && (
-            <div className="flex items-center gap-1.5 h-4">
-              {colorSwatches.slice(0, 4).map((c) => (
-                <button
-                  key={c.color}
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveColor(c.color);
-                    setCurrentImageIndex(0);
-                  }}
-                  title={c.color}
-                  className={`w-3.5 h-3.5 rounded-full border border-black/20 hover:scale-110 transition-transform duration-200 ${
-                    activeColor?.toLowerCase() === c.color?.toLowerCase()
-                      ? "scale-125 ring-1 ring-brand-primary"
-                      : ""
-                    }`}
-                  style={{ backgroundColor: c.color_hex || "#000000" }}
-                />
-              ))}
-              {colorSwatches.length > 4 && (
-                <span className="text-[10px] text-brand-muted font-mono font-medium">
-                  +{colorSwatches.length - 4}
-                </span>
-              )}
-            </div>
-          )}
+        {/* Detalles: Marca, Título y Precio Destacado Debajo (Estilo Ripley) */}
+        <div className="p-3 sm:p-3.5 space-y-1.5">
+          <span className="block text-[10px] uppercase font-bold text-brand-muted tracking-wider truncate">
+            {product.brands?.name || product.categories?.name || "ERXIDI"}
+          </span>
 
-          <div className="space-y-0.5">
-            <span className="block text-[10px] uppercase font-bold text-brand-muted tracking-wider truncate">
-              {product.brands?.name || product.categories?.name || "ERXIDI"}
+          <h3
+            className="text-xs sm:text-sm font-semibold text-brand-primary truncate hover:underline"
+            title={product.name}
+          >
+            {product.name}
+          </h3>
+
+          <div className="pt-0.5">
+            <span className="font-mono font-extrabold text-base sm:text-lg text-brand-primary">
+              S/ {Number(product.price).toFixed(2)}
             </span>
-            <h3
-              className="text-xs sm:text-sm font-semibold text-brand-primary truncate hover:underline"
-              title={product.name}
-            >
-              {product.name}
-            </h3>
           </div>
         </div>
       </div>
 
-      {/* Pie: Precio Destacado y Botón Elegir Talla */}
-      <div className="px-3 sm:px-3.5 pb-3 sm:pb-3.5 pt-1.5 flex items-center justify-between gap-2 border-t border-border/50">
-        <span className="font-mono font-extrabold text-sm sm:text-lg text-brand-primary">
-          S/ {Number(product.price).toFixed(2)}
-        </span>
+      {/* Fila Inferior (Footer): Swatches a la izquierda y Botón Elegir Talla a la derecha */}
+      <div className="px-3 sm:px-3.5 pb-3 sm:pb-3.5 pt-2 flex items-center justify-between gap-2 border-t border-border/50">
+        {/* Swatches de Color con área táctil protegida y hover responsivo */}
+        <div className="flex items-center gap-1.5 min-h-[32px]">
+          {colorSwatches.slice(0, 4).map((c) => {
+            const isSelected = effectiveActiveColor?.toLowerCase() === c.color?.toLowerCase();
+            return (
+              <button
+                key={c.color}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveColor(c.color);
+                  setCurrentImageIndex(0);
+                }}
+                title={c.color}
+                className="p-1 -m-1 focus:outline-none group/swatch"
+                aria-label={`Color ${c.color}`}
+              >
+                <span
+                  className={`block w-4 h-4 rounded-full border border-black/20 transition-all duration-200 group-hover/swatch:scale-125 ${
+                    isSelected
+                      ? "scale-110 ring-2 ring-brand-primary ring-offset-1"
+                      : "opacity-80 group-hover/swatch:opacity-100"
+                  }`}
+                  style={{ backgroundColor: c.color_hex || "#000000" }}
+                />
+              </button>
+            );
+          })}
+          {colorSwatches.length > 4 && (
+            <span className="text-[10px] text-brand-muted font-mono font-medium ml-0.5">
+              +{colorSwatches.length - 4}
+            </span>
+          )}
+        </div>
 
+        {/* Botón Elegir Talla */}
         <Button
           type="button"
           variant="primary"
@@ -241,9 +279,9 @@ export default function ProductCard({ product, onSelect }) {
           disabled={!hasGlobalStock}
           onClick={(e) => {
             e.stopPropagation();
-            onSelect?.(product, activeColor);
+            onSelect?.(product, effectiveActiveColor);
           }}
-          className="text-xs px-2.5 sm:px-3.5 h-8 gap-1 shrink-0"
+          className="text-xs px-2.5 sm:px-3 h-8 gap-1 shrink-0"
           title={hasGlobalStock ? "Elegir talla" : "Producto agotado"}
         >
           <ShoppingBag className="w-3.5 h-3.5" />
