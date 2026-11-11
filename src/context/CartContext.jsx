@@ -112,7 +112,7 @@ export function CartProvider({ children }) {
         // Consultar cart_items del usuario
         const { data: cloudItems, error } = await supabase
           .from("cart_items")
-          .select("id, variant_id, quantity, product_variants(*, products(*, product_color_images(*)))")
+          .select("id, variant_id, quantity, product_variants(*, sizes(id, name, display_order), products(*, product_color_images(*)))")
           .eq("user_id", user.id);
 
         if (error) throw error;
@@ -157,6 +157,12 @@ export function CartProvider({ children }) {
                 ci.product_variants?.image_url ||
                 null;
 
+              // Resolver el nombre de la talla desde la relación sizes
+              const resolvedSize =
+                ci.product_variants?.sizes?.name ||
+                ci.product_variants?.size ||
+                "M";
+
               if (cloudMap.has(vId)) {
                 cloudMap.get(vId).quantity += qtyVal;
               } else {
@@ -169,7 +175,7 @@ export function CartProvider({ children }) {
                     null,
                   name: ci.product_variants?.products?.name || "Prenda",
                   price: Number(ci.product_variants?.products?.price || 0),
-                  size: ci.product_variants?.size || "M",
+                  size: resolvedSize,
                   color: ci.product_variants?.color || "—",
                   quantity: qtyVal,
                   imageUrl: resolvedImageUrl,
