@@ -4,6 +4,7 @@ export default function VariantSelector({
   variants = [],
   selectedVariant = null,
   onVariantChange,
+  selectionSource = "manual",
 }) {
   // Filtrar estrictamente variantes activas (excluye bajas lógicas del Backoffice)
   const activeVariants = useMemo(
@@ -178,9 +179,11 @@ export default function VariantSelector({
                   className={
                     "min-w-[40px] h-9 px-3 rounded-button font-mono text-xs font-semibold uppercase transition-colors duration-150 flex items-center justify-center border focus:outline-none " +
                     (isOutOfStock
-                      ? "border-dashed border-border text-brand-muted opacity-40 cursor-not-allowed bg-surface-subtle"
+                      ? "opacity-30 line-through cursor-not-allowed border-dashed border-border bg-surface-subtle text-brand-muted"
                       : isSelected
-                        ? "border-brand-primary ring-1 ring-brand-primary bg-surface-subtle text-brand-primary font-bold shadow-subtle"
+                        ? selectionSource === "recommended"
+                          ? "bg-brand-primary text-white shadow-xs ring-2 ring-brand-primary/20 border-brand-primary font-bold"
+                          : "bg-accent text-white shadow-xs border-accent font-bold"
                         : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary")
                   }
                 >

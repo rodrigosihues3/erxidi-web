@@ -158,9 +158,7 @@ export default function CartDrawer({ isOpen, onClose }) {
                             className="w-full h-full object-contain"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-[10px] text-brand-muted">
-                            Prenda
-                          </div>
+                          <Package className="w-6 h-6 text-brand-muted" />
                         )}
                       </Link>
 
@@ -256,7 +254,7 @@ export default function CartDrawer({ isOpen, onClose }) {
                       className="p-3 rounded-card border border-rose-200 bg-rose-50/40 opacity-75 grayscale flex items-center justify-between gap-3 text-xs"
                     >
                       <Link
-                        className="w-12 aspect-[4/5] shrink-0 rounded border border-border bg-white overflow-hidden flex items-center justify-center cursor-pointer"
+                        className="w-12 aspect-[4/5] shrink-0 rounded border border-border bg-surface-subtle overflow-hidden flex items-center justify-center cursor-pointer"
                         onClick={onClose}
                         to={item.productId ? `/catalogo/${item.productId}` : '/catalogo'}
                       >

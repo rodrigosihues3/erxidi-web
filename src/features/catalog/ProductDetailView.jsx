@@ -3,15 +3,18 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ShoppingCart,
-  ShieldAlert,
   Minus,
   Plus,
   CheckCircle,
   AlertCircle,
+  Package,
+  Ruler,
+  ChevronDown,
 } from "lucide-react";
 import { mockProducts } from "./data/mockCatalog";
 import VariantSelector from "./components/VariantSelector";
 import SizeMatcherModal from "./components/SizeMatcherModal";
+import SizeCalculatorAccordion from "./components/SizeCalculatorAccordion";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
 import { useCart } from "../../context/CartContext";
@@ -89,10 +92,13 @@ export default function ProductDetailView({
       );
       if (any?.image_url) return any.image_url;
     }
-    return currentProduct?.main_image_url || "";
+    return null;
   });
   const [quantity, setQuantity] = useState(1);
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
+  const [isAccordionOpen, setIsAccordionOpen] = useState(false);
+  const [autoSuggestedSize, setAutoSuggestedSize] = useState(null);
+  const [selectionSource, setSelectionSource] = useState("manual"); // "manual" | "recommended"
 
   const [sizeGuides, setSizeGuides] = useState(
     currentProduct?.size_guides || []
@@ -145,16 +151,18 @@ export default function ProductDetailView({
     });
   }, [hasUserMeasurements, userMeasureState.measurements, sizeGuides]);
 
+  const effectiveSizeRecommendation = autoSuggestedSize || recommendedSize;
+
   const isRecommendedInStock = useMemo(() => {
-    if (!recommendedSize || activeVariants.length === 0) return false;
+    if (!effectiveSizeRecommendation || activeVariants.length === 0) return false;
     const currentColor = selectedVariant?.color;
     return activeVariants.some(
       (v) =>
-        v.color === currentColor &&
-        v.sizes?.name === recommendedSize &&
+        v.color?.toLowerCase() === currentColor?.toLowerCase() &&
+        v.sizes?.name === effectiveSizeRecommendation &&
         (Number(v.stock) || 0) > 0
     );
-  }, [recommendedSize, activeVariants, selectedVariant?.color]);
+  }, [effectiveSizeRecommendation, activeVariants, selectedVariant?.color]);
 
   const derivedFamily = useMemo(() => {
     const slug = currentProduct?.categories?.slug;
@@ -217,9 +225,10 @@ export default function ProductDetailView({
             (ci) =>
               ci.color?.toLowerCase() === targetColor.toLowerCase() &&
               Boolean(ci.image_url)
-          )?.image_url;
+          )?.image_url ||
+          null;
       }
-      setSelectedImage(colorImg || currentProduct?.main_image_url || "");
+      setSelectedImage(colorImg);
       setQuantity(1);
 
       if (!initialColorParam && targetColor) {
@@ -248,7 +257,7 @@ export default function ProductDetailView({
       return Array.from(new Set(sorted.map((ci) => ci.image_url)));
     }
 
-    return currentProduct?.main_image_url ? [currentProduct.main_image_url] : [];
+    return [];
   }, [currentProduct, selectedVariant?.color]);
 
   // Cantidad ya presente en el carrito para esta variante
@@ -365,6 +374,24 @@ export default function ProductDetailView({
     setIsSizeMatcherOpen(false);
   };
 
+  const handleAutoSelectSuggestedSize = (suggestedSize) => {
+    if (!suggestedSize) return;
+    setAutoSuggestedSize(suggestedSize);
+
+    const currentColor = selectedVariant?.color;
+    const matchedVariant = activeVariants.find(
+      (v) =>
+        v.color?.toLowerCase() === currentColor?.toLowerCase() &&
+        v.sizes?.name === suggestedSize &&
+        Number(v.stock) > 0
+    );
+
+    if (matchedVariant) {
+      setSelectionSource("recommended");
+      handleVariantChange(matchedVariant);
+    }
+  };
+
   const handleIncrement = () => {
     if (quantity < stockAfterCart && !isCartLimitReached && !isOutOfStock) {
       setQuantity((prev) => prev + 1);
@@ -390,8 +417,7 @@ export default function ProductDetailView({
         (ci) =>
           ci.color?.toLowerCase() === activeColorName && Boolean(ci.image_url)
       )?.image_url ||
-      currentProduct?.main_image_url ||
-      "";
+      null;
 
     setSelectedImage(resolvedImage);
 
@@ -410,18 +436,18 @@ export default function ProductDetailView({
       const qtyToAdd = Math.min(quantity, stockAfterCart);
 
       // Resolver la imagen exacta del color seleccionado
+      const activeColorName = selectedVariant?.color?.toLowerCase();
       const resolvedImageUrl =
         selectedImage ||
         currentProduct?.product_color_images?.find(
           (ci) =>
-            ci.color?.toLowerCase() ===
-              selectedVariant?.color?.toLowerCase() && ci.is_cover
+            ci.color?.toLowerCase() === activeColorName && ci.is_cover
         )?.image_url ||
         currentProduct?.product_color_images?.find(
           (ci) =>
-            ci.color?.toLowerCase() === selectedVariant?.color?.toLowerCase()
+            ci.color?.toLowerCase() === activeColorName && Boolean(ci.image_url)
         )?.image_url ||
-        currentProduct?.main_image_url;
+        null;
 
       addItem(
         {
@@ -460,7 +486,7 @@ export default function ProductDetailView({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12 items-start">
           {/* Galería de Producto */}
           <div className="space-y-4">
-            <div className="aspect-[4/5] bg-surface-card border border-border rounded-card overflow-hidden shadow-subtle relative flex items-center justify-center">
+            <div className="aspect-[4/5] bg-surface-subtle border border-border rounded-card overflow-hidden shadow-subtle relative flex flex-col items-center justify-center p-6 text-center select-none">
               {selectedImage ? (
                 <img
                   src={selectedImage}
@@ -468,8 +494,18 @@ export default function ProductDetailView({
                   className="w-full h-full object-cover transition-all duration-300"
                 />
               ) : (
-                <div className="text-xs text-brand-muted font-mono">
-                  Sin imagen disponible
+                <div className="space-y-2 text-brand-muted flex flex-col items-center justify-center">
+                  <div className="w-12 h-12 rounded-full bg-surface-card border border-border flex items-center justify-center">
+                    <Package className="w-6 h-6 text-brand-muted" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-bold text-brand-secondary">
+                      Sin imágenes disponibles
+                    </p>
+                    <p className="text-[11px] text-brand-muted">
+                      Variante en color {selectedVariant?.color || "seleccionado"}
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -538,11 +574,6 @@ export default function ProductDetailView({
                 <span className="text-2xl font-bold text-brand-primary">
                   {formattedPrice}
                 </span>
-                {selectedVariant?.sku && (
-                  <span className="text-xs font-mono text-brand-muted">
-                    SKU: {selectedVariant.sku}
-                  </span>
-                )}
               </div>
             </div>
 
@@ -576,46 +607,75 @@ export default function ProductDetailView({
               <VariantSelector
                 variants={activeVariants}
                 selectedVariant={selectedVariant}
-                onVariantChange={handleVariantChange}
+                onVariantChange={(newVariant) => {
+                  setSelectionSource("manual");
+                  handleVariantChange(newVariant);
+                }}
+                selectionSource={selectionSource}
               />
 
-              {/* Recomendador Antropométrico */}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-xs text-brand-secondary">
-                  {hasUserMeasurements
-                    ? "Talla personalizada según tus medidas"
-                    : "¿No estás seguro de tu talla?"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsSizeMatcherOpen(true)}
-                  className="inline-flex items-center text-xs font-semibold text-accent hover:text-accent-hover transition-colors focus:outline-none"
-                >
-                  {hasUserMeasurements
-                    ? "Modificar mis medidas / Recalcular"
-                    : "Calculador de Talla"}
-                </button>
-              </div>
+              {/* Banner Informativo de Talla */}
+              {effectiveSizeRecommendation && (
+                <div className="mt-2 text-xs">
+                  {isRecommendedInStock ? (
+                    <div className="p-2.5 rounded-card bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        Según tus medidas, seleccionamos la talla{" "}
+                        <strong>{effectiveSizeRecommendation}</strong>.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-card bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        Talla sugerida{" "}
+                        <strong>{effectiveSizeRecommendation}</strong> no
+                        disponible en este color.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
-              {hasUserMeasurements &&
-                recommendedSize &&
-                (isRecommendedInStock ? (
-                  <div className="p-2.5 rounded-card bg-surface-subtle border border-border text-xs flex items-center gap-2 text-brand-primary animate-in fade-in duration-150">
-                    <CheckCircle className="w-4 h-4 text-accent flex-shrink-0" />
-                    <span>
-                      Según tus medidas, te sugerimos la talla {recommendedSize}
-                      .
-                    </span>
+              {/* Disparador del Acordeón con Apertura Gradual */}
+              <div className="pt-3">
+                <div className="w-full flex items-center justify-between py-2 border-b border-border">
+                  <span className="text-xs text-brand-secondary">
+                    ¿No estás seguro de tu talla?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsAccordionOpen((prev) => !prev)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:text-accent-hover transition-colors focus:outline-none"
+                  >
+                    <Ruler className="w-3.5 h-3.5" />
+                    <span>Calcular mi talla</span>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                        isAccordionOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Transición CSS Grid para apertura fluida estilo iOS */}
+                <div
+                  className={`grid transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                    isAccordionOpen
+                      ? "grid-rows-[1fr] opacity-100 mt-3"
+                      : "grid-rows-[0fr] opacity-0"
+                  }`}
+                >
+                  <div className="overflow-hidden">
+                    <SizeCalculatorAccordion
+                      garmentFamily={derivedFamily}
+                      isOpen={isAccordionOpen}
+                      onSizeCalculated={handleAutoSelectSuggestedSize}
+                    />
                   </div>
-                ) : (
-                  <div className="border border-amber-500/30 bg-amber-500/10 text-amber-500 text-xs p-2.5 rounded-card flex items-center gap-2 animate-in fade-in duration-150">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-500" />
-                    <span>
-                      Tu talla sugerida ({recommendedSize}) no se encuentra
-                      disponible actualmente en este color.
-                    </span>
-                  </div>
-                ))}
+                </div>
+              </div>
             </div>
 
             {/* Selector de Cantidad y Botón de Compra */}
@@ -672,18 +732,6 @@ export default function ProductDetailView({
                         : "Agregar al carrito"}
                   </Button>
                 </div>
-              </div>
-
-              {/* Regla de Negocio 1: Advertencia Sanitaria Obligatoria */}
-              <div className="flex items-start gap-2.5 p-3 rounded-card bg-surface-subtle border border-border text-brand-secondary">
-                <ShieldAlert className="w-4 h-4 text-brand-muted flex-shrink-0 mt-0.5" />
-                <p className="text-xs leading-relaxed">
-                  <strong className="text-brand-primary">
-                    Política de higiene:
-                  </strong>{" "}
-                  Por motivos de protección sanitaria, la ropa interior no
-                  cuenta con cambios ni devoluciones una vez abierto el empaque.
-                </p>
               </div>
             </div>
           </div>
