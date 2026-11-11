@@ -31,7 +31,7 @@ export default function ProductDetailView({
   const { items: cartItems, addItem } = useCart();
   const { profile } = useAuth();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialColorParam = searchParams.get("color");
 
   const activeVariants = useMemo(
@@ -76,9 +76,21 @@ export default function ProductDetailView({
   }, [activeVariants, initialColorParam]);
 
   const [selectedVariant, setSelectedVariant] = useState(initialVariant);
-  const [selectedImage, setSelectedImage] = useState(
-    currentProduct?.main_image_url || ""
-  );
+  const [selectedImage, setSelectedImage] = useState(() => {
+    const activeColorName = initialVariant?.color?.toLowerCase();
+    if (activeColorName && Array.isArray(currentProduct?.product_color_images)) {
+      const cover = currentProduct.product_color_images.find(
+        (ci) => ci.color?.toLowerCase() === activeColorName && ci.is_cover
+      );
+      if (cover?.image_url) return cover.image_url;
+      const any = currentProduct.product_color_images.find(
+        (ci) =>
+          ci.color?.toLowerCase() === activeColorName && Boolean(ci.image_url)
+      );
+      if (any?.image_url) return any.image_url;
+    }
+    return currentProduct?.main_image_url || "";
+  });
   const [quantity, setQuantity] = useState(1);
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
 
@@ -167,6 +179,17 @@ export default function ProductDetailView({
         : null;
 
       const targetColor = matchedColor ? matchedColor.color : availableColors[0].color;
+
+      if (
+        selectedVariant &&
+        selectedVariant.color?.toLowerCase() === targetColor.toLowerCase()
+      ) {
+        if (!initialColorParam && selectedVariant.color) {
+          setSearchParams({ color: selectedVariant.color }, { replace: true });
+        }
+        return;
+      }
+
       const targetVariant =
         activeVariants.find(
           (v) =>
@@ -191,53 +214,41 @@ export default function ProductDetailView({
               ci.is_cover
           )?.image_url ||
           currentProduct.product_color_images.find(
-            (ci) => ci.color?.toLowerCase() === targetColor.toLowerCase()
+            (ci) =>
+              ci.color?.toLowerCase() === targetColor.toLowerCase() &&
+              Boolean(ci.image_url)
           )?.image_url;
       }
       setSelectedImage(colorImg || currentProduct?.main_image_url || "");
       setQuantity(1);
+
+      if (!initialColorParam && targetColor) {
+        setSearchParams({ color: targetColor }, { replace: true });
+      }
     }
-  }, [availableColors, initialColorParam, activeVariants, currentProduct, initialVariant]);
+  }, [availableColors, initialColorParam, activeVariants, currentProduct, initialVariant, selectedVariant, setSearchParams]);
 
   const galleryImages = useMemo(() => {
-    const list = [];
     const activeColorName = selectedVariant?.color?.toLowerCase();
+    const colorImages = Array.isArray(currentProduct?.product_color_images)
+      ? currentProduct.product_color_images.filter(
+          (ci) =>
+            ci.color?.toLowerCase() === activeColorName &&
+            Boolean(ci.image_url)
+        )
+      : [];
 
-    // 1. Imágenes correspondientes al color seleccionado
-    if (activeColorName && Array.isArray(currentProduct?.product_color_images)) {
-      currentProduct.product_color_images
-        .filter((ci) => ci.color?.toLowerCase() === activeColorName && ci.image_url)
-        .forEach((ci) => {
-          if (!list.includes(ci.image_url)) {
-            list.push(ci.image_url);
-          }
-        });
-    }
-
-    // 2. Imagen principal del producto
-    if (currentProduct?.main_image_url && !list.includes(currentProduct.main_image_url)) {
-      list.push(currentProduct.main_image_url);
-    }
-
-    // 3. URLs de galería adicionales
-    if (Array.isArray(currentProduct?.gallery_urls)) {
-      currentProduct.gallery_urls.forEach((url) => {
-        if (!list.includes(url)) {
-          list.push(url);
-        }
+    if (colorImages.length > 0) {
+      // Ordenar: portada primero, seguida de las demás por display_order ascendente
+      const sorted = [...colorImages].sort((a, b) => {
+        const coverDiff = (b.is_cover ? 1 : 0) - (a.is_cover ? 1 : 0);
+        if (coverDiff !== 0) return coverDiff;
+        return (Number(a.display_order) || 0) - (Number(b.display_order) || 0);
       });
+      return Array.from(new Set(sorted.map((ci) => ci.image_url)));
     }
 
-    // 4. Resto de imágenes de color
-    if (Array.isArray(currentProduct?.product_color_images)) {
-      currentProduct.product_color_images.forEach((ci) => {
-        if (ci.image_url && !list.includes(ci.image_url)) {
-          list.push(ci.image_url);
-        }
-      });
-    }
-
-    return list;
+    return currentProduct?.main_image_url ? [currentProduct.main_image_url] : [];
   }, [currentProduct, selectedVariant?.color]);
 
   // Cantidad ya presente en el carrito para esta variante
@@ -369,22 +380,23 @@ export default function ProductDetailView({
   const handleVariantChange = (newVariant) => {
     setSelectedVariant(newVariant);
     setQuantity(1);
-    if (newVariant?.image_url) {
-      setSelectedImage(newVariant.image_url);
-    } else if (currentProduct?.product_color_images?.length) {
-      const colorCover =
-        currentProduct.product_color_images.find(
-          (ci) =>
-            ci.color?.toLowerCase() === newVariant?.color?.toLowerCase() &&
-            ci.is_cover,
-        ) ||
-        currentProduct.product_color_images.find(
-          (ci) =>
-            ci.color?.toLowerCase() === newVariant?.color?.toLowerCase(),
-        );
-      if (colorCover?.image_url) {
-        setSelectedImage(colorCover.image_url);
-      }
+
+    const activeColorName = newVariant?.color?.toLowerCase();
+    const resolvedImage =
+      currentProduct?.product_color_images?.find(
+        (ci) => ci.color?.toLowerCase() === activeColorName && ci.is_cover
+      )?.image_url ||
+      currentProduct?.product_color_images?.find(
+        (ci) =>
+          ci.color?.toLowerCase() === activeColorName && Boolean(ci.image_url)
+      )?.image_url ||
+      currentProduct?.main_image_url ||
+      "";
+
+    setSelectedImage(resolvedImage);
+
+    if (newVariant?.color) {
+      setSearchParams({ color: newVariant.color }, { replace: true });
     }
   };
 
@@ -397,24 +409,34 @@ export default function ProductDetailView({
     ) {
       const qtyToAdd = Math.min(quantity, stockAfterCart);
 
-      if (onAddToCart) {
-        onAddToCart(selectedVariant, qtyToAdd);
-      } else if (addItem) {
-        addItem(
-          {
-            variantId: selectedVariant.id,
-            productId: currentProduct.id,
-            name: currentProduct.name,
-            size: selectedVariant.sizes?.name || "M",
-            color: selectedVariant.color || "",
-            colorHex: selectedVariant.color_hex || "#111827",
-            price: currentProduct.price,
-            stock: selectedVariant.stock,
-            imageUrl: selectedVariant.image_url || currentProduct.main_image_url,
-          },
-          qtyToAdd
-        );
-      }
+      // Resolver la imagen exacta del color seleccionado
+      const resolvedImageUrl =
+        selectedImage ||
+        currentProduct?.product_color_images?.find(
+          (ci) =>
+            ci.color?.toLowerCase() ===
+              selectedVariant?.color?.toLowerCase() && ci.is_cover
+        )?.image_url ||
+        currentProduct?.product_color_images?.find(
+          (ci) =>
+            ci.color?.toLowerCase() === selectedVariant?.color?.toLowerCase()
+        )?.image_url ||
+        currentProduct?.main_image_url;
+
+      addItem(
+        {
+          variantId: selectedVariant.id,
+          productId: currentProduct.id,
+          name: currentProduct.name,
+          size: selectedVariant.sizes?.name || "M",
+          color: selectedVariant.color || "",
+          colorHex: selectedVariant.color_hex || "#111827",
+          price: currentProduct.price,
+          stock: selectedVariant.stock,
+          imageUrl: resolvedImageUrl,
+        },
+        qtyToAdd
+      );
     }
   };
 
