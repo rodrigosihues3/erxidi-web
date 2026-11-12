@@ -35,6 +35,8 @@ export default function HomeView() {
   const [genderFilter, setGenderFilter] = useState("all");
   const [dbFeaturedProducts, setDbFeaturedProducts] = useState([]);
   const [loadingFeatured, setLoadingFeatured] = useState(true);
+  const [dbSaleProducts, setDbSaleProducts] = useState([]);
+  const [loadingSale, setLoadingSale] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -44,9 +46,10 @@ export default function HomeView() {
         const { data, error } = await supabase
           .from("products")
           .select(`
-            id, name, slug, price, main_image_url, target_gender, is_featured, is_active,
+            id, name, slug, price, main_image_url, target_gender, is_featured, is_on_sale, is_active,
+            product_color_images (*),
             product_variants (
-              id, color, color_hex, stock, is_active,
+              id, color, color_hex, stock, is_active, image_url,
               sizes:size_id ( id, name )
             )
           `)
@@ -65,6 +68,41 @@ export default function HomeView() {
       }
     }
     loadFeatured();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSaleProducts() {
+      try {
+        setLoadingSale(true);
+        const { data, error } = await supabase
+          .from("products")
+          .select(`
+            id, name, slug, price, main_image_url, target_gender, is_featured, is_on_sale, is_active,
+            product_color_images (*),
+            product_variants (
+              id, color, color_hex, stock, is_active, image_url,
+              sizes:size_id ( id, name )
+            )
+          `)
+          .eq("is_active", true)
+          .eq("is_on_sale", true)
+          .limit(4);
+
+        if (error) throw error;
+        if (isMounted) {
+          setDbSaleProducts(data || []);
+        }
+      } catch (err) {
+        console.error("Error al cargar promociones desde Supabase:", err);
+      } finally {
+        if (isMounted) setLoadingSale(false);
+      }
+    }
+    loadSaleProducts();
     return () => {
       isMounted = false;
     };
@@ -126,6 +164,7 @@ export default function HomeView() {
       id: "medias-tobilleras",
       name: "Medias Tobilleras",
       category: "Calcetería Unisex",
+      categorySlug: "medias",
       image: mediaImg,
       alt: "Medias Tobilleras ERXIDI",
       hotspots: [
@@ -159,6 +198,7 @@ export default function HomeView() {
       id: "boxer",
       name: "Bóxer Brief Anatómico",
       category: "Línea Masculina",
+      categorySlug: "boxers",
       image: heroImg,
       alt: "Bóxer Anatómico ERXIDI",
       hotspots: [
@@ -192,6 +232,7 @@ export default function HomeView() {
       id: "trusa-modal",
       name: "Trusa Clásico Invisible",
       category: "Línea Femenina",
+      categorySlug: "calzones",
       image: trusaImg,
       alt: "Trusa Invisible ERXIDI",
       hotspots: [
@@ -225,6 +266,7 @@ export default function HomeView() {
       id: "top-confort",
       name: "Top Bralette Confort Diario",
       category: "Línea Femenina",
+      categorySlug: "brasiers",
       image: topImg,
       alt: "Top Bralette Confort ERXIDI",
       hotspots: [
@@ -498,9 +540,13 @@ export default function HomeView() {
                 </div>
 
                 <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-slate-400">
-                  <span>
-                    {currentItem.name} · Toca los puntos (+) para inspeccionar
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/catalogo?categoria=${currentItem.categorySlug || ""}`)}
+                    className="hover:text-white hover:underline transition-colors focus:outline-none"
+                  >
+                    {currentItem.name} · Ver en catálogo ➔
+                  </button>
                 </div>
               </div>
             </div>
@@ -630,6 +676,43 @@ export default function HomeView() {
           </Button>
         </div>
       </section>
+
+      {/* Sección de Ofertas y Descuentos */}
+      {dbSaleProducts.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-border">
+            <div>
+              <span className="text-xs font-mono font-bold text-accent uppercase tracking-wider block mb-1">
+                Oportunidades de Temporada
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-brand-primary">
+                Ofertas y Descuentos
+              </h2>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate("/catalogo")}
+              className="text-xs font-semibold"
+            >
+              Ver todas las ofertas
+              <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {dbSaleProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onSelect={handleProductSelect}
+                onQuickAdd={handleQuickAdd}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 4. Banner de Política Sanitaria y SizeMatcher */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
