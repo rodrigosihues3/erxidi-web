@@ -24,6 +24,7 @@ import {
   deleteDeliveryStaff,
   toggleDeliveryStaffActive,
 } from "../services/adminDelivery.service";
+import { subscribeCouriersRealtime } from "../services/adminOrders.service";
 import DeliveryStaffModal, {
   parseStaffModality,
   formatPaternalSurnameWithModality,
@@ -99,6 +100,28 @@ export default function DeliveryUsersView() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeCouriersRealtime((updatedProfile) => {
+      if (!updatedProfile?.id) return;
+      if (updatedProfile.role && updatedProfile.role !== "delivery") return;
+
+      setDeliveryUsers((prev) => {
+        const exists = prev.some((u) => u.id === updatedProfile.id);
+        if (!exists) {
+          loadDeliveryUsers();
+          return prev;
+        }
+        return prev.map((u) =>
+          u.id === updatedProfile.id ? { ...u, ...updatedProfile } : u
+        );
+      });
+    });
+
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const term = search.trim().toLowerCase();
 
     if (!term) {
@@ -171,13 +194,13 @@ export default function DeliveryUsersView() {
   }
 
   function renderOperationalBadge(user) {
-    const status = user.operational_status || "available";
+    const status = String(user.operational_status || "available").toLowerCase();
     const isOnDuty = user.is_on_duty !== false;
 
-    if (!isOnDuty || status === "paused" || status === "en_pausa") {
+    if (status === "paused" || status === "en_pausa" || status === "offline" || !isOnDuty) {
       return <Badge variant="neutral">En Pausa</Badge>;
     }
-    if (status === "in_route" || status === "en_ruta" || status === "busy") {
+    if (status === "on_route" || status === "in_route" || status === "en_ruta" || status === "busy") {
       return <Badge variant="warning">En Ruta</Badge>;
     }
     return <Badge variant="success">Disponible</Badge>;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PauseCircle, UserCheck, X } from "lucide-react";
+import { PauseCircle, UserCheck, X, Truck } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import {
   getDeliveryStaff,
@@ -15,8 +15,10 @@ export function isCourierPaused(courier) {
     courier.is_on_duty === false ||
     opStatus === "paused" ||
     opStatus === "en_pausa" ||
+    opStatus === "offline" ||
     availStatus === "en_pausa" ||
-    availStatus === "paused"
+    availStatus === "paused" ||
+    availStatus === "offline"
   );
 }
 
@@ -145,6 +147,11 @@ export default function AssignCourierModal({
     const isPaused = isCourierPaused(staff);
     const isSelected = selectedId === staff.id && !isPaused;
     const cleanSurname = cleanCourierSurname(staff.paternal_surname);
+    const opStatus = String(staff.operational_status || "").toLowerCase();
+    const isOnRoute =
+      opStatus === "on_route" ||
+      opStatus === "in_route" ||
+      opStatus === "en_ruta";
 
     return (
       <label
@@ -186,6 +193,11 @@ export default function AssignCourierModal({
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
               <PauseCircle className="w-3 h-3" />
               En Pausa
+            </span>
+          ) : isOnRoute ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+              <Truck className="w-3 h-3" />
+              En Ruta
             </span>
           ) : (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">

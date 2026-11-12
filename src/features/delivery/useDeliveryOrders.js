@@ -475,12 +475,21 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
     return true;
   }
 
-  // Inicia ruta: todos los pedidos en base pasan a en_camino y el semáforo a on_route
+  // Inicia ruta: pedidos asignados pasan a en_camino y el semáforo a on_route
   async function startRoute(orderIds) {
     setActionError(null);
-    const ids = orderIds
-      ? (Array.isArray(orderIds) ? orderIds : [orderIds])
-      : orders.filter((o) => o.status === "asignado").map((o) => o.id);
+
+    const normalizedIds = Array.isArray(orderIds)
+      ? orderIds.filter((id) => typeof id === "string" && id.trim().length > 0)
+      : typeof orderIds === "string" && orderIds.trim().length > 0
+        ? [orderIds.trim()]
+        : [];
+
+    const ids =
+      normalizedIds.length > 0
+        ? normalizedIds
+        : orders.filter((o) => o.status === "asignado").map((o) => o.id);
+
     if (ids.length === 0) return false;
     if (!useMock) {
       const { error: e } = await supabase
@@ -526,7 +535,7 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
       .from("profiles")
       .update({
         operational_status: next,
-        is_on_duty: next !== "offline",
+        is_on_duty: next !== "paused" && next !== "offline",
         updated_at: new Date().toISOString(),
       })
       .eq("id", user.id);

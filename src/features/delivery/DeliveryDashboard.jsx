@@ -431,7 +431,7 @@ function AssignedCard({
               <Button
                 variant="primary"
                 isLoading={isUpdating}
-                onClick={onStartRoute}
+                onClick={() => onStartRoute(order.id)}
                 className="w-full"
               >
                 Iniciar Ruta
