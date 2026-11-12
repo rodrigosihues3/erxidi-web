@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as RouterDom from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
@@ -6,12 +6,8 @@ import Button from "../../components/ui/Button";
 import Input from "../../components/ui/Input";
 import {
   Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   CardContent,
 } from "../../components/ui/Card";
-import Badge from "../../components/ui/Badge";
 import { lookupDni } from "../../services/api/dniService";
 import {
   Mail,
@@ -20,7 +16,6 @@ import {
   Search,
   Check,
   AlertCircle,
-  Edit3,
   ShieldCheck,
 } from "lucide-react";
 
@@ -58,6 +53,147 @@ function evaluatePasswordRules(password = "") {
   const isAllValid = passedCount === rules.length;
 
   return { rules, passedCount, isAllValid };
+}
+
+function DevShortcutsDraggable({ onQuickLogin }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== "undefined") {
+      return {
+        x: 24,
+        y: Math.max(0, window.innerHeight - 24 - 48),
+      };
+    }
+    return { x: 24, y: 500 };
+  });
+
+  const dragRef = useRef({
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    elemX: 0,
+    elemY: 0,
+    hasMoved: false,
+  });
+
+  const handlePointerDown = (e) => {
+    if (e.button !== 0) return;
+    dragRef.current = {
+      isDragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      elemX: position.x,
+      elemY: position.y,
+      hasMoved: false,
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handlePointerMove = (e) => {
+    if (!dragRef.current.isDragging) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+
+    if (Math.hypot(dx, dy) > 5) {
+      dragRef.current.hasMoved = true;
+    }
+
+    const maxX = Math.max(0, window.innerWidth - 50);
+    const maxY = Math.max(0, window.innerHeight - 50);
+    const newX = Math.min(Math.max(0, dragRef.current.elemX + dx), maxX);
+    const newY = Math.min(Math.max(0, dragRef.current.elemY + dy), maxY);
+
+    setPosition({ x: newX, y: newY });
+  };
+
+  const handlePointerUp = (e) => {
+    if (!dragRef.current.isDragging) return;
+    dragRef.current.isDragging = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    if (!dragRef.current.hasMoved) {
+      setIsOpen((prev) => !prev);
+    }
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition((pos) => ({
+        x: Math.min(pos.x, Math.max(0, window.innerWidth - 50)),
+        y: Math.min(pos.y, Math.max(0, window.innerHeight - 50)),
+      }));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return (
+    <div
+      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      className="fixed z-50 select-none touch-none"
+    >
+      {isOpen && (
+        <div
+          className="absolute bottom-14 left-0 mb-2 w-48 bg-surface-card border border-border rounded-card shadow-lg p-3 space-y-2 z-50"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-1 border-b border-border">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-brand-secondary flex items-center gap-1">
+              <UserCheck className="w-3.5 h-3.5 text-accent" />
+              Atajos de Testing
+            </span>
+          </div>
+          <div className="flex flex-col gap-1.5 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                onQuickLogin("cliente@erxidi.pe");
+                setIsOpen(false);
+              }}
+              className="text-xs py-1.5 px-2.5 text-left bg-surface-subtle border border-border rounded font-semibold text-brand-primary hover:bg-slate-200 transition-colors"
+            >
+              Cliente
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onQuickLogin("duena@erxidi.pe");
+                setIsOpen(false);
+              }}
+              className="text-xs py-1.5 px-2.5 text-left bg-amber-50 border border-amber-200 rounded font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
+            >
+              Dueña
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onQuickLogin("repartidor@erxidi.pe");
+                setIsOpen(false);
+              }}
+              className="text-xs py-1.5 px-2.5 text-left bg-slate-800 border border-slate-700 rounded font-semibold text-white hover:bg-slate-900 transition-colors"
+            >
+              Repartidor
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        className="w-12 h-12 rounded-full bg-surface-card border border-border shadow-md flex items-center justify-center text-brand-primary hover:text-accent hover:border-accent/40 active:cursor-grabbing cursor-grab transition-colors focus:outline-none"
+        title="Atajos de desarrollo (arrastrable)"
+      >
+        <UserCheck className="w-5 h-5 pointer-events-none" />
+      </button>
+    </div>
+  );
 }
 
 export default function LoginView() {
@@ -374,27 +510,12 @@ export default function LoginView() {
           </button>
         </div>
 
-        <CardHeader>
-          <div className="flex justify-between items-center mb-1">
-            <CardTitle>
-              {activeTab === "login"
-                ? "Acceso de Clientes"
-                : "Registro de Cuenta"}
-            </CardTitle>
-            <Badge variant="neutral">ERXIDI</Badge>
-          </div>
-          <CardDescription>
-            {activeTab === "login"
-              ? "Ingresa tus credenciales para acceder y gestionar tus pedidos."
-              : "Regístrate con tu DNI para disfrutar de pagos contra entrega y tracking."}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          {/* ========================================================= */}
-          {/* TAB 1: INICIAR SESIÓN */}
-          {/* ========================================================= */}
-          {activeTab === "login" && (
+        <CardContent className="pt-5">
+          <div className="transition-[max-height,opacity] duration-500 ease-in-out overflow-hidden">
+            {/* ========================================================= */}
+            {/* TAB 1: INICIAR SESIÓN */}
+            {/* ========================================================= */}
+            {activeTab === "login" && (
             <div className="space-y-4">
               {loginError && (
                 <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-center gap-2">
@@ -418,27 +539,14 @@ export default function LoginView() {
                   required
                 />
                 {!forgotPasswordMode && (
-                  <div>
-                    <div className="flex justify-between items-center">
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1.5">
-                        Contraseña
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setForgotPasswordMode(true)}
-                        className="text-xs font-medium text-accent hover:underline mb-1.5"
-                      >
-                        ¿Olvidaste tu contraseña?
-                      </button>
-                    </div>
-                    <Input
-                      type="password"
-                      placeholder="••••••••"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      required
-                    />
-                  </div>
+                  <Input
+                    label="Contraseña"
+                    type="password"
+                    placeholder="••••••••"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                  />
                 )}
 
                 {forgotPasswordMode && resetEmailSent && (
@@ -463,6 +571,18 @@ export default function LoginView() {
                     : "Ingresar a mi Cuenta"}
                 </Button>
 
+                {!forgotPasswordMode && (
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setForgotPasswordMode(true)}
+                      className="text-xs text-brand-secondary hover:text-brand-primary hover:underline transition-colors focus:outline-none"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </button>
+                  </div>
+                )}
+
                 {forgotPasswordMode && (
                   <button
                     type="button"
@@ -477,36 +597,6 @@ export default function LoginView() {
                   </button>
                 )}
               </form>
-
-              <div className="mt-6 pt-5 border-t border-border">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-brand-secondary mb-3 flex items-center gap-1.5">
-                  <UserCheck className="w-3.5 h-3.5 text-accent" />
-                  Atajos de Desarrollo (Testing):
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("cliente@erxidi.pe")}
-                    className="text-xs py-1.5 px-2 bg-surface-subtle border border-border rounded font-semibold text-brand-primary hover:bg-slate-200 transition-colors"
-                  >
-                    Cliente
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("duena@erxidi.pe")}
-                    className="text-xs py-1.5 px-2 bg-amber-50 border border-amber-200 rounded font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
-                  >
-                    Dueña
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("repartidor@erxidi.pe")}
-                    className="text-xs py-1.5 px-2 bg-slate-800 border border-slate-700 rounded font-semibold text-white hover:bg-slate-900 transition-colors"
-                  >
-                    Repartidor
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -616,24 +706,12 @@ export default function LoginView() {
 
                   {/* Nombres y Apellidos */}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <label
-                        htmlFor="reg-names"
-                        className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
-                      >
-                        Nombres
-                      </label>
-                      {isDniLocked && (
-                        <button
-                          type="button"
-                          onClick={() => setIsDniLocked(false)}
-                          className="text-[11px] text-accent hover:underline inline-flex items-center gap-1"
-                        >
-                          <Edit3 className="w-3 h-3" />
-                          Editar
-                        </button>
-                      )}
-                    </div>
+                    <label
+                      htmlFor="reg-names"
+                      className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
+                    >
+                      Nombres
+                    </label>
                     <Input
                       id="reg-names"
                       placeholder="Nombres completos"
@@ -642,7 +720,7 @@ export default function LoginView() {
                       readOnly={isDniLocked}
                       className={
                         isDniLocked
-                          ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                          ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
                           : ""
                       }
                       required
@@ -658,7 +736,7 @@ export default function LoginView() {
                         readOnly={isDniLocked}
                         className={
                           isDniLocked
-                            ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                            ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
                             : ""
                         }
                         required
@@ -672,7 +750,7 @@ export default function LoginView() {
                         readOnly={isDniLocked}
                         className={
                           isDniLocked
-                            ? "bg-slate-100 text-slate-700 cursor-not-allowed"
+                            ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
                             : ""
                         }
                       />
@@ -826,8 +904,11 @@ export default function LoginView() {
               )}
             </div>
           )}
+          </div>
         </CardContent>
       </Card>
+
+      <DevShortcutsDraggable onQuickLogin={handleQuickLogin} />
     </div>
   );
 }
