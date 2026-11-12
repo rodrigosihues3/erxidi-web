@@ -279,6 +279,7 @@ export async function sendOrderNotificationEmail({
   customerEmail,
   customerName,
   status,
+  targetStatus,
   deliveryType,
   deliveryAddress,
   scheduledTimeSlot,
@@ -337,7 +338,7 @@ export async function sendOrderNotificationEmail({
   };
 
   const template = createOrderStatusTemplate(
-    status || order?.status,
+    targetStatus || status || order?.status,
     orderData,
     driverInfo,
     incidentReason,

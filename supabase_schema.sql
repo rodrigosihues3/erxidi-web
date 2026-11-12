@@ -13,13 +13,35 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 
-CREATE SCHEMA IF NOT EXISTS "public";
-
-
-ALTER SCHEMA "public" OWNER TO "pg_database_owner";
-
-
 COMMENT ON SCHEMA "public" IS 'standard public schema';
+
+
+
+CREATE EXTENSION IF NOT EXISTS "pg_stat_statements" WITH SCHEMA "extensions";
+
+
+
+
+
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
+
+
+
+
+
+
+CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
+
+
+
+
+
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
+
+
+
 
 
 
@@ -655,11 +677,11 @@ CREATE TABLE IF NOT EXISTS "public"."products" (
     "has_size_guide" boolean DEFAULT true NOT NULL,
     "is_featured" boolean DEFAULT false NOT NULL,
     "is_active" boolean DEFAULT true NOT NULL,
-    "is_on_sale" boolean DEFAULT false NOT NULL,
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
     "target_gender" character varying(10) DEFAULT 'unisex'::character varying NOT NULL,
     "brand_id" bigint,
+    "is_on_sale" boolean DEFAULT false NOT NULL,
     CONSTRAINT "products_price_check" CHECK (("price" > (0)::numeric)),
     CONSTRAINT "products_target_gender_check" CHECK ((("target_gender")::"text" = ANY ((ARRAY['hombre'::character varying, 'mujer'::character varying, 'nino'::character varying, 'nina'::character varying, 'unisex'::character varying])::"text"[])))
 );
@@ -1378,10 +1400,182 @@ ALTER TABLE "public"."stock_reservations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."store_settings" ENABLE ROW LEVEL SECURITY;
 
 
+
+
+ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
+
+
+
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."orders";
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."product_color_images";
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."product_variants";
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."products";
+
+
+
 GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1430,6 +1624,21 @@ GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "service_role";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1613,6 +1822,12 @@ GRANT ALL ON TABLE "public"."v_product_variants_available" TO "service_role";
 
 
 
+
+
+
+
+
+
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
@@ -1637,6 +1852,34 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

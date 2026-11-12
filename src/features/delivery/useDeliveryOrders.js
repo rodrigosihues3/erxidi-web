@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../services/supabase";
 import { useAuth } from "../../context/AuthContext";
+import { sendOrderNotificationEmail } from "../admin/services/orderNotification.service";
 import {
   VISIBLE_DB_STATUSES,
   PICKUP_TYPES,
@@ -24,7 +25,7 @@ const POOL_ELIGIBLE_STATUSES = [
 const ORDERS_SELECT = `
   id, order_number, status, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_status, created_at, updated_at,
-  customer_name, customer_phone, delivery_address, scheduled_time_slot,
+  customer_name, customer_email, customer_phone, delivery_address, scheduled_time_slot,
   delivery_latitude, delivery_longitude, incident_reason, incident_comment,
   items:order_items(
     id, quantity, unit_price, subtotal, variant_id,
@@ -39,7 +40,7 @@ const ORDERS_SELECT = `
 const POOL_ORDERS_SELECT = `
   id, order_number, status, delivery_type, delivery_cost, subtotal,
   total_amount, payment_method, payment_status, created_at, updated_at,
-  customer_name, customer_phone, delivery_address, scheduled_time_slot,
+  customer_name, customer_email, customer_phone, delivery_address, scheduled_time_slot,
   delivery_latitude, delivery_longitude,
   order_items ( id, quantity, variant_id, product_variants ( products ( name ) ) )
 `;
@@ -298,6 +299,22 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
       ),
     );
     setUpdatingId(null);
+
+    if (["en_camino", "cerca", "en_destino", "entregado"].includes(newStatus)) {
+      if (order) {
+        sendOrderNotificationEmail({
+          order: { ...order, status: newStatus },
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerEmail: order.customer_email || order.client_email,
+          customerName: order.customer_name,
+          targetStatus: newStatus,
+          status: newStatus,
+          driverInfo: profile,
+        }).catch((err) => console.error(`Error al notificar ${newStatus}:`, err));
+      }
+    }
+
     return true;
   }
 
@@ -412,6 +429,24 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
           ),
     );
     setUpdatingId(null);
+
+    if (!returnToPool) {
+      const order = orders.find((o) => o.id === orderId);
+      if (order) {
+        sendOrderNotificationEmail({
+          order: { ...order, status: "incidencia_transporte", incident_reason: reason },
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerEmail: order.customer_email || order.client_email,
+          customerName: order.customer_name,
+          targetStatus: "incidencia_transporte",
+          status: "incidencia_transporte",
+          incidentReason: reason,
+          driverInfo: profile,
+        }).catch((err) => console.error("Error al notificar incidencia_transporte:", err));
+      }
+    }
+
     return true;
   }
 
@@ -441,9 +476,11 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
   }
 
   // Inicia ruta: todos los pedidos en base pasan a en_camino y el semáforo a on_route
-  async function startRoute() {
+  async function startRoute(orderIds) {
     setActionError(null);
-    const ids = orders.filter((o) => o.status === "asignado").map((o) => o.id);
+    const ids = orderIds
+      ? (Array.isArray(orderIds) ? orderIds : [orderIds])
+      : orders.filter((o) => o.status === "asignado").map((o) => o.id);
     if (ids.length === 0) return false;
     if (!useMock) {
       const { error: e } = await supabase
@@ -460,17 +497,38 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
       prev.map((o) => (ids.includes(o.id) ? { ...o, status: "en_camino" } : o)),
     );
     await changeOperationalStatus("on_route");
+
+    ids.forEach((id) => {
+      const targetOrder = orders.find((o) => o.id === id);
+      if (targetOrder) {
+        sendOrderNotificationEmail({
+          order: { ...targetOrder, status: "en_camino" },
+          orderId: targetOrder.id,
+          orderNumber: targetOrder.order_number,
+          customerEmail: targetOrder.customer_email || targetOrder.client_email,
+          customerName: targetOrder.customer_name,
+          targetStatus: "en_camino",
+          status: "en_camino",
+          driverInfo: profile,
+        }).catch((err) => console.error("Error al notificar en_camino:", err));
+      }
+    });
+
     return true;
   }
 
-  // Semáforo operativo persistido en profiles.operational_status
+  // Semáforo operativo persistido en profiles.operational_status y profiles.is_on_duty
   async function changeOperationalStatus(next) {
     const previous = operationalStatus;
     setOperationalStatus(next);
     if (useMock || !user?.id) return true;
     const { error: e } = await supabase
       .from("profiles")
-      .update({ operational_status: next })
+      .update({
+        operational_status: next,
+        is_on_duty: next !== "offline",
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", user.id);
     if (e) {
       setOperationalStatus(previous);

@@ -465,15 +465,6 @@ export function subscribeCouriersRealtime(onCourierUpdate) {
     .channel("couriers_realtime_status")
     .on(
       "postgres_changes",
-      { event: "UPDATE", schema: "public", table: "delivery_users" },
-      (payload) => {
-        if (payload?.new) {
-          onCourierUpdate(payload.new);
-        }
-      },
-    )
-    .on(
-      "postgres_changes",
       { event: "UPDATE", schema: "public", table: "profiles" },
       (payload) => {
         if (payload?.new) {
@@ -481,11 +472,6 @@ export function subscribeCouriersRealtime(onCourierUpdate) {
         }
       },
     )
-    .on("broadcast", { event: "courier_status_change" }, (payload) => {
-      if (payload?.payload) {
-        onCourierUpdate(payload.payload);
-      }
-    })
     .subscribe();
 
   return () => {
