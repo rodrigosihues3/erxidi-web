@@ -39,11 +39,27 @@ const formatDate = (isoString) => {
 };
 
 const STATUS_CONFIG = {
+  // Estados en Español (Base de datos real)
+  recibido: { label: "Recibido", variant: "neutral", group: "active" },
+  pendiente_pago: { label: "Pendiente de Pago", variant: "warning", group: "active" },
+  en_preparacion: { label: "En Preparación", variant: "warning", group: "active" },
+  por_asignar_repartidor: { label: "Por Asignar", variant: "warning", group: "active" },
+  asignado: { label: "Asignado", variant: "neutral", group: "active" },
+  listo_recojo: { label: "Listo para Recojo", variant: "neutral", group: "active" },
+  en_camino: { label: "En Camino", variant: "neutral", group: "active" },
+  cerca: { label: "Cerca de Ti", variant: "warning", group: "active" },
+  en_destino: { label: "En Destino", variant: "warning", group: "active" },
+  entregado: { label: "Entregado", variant: "success", group: "delivered" },
+  cancelado: { label: "Cancelado", variant: "danger", group: "cancelled" },
+  incidencia_transporte: { label: "Incidencia", variant: "danger", group: "active" },
+
+  // Compatibilidad en Inglés
   received: { label: "Recibido", variant: "neutral", group: "active" },
   pending: { label: "Pendiente", variant: "warning", group: "active" },
   preparing: { label: "En Preparación", variant: "warning", group: "active" },
   dispatched: { label: "En Camino", variant: "neutral", group: "active" },
   nearby: { label: "Cerca de Ti", variant: "warning", group: "active" },
+  arrived: { label: "En Destino", variant: "warning", group: "active" },
   delivered: { label: "Entregado", variant: "success", group: "delivered" },
   cancelled: { label: "Cancelado", variant: "danger", group: "cancelled" },
 };
@@ -149,7 +165,7 @@ export default function OrdersHistoryView() {
   }, [filteredOrders, safePage]);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 space-y-6">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
       {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <div>
@@ -348,8 +364,8 @@ export default function OrdersHistoryView() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 text-xs">
-                  <div className="sm:col-span-5 space-y-1.5 border-b sm:border-b-0 sm:border-r border-border pb-3 sm:pb-0 sm:pr-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div className="space-y-1.5">
                     <p className="font-semibold text-brand-primary flex items-center gap-1.5">
                       <Truck className="w-3.5 h-3.5 text-accent" />
                       {order.delivery_type === "express"
@@ -361,45 +377,19 @@ export default function OrdersHistoryView() {
                     <p className="text-brand-secondary truncate">
                       {order.delivery_address || "Dirección no especificada"}
                     </p>
-                    <p className="text-[11px] text-brand-muted">
-                      Comprobante:{" "}
-                      {order.invoice_type?.toUpperCase() || "BOLETA"}
-                    </p>
                   </div>
 
-                  <div className="sm:col-span-7 flex flex-col justify-between">
-                    <div className="space-y-1.5">
-                      <p className="font-semibold text-brand-primary flex items-center gap-1.5">
-                        <ShoppingBag className="w-3.5 h-3.5 text-brand-muted" />
-                        {totalUnits} {totalUnits === 1 ? "prenda" : "prendas"}{" "}
-                        en total
-                      </p>
-                      <div className="space-y-1 max-h-20 overflow-y-auto pr-1">
-                        {items.slice(0, 3).map((item, idx) => (
-                          <div
-                            key={item.id || idx}
-                            className="flex justify-between text-[11px] text-brand-secondary"
-                          >
-                            <span className="truncate max-w-[200px]">
-                              &bull;{" "}
-                              {item.product_name ||
-                                "Prenda #" + (idx + 1)}{" "}
-                              (x{item.quantity})
-                            </span>
-                            <span className="font-mono font-medium text-brand-primary">
-                              {formatCurrency(
-                                item.subtotal || item.unit_price * item.quantity
-                              )}
-                            </span>
-                          </div>
-                        ))}
-                        {items.length > 3 && (
-                          <p className="text-[10px] text-brand-muted italic">
-                            + {items.length - 3} prenda(s) más...
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                  <div className="space-y-1.5 sm:border-l sm:border-border sm:pl-4">
+                    <p className="font-semibold text-brand-primary flex items-center gap-1.5">
+                      <ShoppingBag className="w-3.5 h-3.5 text-brand-muted" />
+                      {totalUnits} {totalUnits === 1 ? "prenda" : "prendas"} en total
+                    </p>
+                    <p className="text-[11px] text-brand-muted">
+                      Comprobante:{" "}
+                      {order.invoice_type?.toLowerCase() === "factura"
+                        ? "Factura"
+                        : "Boleta"}
+                    </p>
                   </div>
                 </div>
 
@@ -413,7 +403,7 @@ export default function OrdersHistoryView() {
                         : "Contra Entrega"}
                   </span>
 
-                  <Link to={"/seguimiento/" + order.order_number}>
+                  <Link to={`/seguimiento/${order.order_number}`}>
                     <Button
                       variant="primary"
                       size="sm"
