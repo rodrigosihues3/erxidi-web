@@ -540,13 +540,9 @@ export default function HomeView() {
                 </div>
 
                 <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-slate-400">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/catalogo?categoria=${currentItem.categorySlug || ""}`)}
-                    className="hover:text-white hover:underline transition-colors focus:outline-none"
-                  >
-                    {currentItem.name} · Ver en catálogo ➔
-                  </button>
+                  <span>
+                    {currentItem.name} · Toca los puntos (+) para inspeccionar
+                  </span>
                 </div>
               </div>
             </div>
