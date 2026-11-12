@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Ruler,
@@ -38,75 +38,96 @@ export default function HomeView() {
   const [dbSaleProducts, setDbSaleProducts] = useState([]);
   const [loadingSale, setLoadingSale] = useState(true);
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadFeatured() {
-      try {
-        setLoadingFeatured(true);
-        const { data, error } = await supabase
-          .from("products")
-          .select(`
-            id, name, slug, price, main_image_url, target_gender, is_featured, is_on_sale, is_active,
-            product_color_images (*),
-            product_variants (
-              id, color, color_hex, stock, is_active, image_url,
-              sizes:size_id ( id, name )
-            )
-          `)
-          .eq("is_active", true)
-          .eq("is_featured", true)
-          .limit(8);
+  const loadFeatured = useCallback(async () => {
+    try {
+      setLoadingFeatured(true);
+      const { data, error } = await supabase
+        .from("products")
+        .select(`
+          id, name, slug, price, main_image_url, target_gender, is_featured, is_on_sale, is_active,
+          product_color_images (*),
+          product_variants (
+            id, color, color_hex, stock, is_active, image_url,
+            sizes:size_id ( id, name )
+          )
+        `)
+        .eq("is_active", true)
+        .eq("is_featured", true)
+        .limit(8);
 
-        if (error) throw error;
-        if (isMounted) {
-          setDbFeaturedProducts(data || []);
-        }
-      } catch (err) {
-        console.error("Error al cargar destacados desde Supabase:", err);
-      } finally {
-        if (isMounted) setLoadingFeatured(false);
-      }
+      if (error) throw error;
+      setDbFeaturedProducts(data || []);
+    } catch (err) {
+      console.error("Error al cargar destacados desde Supabase:", err);
+    } finally {
+      setLoadingFeatured(false);
     }
+  }, []);
+
+  const loadSaleProducts = useCallback(async () => {
+    try {
+      setLoadingSale(true);
+      const { data, error } = await supabase
+        .from("products")
+        .select(`
+          id, name, slug, price, main_image_url, target_gender, is_featured, is_on_sale, is_active,
+          product_color_images (*),
+          product_variants (
+            id, color, color_hex, stock, is_active, image_url,
+            sizes:size_id ( id, name )
+          )
+        `)
+        .eq("is_active", true)
+        .eq("is_on_sale", true)
+        .limit(4);
+
+      if (error) throw error;
+      setDbSaleProducts(data || []);
+    } catch (err) {
+      console.error("Error al cargar promociones desde Supabase:", err);
+    } finally {
+      setLoadingSale(false);
+    }
+  }, []);
+
+  useEffect(() => {
     loadFeatured();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    loadSaleProducts();
+  }, [loadFeatured, loadSaleProducts]);
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadSaleProducts() {
-      try {
-        setLoadingSale(true);
-        const { data, error } = await supabase
-          .from("products")
-          .select(`
-            id, name, slug, price, main_image_url, target_gender, is_featured, is_on_sale, is_active,
-            product_color_images (*),
-            product_variants (
-              id, color, color_hex, stock, is_active, image_url,
-              sizes:size_id ( id, name )
-            )
-          `)
-          .eq("is_active", true)
-          .eq("is_on_sale", true)
-          .limit(4);
-
-        if (error) throw error;
-        if (isMounted) {
-          setDbSaleProducts(data || []);
+    const channel = supabase
+      .channel("home-products-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "products" },
+        () => {
+          loadFeatured();
+          loadSaleProducts();
         }
-      } catch (err) {
-        console.error("Error al cargar promociones desde Supabase:", err);
-      } finally {
-        if (isMounted) setLoadingSale(false);
-      }
-    }
-    loadSaleProducts();
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_variants" },
+        () => {
+          loadFeatured();
+          loadSaleProducts();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_color_images" },
+        () => {
+          loadFeatured();
+          loadSaleProducts();
+        }
+      )
+      .subscribe();
+
     return () => {
-      isMounted = false;
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [loadFeatured, loadSaleProducts]);
 
   const featuredProducts = useMemo(() => {
     // Si hay datos en base de datos con is_featured = true, se usan los de Supabase.

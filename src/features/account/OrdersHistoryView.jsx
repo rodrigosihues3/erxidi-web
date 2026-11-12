@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
@@ -83,41 +83,70 @@ export default function OrdersHistoryView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  useEffect(() => {
-    let isMounted = true;
+  const fetchUserOrders = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
 
-    async function fetchUserOrders() {
-      if (!user) return;
-      setLoading(true);
-      setError(null);
+    try {
+      const { data, error: queryError } = await supabase
+        .from("orders")
+        .select("*, order_items(*)")
+        .eq("customer_id", user.id)
+        .order("created_at", { ascending: false });
 
-      try {
-        const { data, error: queryError } = await supabase
-          .from("orders")
-          .select("*, order_items(*)")
-          .eq("customer_id", user.id)
-          .order("created_at", { ascending: false });
-
-        if (queryError) throw queryError;
-        if (isMounted) setOrders(data || []);
-      } catch (err) {
-        console.error("Error al obtener pedidos:", err);
-        if (isMounted) {
-          setError(
-            err.message || "No se pudieron cargar tus pedidos en este momento."
-          );
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+      if (queryError) throw queryError;
+      setOrders(data || []);
+    } catch (err) {
+      console.error("Error al obtener pedidos:", err);
+      setError(
+        err.message || "No se pudieron cargar tus pedidos en este momento."
+      );
+    } finally {
+      setLoading(false);
     }
+  }, [user]);
 
+  const fetchOrdersRef = useRef(fetchUserOrders);
+  fetchOrdersRef.current = fetchUserOrders;
+
+  useEffect(() => {
     fetchUserOrders();
+  }, [fetchUserOrders]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`orders-history-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `customer_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === "UPDATE" && payload.new) {
+            setOrders((prev) =>
+              prev.map((ord) =>
+                ord.id === payload.new.id
+                  ? { ...ord, ...payload.new }
+                  : ord
+              )
+            );
+          } else {
+            fetchOrdersRef.current?.();
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
-      isMounted = false;
+      supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user?.id]);
 
   // Filtrado reactivo de pedidos
   const filteredOrders = useMemo(() => {

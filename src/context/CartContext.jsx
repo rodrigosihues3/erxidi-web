@@ -56,7 +56,7 @@ export function CartProvider({ children }) {
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
-  // 1. Suscripción Supabase Realtime a cambios de inventario
+  // 1. Suscripción Supabase Realtime a cambios de inventario y productos
   useEffect(() => {
     const channel = supabase
       .channel("public:product_variants_cart")
@@ -77,12 +77,52 @@ export function CartProvider({ children }) {
               if (Number(item.variantId) === Number(updated.id)) {
                 hasChanges = true;
                 const newStock = Number(updated.stock);
+                const isInactive = updated.is_active === false;
+                const effectiveStock = isInactive ? 0 : newStock;
                 return {
                   ...item,
-                  stock: newStock,
-                  availableStock: newStock,
-                  isOutOfStock: newStock <= 0,
-                  isShortStock: newStock < Number(item.quantity),
+                  stock: effectiveStock,
+                  availableStock: effectiveStock,
+                  isOutOfStock: isInactive || effectiveStock <= 0,
+                  isShortStock: !isInactive && effectiveStock < Number(item.quantity),
+                };
+              }
+              return item;
+            });
+            return hasChanges ? next : prevItems;
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "products",
+        },
+        (payload) => {
+          const updatedProduct = payload.new;
+          if (!updatedProduct) return;
+
+          setItems((prevItems) => {
+            let hasChanges = false;
+            const next = prevItems.map((item) => {
+              const itemProductId = Number(item.productId || item.product_id);
+              if (itemProductId === Number(updatedProduct.id)) {
+                hasChanges = true;
+                const newPrice = Number(updatedProduct.price);
+                const isInactive = updatedProduct.is_active === false;
+                return {
+                  ...item,
+                  price: !isNaN(newPrice) ? newPrice : item.price,
+                  ...(isInactive
+                    ? {
+                        stock: 0,
+                        availableStock: 0,
+                        isOutOfStock: true,
+                        isShortStock: true,
+                      }
+                    : {}),
                 };
               }
               return item;

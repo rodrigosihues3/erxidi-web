@@ -17,6 +17,7 @@ import SizeMatcherModal from "./components/SizeMatcherModal";
 import SizeCalculatorAccordion from "./components/SizeCalculatorAccordion";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
+import { supabase } from "../../services/supabase";
 import { useCart } from "../../context/CartContext";
 import { useAuth } from "../../context/AuthContext";
 import { getUserMeasurements } from "./utils/sizeCalculator";
@@ -30,19 +31,35 @@ export default function ProductDetailView({
   onAddToCart,
   onBack,
 }) {
-  const currentProduct = product || mockProducts[0];
+  const [productDetails, setProductDetails] = useState(
+    () => product || mockProducts[0]
+  );
+
+  useEffect(() => {
+    setProductDetails(product || mockProducts[0]);
+  }, [product]);
+
+  const currentProduct = productDetails;
   const { items: cartItems, addItem } = useCart();
   const { profile } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const initialColorParam = searchParams.get("color");
 
+  const [variants, setVariants] = useState(
+    () => currentProduct?.product_variants || []
+  );
+
+  useEffect(() => {
+    setVariants(currentProduct?.product_variants || []);
+  }, [currentProduct?.id, currentProduct?.product_variants]);
+
   const activeVariants = useMemo(
     () =>
-      (currentProduct?.product_variants || []).filter(
+      (variants || []).filter(
         (v) => v.is_active !== false
       ),
-    [currentProduct]
+    [variants]
   );
 
   const availableColors = useMemo(() => {
@@ -103,6 +120,90 @@ export default function ProductDetailView({
   const [sizeGuides, setSizeGuides] = useState(
     currentProduct?.size_guides || []
   );
+
+  useEffect(() => {
+    if (!currentProduct?.id) return;
+
+    const channel = supabase
+      .channel(`product-detail-${currentProduct.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "product_variants",
+          filter: `product_id=eq.${currentProduct.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === "UPDATE" && payload.new) {
+            setVariants((prev) =>
+              prev.map((v) =>
+                v.id === payload.new.id ? { ...v, ...payload.new } : v
+              )
+            );
+            setSelectedVariant((prev) =>
+              prev && prev.id === payload.new.id
+                ? { ...prev, ...payload.new }
+                : prev
+            );
+          } else if (payload.eventType === "INSERT" && payload.new) {
+            setVariants((prev) => [...prev, payload.new]);
+          } else if (payload.eventType === "DELETE" && payload.old) {
+            setVariants((prev) => prev.filter((v) => v.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "products",
+          filter: `id=eq.${currentProduct.id}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            setProductDetails((prev) => ({
+              ...prev,
+              name: payload.new.name,
+              price: Number(payload.new.price),
+              description: payload.new.description,
+              is_active: payload.new.is_active,
+            }));
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "product_color_images",
+          filter: `product_id=eq.${currentProduct.id}`,
+        },
+        async () => {
+          try {
+            const { data, error } = await supabase
+              .from("product_color_images")
+              .select("*")
+              .eq("product_id", currentProduct.id);
+            if (!error && data) {
+              setProductDetails((prev) => ({
+                ...prev,
+                product_color_images: data,
+              }));
+            }
+          } catch (err) {
+            console.error("Error al actualizar imágenes de color:", err);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentProduct?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -283,7 +384,10 @@ export default function ProductDetailView({
   const availableLeft = Math.max(0, stockAfterCart - quantity);
 
   const isOutOfStock =
-    !selectedVariant || selectedVariant.is_active === false || totalStock <= 0;
+    !selectedVariant ||
+    selectedVariant.is_active === false ||
+    currentProduct?.is_active === false ||
+    totalStock <= 0;
 
   const isCartLimitReached = !isOutOfStock && stockAfterCart === 0;
   const isSelectionLimitReached =

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { supabase } from "../../../services/supabase";
 import {
   getCategories,
   getMaterials,
@@ -44,6 +45,9 @@ export function useCatalog(filterOptions = {}) {
     }
   }, [filterOptions.categorySlug, filterOptions.targetGender]);
 
+  const fetchDataRef = useRef(fetchData);
+  fetchDataRef.current = fetchData;
+
   useEffect(() => {
     fetchData();
 
@@ -58,6 +62,37 @@ export function useCatalog(filterOptions = {}) {
       };
     }
   }, [fetchData]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("catalog-products-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "products" },
+        () => {
+          fetchDataRef.current?.();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_variants" },
+        () => {
+          fetchDataRef.current?.();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "product_color_images" },
+        () => {
+          fetchDataRef.current?.();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   return {
     products,
