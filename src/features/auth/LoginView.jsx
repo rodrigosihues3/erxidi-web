@@ -55,6 +55,34 @@ function evaluatePasswordRules(password = "") {
   return { rules, passedCount, isAllValid };
 }
 
+const DEMO_SHORTCUTS = [
+  {
+    label: "Cliente",
+    email: "cliente@erxidi.pe",
+    password: "Demo#1234",
+    className:
+      "bg-surface-subtle text-brand-primary border-border hover:bg-slate-200",
+  },
+  {
+    label: "Dueña",
+    email: "duena@erxidi.pe",
+    password: "Password123*",
+    className: "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100",
+  },
+  {
+    label: "Repartidor · Express",
+    email: "express@erxidi.pe",
+    password: "Demo#1234",
+    className: "bg-slate-900 text-white border-slate-900 hover:bg-slate-950",
+  },
+  {
+    label: "Repartidor · Programado",
+    email: "programado@erxidi.pe",
+    password: "Demo#1234",
+    className: "bg-slate-800 text-white border-slate-700 hover:bg-slate-900",
+  },
+];
+
 function DevShortcutsDraggable({ onQuickLogin }) {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState(() => {
@@ -88,7 +116,7 @@ function DevShortcutsDraggable({ onQuickLogin }) {
     };
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {}
+    } catch { }
   };
 
   const handlePointerMove = (e) => {
@@ -113,7 +141,7 @@ function DevShortcutsDraggable({ onQuickLogin }) {
     dragRef.current.isDragging = false;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch { }
 
     if (!dragRef.current.hasMoved) {
       setIsOpen((prev) => !prev);
@@ -138,7 +166,7 @@ function DevShortcutsDraggable({ onQuickLogin }) {
     >
       {isOpen && (
         <div
-          className="absolute bottom-14 left-0 mb-2 w-48 bg-surface-card border border-border rounded-card shadow-lg p-3 space-y-2 z-50"
+          className="absolute bottom-14 left-0 mb-2 w-56 min-w-[220px] bg-surface-card border border-border rounded-card shadow-lg p-3 space-y-2 z-50"
           onPointerDown={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between pb-1 border-b border-border">
@@ -148,36 +176,19 @@ function DevShortcutsDraggable({ onQuickLogin }) {
             </span>
           </div>
           <div className="flex flex-col gap-1.5 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                onQuickLogin("cliente@erxidi.pe");
-                setIsOpen(false);
-              }}
-              className="text-xs py-1.5 px-2.5 text-left bg-surface-subtle border border-border rounded font-semibold text-brand-primary hover:bg-slate-200 transition-colors"
-            >
-              Cliente
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onQuickLogin("duena@erxidi.pe");
-                setIsOpen(false);
-              }}
-              className="text-xs py-1.5 px-2.5 text-left bg-amber-50 border border-amber-200 rounded font-semibold text-amber-800 hover:bg-amber-100 transition-colors"
-            >
-              Dueña
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onQuickLogin("repartidor@erxidi.pe");
-                setIsOpen(false);
-              }}
-              className="text-xs py-1.5 px-2.5 text-left bg-slate-800 border border-slate-700 rounded font-semibold text-white hover:bg-slate-900 transition-colors"
-            >
-              Repartidor
-            </button>
+            {DEMO_SHORTCUTS.map((shortcut) => (
+              <button
+                key={shortcut.email}
+                type="button"
+                onClick={() => {
+                  onQuickLogin(shortcut.email, shortcut.password);
+                  setIsOpen(false);
+                }}
+                className={`text-xs py-1.5 px-2.5 text-left border rounded font-semibold whitespace-nowrap transition-colors ${shortcut.className}`}
+              >
+                {shortcut.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -456,14 +467,16 @@ export default function LoginView() {
     }
   }
 
-  async function handleQuickLogin(testEmail) {
+  async function handleQuickLogin(testEmail, testPassword) {
+    setActiveTab("login");
+    setForgotPasswordMode(false);
     setLoginEmail(testEmail);
-    setLoginPassword("Password123*");
+    setLoginPassword(testPassword);
     setLoginError(null);
     setLoginLoading(true);
 
     try {
-      const { error } = await signIn(testEmail, "Password123*");
+      const { error } = await signIn(testEmail, testPassword);
       if (error) throw error;
       navigate(redirectPath, { replace: true });
     } catch (err) {
@@ -516,394 +529,394 @@ export default function LoginView() {
             {/* TAB 1: INICIAR SESIÓN */}
             {/* ========================================================= */}
             {activeTab === "login" && (
-            <div className="space-y-4">
-              {loginError && (
-                <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 shrink-0" />
-                  <span>{loginError}</span>
-                </div>
-              )}
-
-              <form
-                onSubmit={
-                  forgotPasswordMode ? handleResetPassword : handleLoginSubmit
-                }
-                className="space-y-4"
-              >
-                <Input
-                  label="Correo Electrónico"
-                  type="email"
-                  placeholder="usuario@erxidi.pe"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  required
-                />
-                {!forgotPasswordMode && (
-                  <Input
-                    label="Contraseña"
-                    type="password"
-                    placeholder="••••••••"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    required
-                  />
-                )}
-
-                {forgotPasswordMode && resetEmailSent && (
-                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-button text-xs flex items-start gap-2">
-                    <Check className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>
-                      Se ha enviado un enlace de recuperación a tu correo.
-                      Revisa también tu bandeja de spam.
-                    </span>
+              <div className="space-y-4">
+                {loginError && (
+                  <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 shrink-0" />
+                    <span>{loginError}</span>
                   </div>
                 )}
 
-                <Button
-                  type="submit"
-                  variant="primary"
-                  className="w-full mt-2 bg-accent hover:bg-accent-hover text-white"
-                  isLoading={loginLoading}
+                <form
+                  onSubmit={
+                    forgotPasswordMode ? handleResetPassword : handleLoginSubmit
+                  }
+                  className="space-y-4"
                 >
-                  <Mail className="w-4 h-4 mr-2" />
-                  {forgotPasswordMode
-                    ? "Enviar Enlace"
-                    : "Ingresar a mi Cuenta"}
-                </Button>
-
-                {!forgotPasswordMode && (
-                  <div className="pt-2 text-center">
-                    <button
-                      type="button"
-                      onClick={() => setForgotPasswordMode(true)}
-                      className="text-xs text-brand-secondary hover:text-brand-primary hover:underline transition-colors focus:outline-none"
-                    >
-                      ¿Olvidaste tu contraseña?
-                    </button>
-                  </div>
-                )}
-
-                {forgotPasswordMode && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForgotPasswordMode(false);
-                      setResetEmailSent(false);
-                      setLoginError(null);
-                    }}
-                    className="w-full text-center text-xs font-medium text-brand-secondary hover:text-brand-primary"
-                  >
-                    Volver a iniciar sesión
-                  </button>
-                )}
-              </form>
-            </div>
-          )}
-
-          {/* ========================================================= */}
-          {/* TAB 2: CREAR CUENTA (Con Checklist de Contraseña Reactivo) */}
-          {/* ========================================================= */}
-          {activeTab === "register" && (
-            <div className="space-y-4">
-              {registerSuccessMessage ? (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-card space-y-3 text-center">
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
-                    <Check className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-sm font-bold text-emerald-900">
-                    ¡Cuenta creada exitosamente!
-                  </h3>
-                  <p className="text-xs text-emerald-800 leading-relaxed">
-                    {registerSuccessMessage}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setRegisterSuccessMessage(null);
-                      setActiveTab("login");
-                    }}
-                    className="mt-2 text-xs"
-                  >
-                    Ir a Iniciar Sesión
-                  </Button>
-                </div>
-              ) : (
-                <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
-                  {registerError && (
-                    <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span>{registerError}</span>
-                    </div>
-                  )}
-
-                  {/* Búsqueda de DNI */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label
-                        htmlFor="reg-dni"
-                        className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
-                      >
-                        DNI (8 dígitos) - Opcional
-                      </label>
-                      {isSearchingDni && (
-                        <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
-                          Consultando RENIEC...
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex gap-2 items-center">
-                      <div className="flex-1">
-                        <Input
-                          id="reg-dni"
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="8 dígitos (opcional)"
-                          maxLength={8}
-                          value={dni}
-                          onChange={handleDniChange}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              handleDniLookup();
-                            }
-                          }}
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="md"
-                        onClick={() => handleDniLookup()}
-                        disabled={isSearchingDni || dni.length !== 8}
-                        className="h-10 px-3.5 shrink-0"
-                        title="Buscar en RENIEC"
-                      >
-                        <Search className="w-4 h-4 text-brand-primary" />
-                      </Button>
-                    </div>
-
-                    {dniFeedback && (
-                      <div
-                        className={
-                          "mt-1.5 text-xs flex items-center gap-1.5 " +
-                          (dniFeedback.type === "success"
-                            ? "text-emerald-600 font-medium"
-                            : "text-amber-600")
-                        }
-                      >
-                        {dniFeedback.type === "success" ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : (
-                          <AlertCircle className="w-3.5 h-3.5" />
-                        )}
-                        <span>{dniFeedback.message}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Nombres y Apellidos */}
-                  <div className="space-y-3">
-                    <label
-                      htmlFor="reg-names"
-                      className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
-                    >
-                      Nombres
-                    </label>
-                    <Input
-                      id="reg-names"
-                      placeholder="Nombres completos"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      readOnly={isDniLocked}
-                      className={
-                        isDniLocked
-                          ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
-                          : ""
-                      }
-                      required
-                    />
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        label="Ap. Paterno"
-                        id="reg-paternal"
-                        placeholder="Paterno"
-                        value={paternalSurname}
-                        onChange={(e) => setPaternalSurname(e.target.value)}
-                        readOnly={isDniLocked}
-                        className={
-                          isDniLocked
-                            ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
-                            : ""
-                        }
-                        required
-                      />
-                      <Input
-                        label="Ap. Materno"
-                        id="reg-maternal"
-                        placeholder="Materno"
-                        value={maternalSurname}
-                        onChange={(e) => setMaternalSurname(e.target.value)}
-                        readOnly={isDniLocked}
-                        className={
-                          isDniLocked
-                            ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
-                            : ""
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <Input
-                    label="Teléfono Celular"
-                    id="reg-phone"
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={9}
-                    placeholder="9XXXXXXXX"
-                    value={phone}
-                    onChange={(e) =>
-                      setPhone(e.target.value.replace(/\D/g, "").slice(0, 9))
-                    }
-                    required
-                  />
-
                   <Input
                     label="Correo Electrónico"
-                    id="reg-email"
                     type="email"
-                    placeholder="tu.correo@ejemplo.pe"
-                    value={registerEmail}
-                    onChange={(e) => setRegisterEmail(e.target.value)}
+                    placeholder="usuario@erxidi.pe"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
                     required
                   />
+                  {!forgotPasswordMode && (
+                    <Input
+                      label="Contraseña"
+                      type="password"
+                      placeholder="••••••••"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      required
+                    />
+                  )}
 
-                  {/* Contraseñas con Validación Interactiva */}
-                  <div className="space-y-3 pt-1">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <Input
-                        label="Contraseña"
-                        id="reg-pass"
-                        type="password"
-                        placeholder="Crea una clave segura"
-                        value={registerPassword}
-                        onChange={(e) => setRegisterPassword(e.target.value)}
-                        required
-                      />
-                      <Input
-                        label="Confirmar"
-                        id="reg-confirm-pass"
-                        type="password"
-                        placeholder="Repite contraseña"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        required
-                      />
+                  {forgotPasswordMode && resetEmailSent && (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-button text-xs flex items-start gap-2">
+                      <Check className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>
+                        Se ha enviado un enlace de recuperación a tu correo.
+                        Revisa también tu bandeja de spam.
+                      </span>
                     </div>
-
-                    {/* Panel Dinámico de Cumplimiento de Contraseña */}
-                    <div className="p-3 rounded-card bg-surface-subtle border border-border space-y-2.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold uppercase tracking-wider text-brand-secondary flex items-center gap-1">
-                          <ShieldCheck className="w-3.5 h-3.5 text-accent" />
-                          Seguridad de la contraseña
-                        </span>
-                        <span className="font-mono font-bold text-brand-primary">
-                          {passwordCheck.passedCount}/5 reglas
-                        </span>
-                      </div>
-
-                      {/* Barra de progreso segmentada */}
-                      <div className="grid grid-cols-5 gap-1 h-1.5">
-                        {[1, 2, 3, 4, 5].map((step) => {
-                          const active = passwordCheck.passedCount >= step;
-                          const barColor =
-                            passwordCheck.passedCount <= 2
-                              ? "bg-rose-500"
-                              : passwordCheck.passedCount <= 4
-                                ? "bg-amber-500"
-                                : "bg-emerald-600";
-                          return (
-                            <div
-                              key={step}
-                              className={
-                                "rounded-full transition-all duration-200 " +
-                                (active ? barColor : "bg-slate-200")
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-
-                      <ul className="space-y-1 text-[11px]">
-                        {passwordCheck.rules.map((rule) => (
-                          <li
-                            key={rule.id}
-                            className={
-                              "flex items-center gap-1.5 transition-colors " +
-                              (rule.passed
-                                ? "text-emerald-700 font-semibold"
-                                : registerPassword.length > 0
-                                  ? "text-rose-600"
-                                  : "text-brand-muted")
-                            }
-                          >
-                            {rule.passed ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            ) : (
-                              <span className="w-3.5 h-3.5 rounded-full border border-current inline-flex items-center justify-center text-[9px] shrink-0">
-                                •
-                              </span>
-                            )}
-                            <span>{rule.label}</span>
-                          </li>
-                        ))}
-
-                        {confirmPassword.length > 0 && (
-                          <li
-                            className={
-                              "flex items-center gap-1.5 pt-1 border-t border-border/60 font-semibold " +
-                              (passwordsMatch
-                                ? "text-emerald-700"
-                                : "text-rose-600")
-                            }
-                          >
-                            {passwordsMatch ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            ) : (
-                              <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                            )}
-                            <span>
-                              {passwordsMatch
-                                ? "Las contraseñas coinciden"
-                                : "Las contraseñas aún no coinciden"}
-                            </span>
-                          </li>
-                        )}
-                      </ul>
-                    </div>
-                  </div>
+                  )}
 
                   <Button
                     type="submit"
                     variant="primary"
-                    disabled={
-                      registerLoading ||
-                      !passwordCheck.isAllValid ||
-                      !passwordsMatch
-                    }
-                    className="w-full mt-3 bg-accent hover:bg-accent-hover text-white"
-                    isLoading={registerLoading}
+                    className="w-full mt-2 bg-accent hover:bg-accent-hover text-white"
+                    isLoading={loginLoading}
                   >
-                    Registrar Cuenta
+                    <Mail className="w-4 h-4 mr-2" />
+                    {forgotPasswordMode
+                      ? "Enviar Enlace"
+                      : "Ingresar a mi Cuenta"}
                   </Button>
+
+                  {!forgotPasswordMode && (
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setForgotPasswordMode(true)}
+                        className="text-xs text-brand-secondary hover:text-brand-primary hover:underline transition-colors focus:outline-none"
+                      >
+                        ¿Olvidaste tu contraseña?
+                      </button>
+                    </div>
+                  )}
+
+                  {forgotPasswordMode && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotPasswordMode(false);
+                        setResetEmailSent(false);
+                        setLoginError(null);
+                      }}
+                      className="w-full text-center text-xs font-medium text-brand-secondary hover:text-brand-primary"
+                    >
+                      Volver a iniciar sesión
+                    </button>
+                  )}
                 </form>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+
+            {/* ========================================================= */}
+            {/* TAB 2: CREAR CUENTA (Con Checklist de Contraseña Reactivo) */}
+            {/* ========================================================= */}
+            {activeTab === "register" && (
+              <div className="space-y-4">
+                {registerSuccessMessage ? (
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-card space-y-3 text-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+                      <Check className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-sm font-bold text-emerald-900">
+                      ¡Cuenta creada exitosamente!
+                    </h3>
+                    <p className="text-xs text-emerald-800 leading-relaxed">
+                      {registerSuccessMessage}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setRegisterSuccessMessage(null);
+                        setActiveTab("login");
+                      }}
+                      className="mt-2 text-xs"
+                    >
+                      Ir a Iniciar Sesión
+                    </Button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+                    {registerError && (
+                      <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{registerError}</span>
+                      </div>
+                    )}
+
+                    {/* Búsqueda de DNI */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label
+                          htmlFor="reg-dni"
+                          className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
+                        >
+                          DNI (8 dígitos) - Opcional
+                        </label>
+                        {isSearchingDni && (
+                          <span className="text-[11px] text-accent flex items-center gap-1 font-semibold">
+                            Consultando RENIEC...
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1">
+                          <Input
+                            id="reg-dni"
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="8 dígitos (opcional)"
+                            maxLength={8}
+                            value={dni}
+                            onChange={handleDniChange}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleDniLookup();
+                              }
+                            }}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="md"
+                          onClick={() => handleDniLookup()}
+                          disabled={isSearchingDni || dni.length !== 8}
+                          className="h-10 px-3.5 shrink-0"
+                          title="Buscar en RENIEC"
+                        >
+                          <Search className="w-4 h-4 text-brand-primary" />
+                        </Button>
+                      </div>
+
+                      {dniFeedback && (
+                        <div
+                          className={
+                            "mt-1.5 text-xs flex items-center gap-1.5 " +
+                            (dniFeedback.type === "success"
+                              ? "text-emerald-600 font-medium"
+                              : "text-amber-600")
+                          }
+                        >
+                          {dniFeedback.type === "success" ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <AlertCircle className="w-3.5 h-3.5" />
+                          )}
+                          <span>{dniFeedback.message}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Nombres y Apellidos */}
+                    <div className="space-y-3">
+                      <label
+                        htmlFor="reg-names"
+                        className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary"
+                      >
+                        Nombres
+                      </label>
+                      <Input
+                        id="reg-names"
+                        placeholder="Nombres completos"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        readOnly={isDniLocked}
+                        className={
+                          isDniLocked
+                            ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
+                            : ""
+                        }
+                        required
+                      />
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          label="Ap. Paterno"
+                          id="reg-paternal"
+                          placeholder="Paterno"
+                          value={paternalSurname}
+                          onChange={(e) => setPaternalSurname(e.target.value)}
+                          readOnly={isDniLocked}
+                          className={
+                            isDniLocked
+                              ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
+                              : ""
+                          }
+                          required
+                        />
+                        <Input
+                          label="Ap. Materno"
+                          id="reg-maternal"
+                          placeholder="Materno"
+                          value={maternalSurname}
+                          onChange={(e) => setMaternalSurname(e.target.value)}
+                          readOnly={isDniLocked}
+                          className={
+                            isDniLocked
+                              ? "bg-slate-100 text-slate-600 cursor-not-allowed select-none"
+                              : ""
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <Input
+                      label="Teléfono Celular"
+                      id="reg-phone"
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={9}
+                      placeholder="9XXXXXXXX"
+                      value={phone}
+                      onChange={(e) =>
+                        setPhone(e.target.value.replace(/\D/g, "").slice(0, 9))
+                      }
+                      required
+                    />
+
+                    <Input
+                      label="Correo Electrónico"
+                      id="reg-email"
+                      type="email"
+                      placeholder="tu.correo@ejemplo.pe"
+                      value={registerEmail}
+                      onChange={(e) => setRegisterEmail(e.target.value)}
+                      required
+                    />
+
+                    {/* Contraseñas con Validación Interactiva */}
+                    <div className="space-y-3 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Input
+                          label="Contraseña"
+                          id="reg-pass"
+                          type="password"
+                          placeholder="Crea una clave segura"
+                          value={registerPassword}
+                          onChange={(e) => setRegisterPassword(e.target.value)}
+                          required
+                        />
+                        <Input
+                          label="Confirmar"
+                          id="reg-confirm-pass"
+                          type="password"
+                          placeholder="Repite contraseña"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          required
+                        />
+                      </div>
+
+                      {/* Panel Dinámico de Cumplimiento de Contraseña */}
+                      <div className="p-3 rounded-card bg-surface-subtle border border-border space-y-2.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold uppercase tracking-wider text-brand-secondary flex items-center gap-1">
+                            <ShieldCheck className="w-3.5 h-3.5 text-accent" />
+                            Seguridad de la contraseña
+                          </span>
+                          <span className="font-mono font-bold text-brand-primary">
+                            {passwordCheck.passedCount}/5 reglas
+                          </span>
+                        </div>
+
+                        {/* Barra de progreso segmentada */}
+                        <div className="grid grid-cols-5 gap-1 h-1.5">
+                          {[1, 2, 3, 4, 5].map((step) => {
+                            const active = passwordCheck.passedCount >= step;
+                            const barColor =
+                              passwordCheck.passedCount <= 2
+                                ? "bg-rose-500"
+                                : passwordCheck.passedCount <= 4
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-600";
+                            return (
+                              <div
+                                key={step}
+                                className={
+                                  "rounded-full transition-all duration-200 " +
+                                  (active ? barColor : "bg-slate-200")
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+
+                        <ul className="space-y-1 text-[11px]">
+                          {passwordCheck.rules.map((rule) => (
+                            <li
+                              key={rule.id}
+                              className={
+                                "flex items-center gap-1.5 transition-colors " +
+                                (rule.passed
+                                  ? "text-emerald-700 font-semibold"
+                                  : registerPassword.length > 0
+                                    ? "text-rose-600"
+                                    : "text-brand-muted")
+                              }
+                            >
+                              {rule.passed ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              ) : (
+                                <span className="w-3.5 h-3.5 rounded-full border border-current inline-flex items-center justify-center text-[9px] shrink-0">
+                                  •
+                                </span>
+                              )}
+                              <span>{rule.label}</span>
+                            </li>
+                          ))}
+
+                          {confirmPassword.length > 0 && (
+                            <li
+                              className={
+                                "flex items-center gap-1.5 pt-1 border-t border-border/60 font-semibold " +
+                                (passwordsMatch
+                                  ? "text-emerald-700"
+                                  : "text-rose-600")
+                              }
+                            >
+                              {passwordsMatch ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              ) : (
+                                <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                              )}
+                              <span>
+                                {passwordsMatch
+                                  ? "Las contraseñas coinciden"
+                                  : "Las contraseñas aún no coinciden"}
+                              </span>
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={
+                        registerLoading ||
+                        !passwordCheck.isAllValid ||
+                        !passwordsMatch
+                      }
+                      className="w-full mt-3 bg-accent hover:bg-accent-hover text-white"
+                      isLoading={registerLoading}
+                    >
+                      Registrar Cuenta
+                    </Button>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
