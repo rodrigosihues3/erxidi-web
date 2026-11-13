@@ -254,6 +254,9 @@ export async function processStudioPhoto({
     ],
     generationConfig: {
       temperature: 0.35,
+      imageConfig: {
+        aspectRatio: "4:5",
+      },
     },
   };
 
