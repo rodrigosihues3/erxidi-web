@@ -550,6 +550,45 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
     return true;
   }
 
+  // Conciliación de pago contra entrega -> digital (Yape / Plin)
+  async function switchOrderPaymentToQr(orderId) {
+    setActionError(null);
+    if (useMock) {
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? { ...o, payment_method: "yape_plin", payment_status: "paid" }
+            : o,
+        ),
+      );
+      return true;
+    }
+
+    const { error: e } = await supabase
+      .from("orders")
+      .update({
+        payment_method: "yape_plin",
+        payment_status: "paid",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", orderId)
+      .eq("assigned_delivery_id", user.id);
+
+    if (e) {
+      setActionError(e.message);
+      return false;
+    }
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? { ...o, payment_method: "yape_plin", payment_status: "paid" }
+          : o,
+      ),
+    );
+    return true;
+  }
+
   return {
     repartidorName: profile?.first_name,
     profile,
@@ -570,5 +609,6 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
     claimOrder,
     takeOrder: claimOrder,
     reportIncident,
+    switchOrderPaymentToQr,
   };
 }

@@ -8,10 +8,12 @@ import {
   AlertTriangle,
   Banknote,
   MapPin,
+  Package,
   Phone,
   Navigation,
   ChevronDown,
   ShoppingBag,
+  QrCode,
   X,
   LogOut,
   Zap,
@@ -25,7 +27,10 @@ import { useAuth } from "../../context/AuthContext";
 import { useDeliveryOrders, MAX_ITEMS_PER_TRIP } from "./useDeliveryOrders";
 import { STATUS_CONFIG, CASH_METHODS } from "./deliveryStatus";
 import { calculateAzimuth, isRouteCompatible } from "../../utils/geoUtils";
-import { getStoreDeliverySettings } from "../admin/services/adminSettings.service";
+import {
+  getAllStoreSettings,
+  getStoreDeliverySettings,
+} from "../admin/services/adminSettings.service";
 import DeliveryMapView from "./DeliveryMapView";
 
 const FALLBACK_STORE = [-12.1215, -77.0298];
@@ -370,14 +375,19 @@ function AssignedCard({
   onReturn,
   onChangeStatus,
   onOpenIncident,
+  onShowQr,
   isUpdating,
 }) {
+  const [itemsExpanded, setItemsExpanded] = useState(false);
   const status = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.asignado;
   const address = order.shipping_address;
   const isCash = CASH_METHODS.includes(order.payment_method);
+  const isQrPaid =
+    order.payment_method === "yape_plin" && order.payment_status === "paid";
   const phone =
     address?.receiver_phone ?? order.customer_phone ?? order.customer?.phone;
   const addressText = addressOf(order);
+  const totalItems = itemCountOf(order);
   const mapsUrl =
     order.delivery_latitude && order.delivery_longitude
       ? `https://www.google.com/maps/dir/?api=1&destination=${order.delivery_latitude},${order.delivery_longitude}`
@@ -394,16 +404,10 @@ function AssignedCard({
         onClick={onToggle}
         className="w-full text-left p-3 hover:bg-surface-subtle transition-colors"
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-sm font-bold font-mono text-brand-primary">
-              {order.order_number}
-            </p>
-            <p className="mt-0.5 flex items-center gap-1 text-xs text-brand-secondary">
-              <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="truncate">{addressText}</span>
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-bold font-mono text-brand-primary">
+            {order.order_number}
+          </p>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <Badge variant={status.variant} icon={status.icon}>
               {status.label}
@@ -420,10 +424,11 @@ function AssignedCard({
       {isOpen && (
         <div className="border-t border-border p-3 space-y-3 bg-surface-card">
           <div className="space-y-1.5 text-xs text-brand-secondary">
-            <p className="text-brand-primary">{addressText}</p>
+            <p className="text-brand-primary break-words whitespace-normal">
+              {addressText}
+            </p>
             {address?.reference && <p>Ref.: {address.reference}</p>}
-            <p className="font-mono">{itemCountOf(order)} prendas</p>
-            <div className="space-y-1 text-xs">
+            <div className="space-y-0.5 text-xs pt-0.5">
               <div className="font-semibold text-brand-primary">
                 Cliente: {getFirstName(order.customer_name)}
               </div>
@@ -436,34 +441,106 @@ function AssignedCard({
                 </a>
               )}
             </div>
-            {phone && (
+            <div className="grid grid-cols-2 gap-2 pt-1">
               <a
-                href={`tel:${phone}`}
-                className="inline-flex items-center gap-1.5 font-semibold text-accent"
+                href={phone ? `tel:${phone}` : undefined}
+                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-button border border-border bg-surface-subtle hover:bg-slate-200/70 text-xs font-semibold text-brand-primary transition-colors"
               >
-                <Phone className="w-3.5 h-3.5" />
-                Llamar · <span className="font-mono">{phone}</span>
+                <Phone className="w-3.5 h-3.5 text-accent shrink-0" />
+                <span className="truncate">{phone || "Sin teléfono"}</span>
               </a>
-            )}
-            <a
-              href={mapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 font-semibold text-accent"
+              <a
+                href={mapsUrl}
+                rel="noreferrer"
+                target="_blank"
+                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-button border border-border bg-surface-subtle hover:bg-slate-200/70 text-xs font-semibold text-brand-primary transition-colors"
+              >
+                <Navigation className="w-3.5 h-3.5 text-accent shrink-0" />
+                <span>Google Maps</span>
+              </a>
+            </div>
+          </div>
+
+          <div className="rounded-button border border-border bg-surface-subtle/60 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setItemsExpanded((prev) => !prev)}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-brand-primary hover:bg-surface-subtle transition-colors"
             >
-              <Navigation className="w-3.5 h-3.5" />
-              Abrir en Google Maps
-            </a>
+              <span className="flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-brand-secondary" />
+                {totalItems} {totalItems === 1 ? "prenda" : "prendas"} en bolsa
+              </span>
+              <ChevronDown
+                className={`w-4 h-4 text-brand-secondary transition-transform ${
+                  itemsExpanded ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+
+            {itemsExpanded && (
+              <ul className="px-3 py-2 border-t border-border bg-surface-card space-y-1.5 text-[11px]">
+                {(order.items || []).map((item, idx) => {
+                  const prodName =
+                    item.variant?.product?.name ||
+                    item.product_variants?.products?.name ||
+                    item.name ||
+                    "Prenda";
+                  const sizeName =
+                    item.variant?.size?.name ||
+                    item.product_variants?.sizes?.name ||
+                    item.size ||
+                    "";
+                  const colorName =
+                    item.variant?.color ||
+                    item.product_variants?.color ||
+                    item.color ||
+                    "";
+                  return (
+                    <li
+                      key={item.id || idx}
+                      className="flex items-start justify-between gap-2 text-brand-secondary"
+                    >
+                      <span className="font-medium text-brand-primary">
+                        {item.quantity}x {prodName}
+                      </span>
+                      <span className="font-mono text-[10px] text-brand-muted shrink-0">
+                        {[sizeName, colorName].filter(Boolean).join(" · ")}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
           {inRoute && (
             <div>
               {isCash ? (
-                <div className="p-2 rounded bg-amber-100 text-amber-900 font-bold text-xs">
-                  Cobrar S/ {Number(order.total_amount || 0).toFixed(2)} en efectivo
+                <div className="px-3 py-2 rounded-button bg-amber-50 border border-amber-200 flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-amber-900">
+                    Cobrar{" "}
+                    <span className="font-mono">
+                      {soles(order.total_amount)}
+                    </span>{" "}
+                    en efectivo
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onShowQr(order)}
+                    className="px-2.5 py-1 rounded-button bg-brand-primary text-white text-[11px] font-semibold hover:bg-slate-800 transition-colors shrink-0"
+                  >
+                    Mostrar QR
+                  </button>
+                </div>
+              ) : isQrPaid ? (
+                <div className="px-3 py-2 rounded-button bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-900">
+                  Pagado vía Yape / Plin (
+                  <span className="font-mono">{soles(order.total_amount)}</span>
+                  ) — Sin deuda en efectivo.
                 </div>
               ) : (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-brand-secondary">
                   Pagado electrónicamente
                 </span>
               )}
@@ -525,6 +602,146 @@ function AssignedCard({
         </div>
       )}
     </Card>
+  );
+}
+
+function QrPaymentModal({ order, paymentMethods, onClose, onConfirmPayment }) {
+  const yapeReady = Boolean(
+    paymentMethods?.yape_enabled ||
+      paymentMethods?.yape_qr_url ||
+      paymentMethods?.yape_phone,
+  );
+  const plinReady = Boolean(
+    paymentMethods?.plin_enabled ||
+      paymentMethods?.plin_qr_url ||
+      paymentMethods?.plin_phone,
+  );
+
+  const [wallet, setWallet] = useState(yapeReady ? "yape" : "plin");
+  const [submitting, setSubmitting] = useState(false);
+
+  if (!order) return null;
+
+  const isYape = wallet === "yape";
+  const qrUrl = isYape
+    ? paymentMethods?.yape_qr_url
+    : paymentMethods?.plin_qr_url;
+  const phone = isYape
+    ? paymentMethods?.yape_phone
+    : paymentMethods?.plin_phone;
+  const holder = isYape
+    ? paymentMethods?.yape_holder_name
+    : paymentMethods?.plin_holder_name;
+
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    const ok = await onConfirmPayment(order.id);
+    setSubmitting(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-card border border-border bg-surface-card p-4 space-y-4">
+        <div className="flex items-start justify-between gap-3 border-b border-border pb-3">
+          <div>
+            <h3 className="text-base font-bold text-brand-primary flex items-center gap-1.5">
+              <QrCode className="w-4 h-4 text-brand-secondary" />
+              Cobro digital QR
+            </h3>
+            <p className="text-xs text-brand-secondary font-mono mt-0.5">
+              {order.order_number} · {soles(order.total_amount)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            aria-label="Cerrar"
+            className="text-brand-secondary hover:text-brand-primary"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {(yapeReady || plinReady) && (
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-button bg-surface-subtle border border-border">
+            <button
+              type="button"
+              disabled={!yapeReady}
+              onClick={() => setWallet("yape")}
+              className={`py-1.5 text-xs font-semibold rounded-button transition-colors ${
+                wallet === "yape"
+                  ? "bg-surface-card text-brand-primary border border-border"
+                  : "text-brand-secondary disabled:opacity-40"
+              }`}
+            >
+              Yape
+            </button>
+            <button
+              type="button"
+              disabled={!plinReady}
+              onClick={() => setWallet("plin")}
+              className={`py-1.5 text-xs font-semibold rounded-button transition-colors ${
+                wallet === "plin"
+                  ? "bg-surface-card text-brand-primary border border-border"
+                  : "text-brand-secondary disabled:opacity-40"
+              }`}
+            >
+              Plin
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-col items-center text-center space-y-2">
+          {qrUrl ? (
+            <img
+              src={qrUrl}
+              alt={`Código QR ${isYape ? "Yape" : "Plin"}`}
+              className="w-52 h-52 object-contain border border-border rounded-card bg-white p-2"
+            />
+          ) : (
+            <div className="w-52 h-52 flex items-center justify-center border border-border rounded-card bg-surface-subtle text-xs text-brand-secondary px-4">
+              QR no configurado para {isYape ? "Yape" : "Plin"}
+            </div>
+          )}
+
+          <div className="space-y-0.5 text-xs">
+            {holder && (
+              <p className="font-semibold text-brand-primary">{holder}</p>
+            )}
+            {phone && (
+              <p className="font-mono text-brand-secondary">{phone}</p>
+            )}
+            <p className="font-mono font-bold text-sm text-brand-primary pt-1">
+              Monto exacto: {soles(order.total_amount)}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 pt-2 border-t border-border">
+          <Button
+            type="button"
+            variant="primary"
+            isLoading={submitting}
+            disabled={submitting}
+            onClick={handleConfirm}
+            className="w-full"
+          >
+            Confirmar pago recibido por Yape/Plin
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={submitting}
+            onClick={onClose}
+            className="w-full"
+          >
+            Cancelar
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -836,29 +1053,39 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
     returnToPool,
     startRoute,
     reportIncident,
+    switchOrderPaymentToQr,
   } = useDeliveryOrders({ useMock });
 
   const [nav, setNav] = useState("deliveries");
   const [subTab, setSubTab] = useState("pool");
   const [openId, setOpenId] = useState(null);
   const [incidentOrder, setIncidentOrder] = useState(null);
+  const [qrOrder, setQrOrder] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [dbStoreCoords, setDbStoreCoords] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState(null);
 
   const isExpress = profile?.delivery_type === "express";
   const { signOut } = useAuth();
 
   useEffect(() => {
-    if (useMock || storeLocation) return undefined;
+    if (useMock) return undefined;
     let active = true;
-    getStoreDeliverySettings()
-      .then(({ storeLocation: loc }) => {
-        if (!active || !loc) return;
-        const lat = Number(loc.lat);
-        const lng = Number(loc.lng);
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          setDbStoreCoords([lat, lng]);
-        }
+    if (!storeLocation) {
+      getStoreDeliverySettings()
+        .then(({ storeLocation: loc }) => {
+          if (!active || !loc) return;
+          const lat = Number(loc.lat);
+          const lng = Number(loc.lng);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            setDbStoreCoords([lat, lng]);
+          }
+        })
+        .catch(() => {});
+    }
+    getAllStoreSettings()
+      .then(({ paymentMethods: pm }) => {
+        if (active && pm) setPaymentMethods(pm);
       })
       .catch(() => {});
     return () => {
@@ -1139,6 +1366,7 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
                   onReturn={returnToPool}
                   onChangeStatus={changeStatus}
                   onOpenIncident={setIncidentOrder}
+                  onShowQr={setQrOrder}
                   isUpdating={updatingId === order.id}
                 />
               ))
@@ -1169,6 +1397,14 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
         isSubmitting={Boolean(incidentOrder && updatingId === incidentOrder.id)}
         onClose={() => setIncidentOrder(null)}
         onSubmit={handleIncident}
+      />
+
+      <QrPaymentModal
+        key={`qr-${qrOrder?.id ?? "none"}`}
+        order={qrOrder}
+        paymentMethods={paymentMethods}
+        onClose={() => setQrOrder(null)}
+        onConfirmPayment={switchOrderPaymentToQr}
       />
     </div>
   );
