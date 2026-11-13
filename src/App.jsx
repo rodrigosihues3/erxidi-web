@@ -42,6 +42,10 @@ import UpdatePasswordView from "./features/auth/UpdatePasswordView";
 import { getProductBySlug } from "./services/api/catalogService";
 import { DeliveryOnlyRoute, ShopCustomerRoute } from "./components/RoleRoute";
 import DeliveryDashboard from "./features/delivery/DeliveryDashboard";
+import TermsView from "./features/legal/TermsView";
+import PrivacyPolicyView from "./features/legal/PrivacyPolicyView";
+import ReturnsPolicyView from "./features/legal/ReturnsPolicyView";
+import ComplaintsBookView from "./features/legal/ComplaintsBookView";
 
 function ProductDetailRouteWrapper() {
   const { slug, productId } = useParams();
@@ -185,6 +189,21 @@ export default function App() {
               <Route
                 path="/actualizar-password"
                 element={<UpdatePasswordView />}
+              />
+
+              {/* Rutas Legales Públicas (INDECOPI / Culqi) */}
+              <Route path="/terminos-y-condiciones" element={<TermsView />} />
+              <Route
+                path="/politica-privacidad"
+                element={<PrivacyPolicyView />}
+              />
+              <Route
+                path="/cambios-y-devoluciones"
+                element={<ReturnsPolicyView />}
+              />
+              <Route
+                path="/libro-reclamaciones"
+                element={<ComplaintsBookView />}
               />
 
               {/* Rutas Protegidas de Cliente */}

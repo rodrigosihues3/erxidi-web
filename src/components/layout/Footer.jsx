@@ -27,11 +27,11 @@ export default function Footer({ onOpenSizeMatcher }) {
   };
 
   return (
-    <footer className="bg-brand-primary text-white border-t border-border/20 py-12 px-4 sm:px-6 lg:px-8 mt-auto">
-      <div className="max-w-7xl mx-auto space-y-10">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
+    <footer className="bg-brand-primary text-white border-t border-border/20 px-4 sm:px-6 lg:px-8 mt-auto">
+      <div className="max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 py-8">
           {/* Columna 1: Taller & Atención */}
-          <div className="space-y-4">
+          <div className="space-y-3">
             <Link to="/" className="inline-block">
               <span className="font-extrabold tracking-tight text-xl text-white">
                 ERXIDI
@@ -60,12 +60,12 @@ export default function Footer({ onOpenSizeMatcher }) {
             </div>
           </div>
 
-          {/* Columna 2: Navegación de Compra */}
-          <div className="space-y-4">
+          {/* Columna 2: Navegación de Compra y Legal */}
+          <div className="space-y-3">
             <h4 className="text-xs font-bold tracking-wider uppercase text-white/90">
-              Servicios al Cliente
+              Servicios y Legal
             </h4>
-            <ul className="space-y-2.5 text-xs text-brand-muted">
+            <ul className="space-y-2 text-xs text-brand-muted">
               <li>
                 <Link
                   to="/catalogo"
@@ -94,10 +94,34 @@ export default function Footer({ onOpenSizeMatcher }) {
               </li>
               <li>
                 <Link
-                  to="/login"
+                  to="/terminos-y-condiciones"
                   className="hover:text-white transition-colors block"
                 >
-                  Acceso a Mi Cuenta
+                  Términos y Condiciones
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/politica-privacidad"
+                  className="hover:text-white transition-colors block"
+                >
+                  Política de Privacidad
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/cambios-y-devoluciones"
+                  className="hover:text-white transition-colors block"
+                >
+                  Política de Cambios y Devoluciones
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/libro-reclamaciones"
+                  className="hover:text-white transition-colors block"
+                >
+                  Libro de Reclamaciones
                 </Link>
               </li>
             </ul>
@@ -158,7 +182,7 @@ export default function Footer({ onOpenSizeMatcher }) {
                 </span>
                 <span>Boleta de Venta y Factura con RUC para empresas.</span>
                 <span className="block font-mono text-[11px] text-brand-muted mt-0.5">
-                  RUC: 20612345678 &bull; ERXIDI S.A.C.
+                  RUC: 10408393367 &bull; YANQUI GUTIERREZ SONIA
                 </span>
               </div>
 
@@ -183,8 +207,11 @@ export default function Footer({ onOpenSizeMatcher }) {
                 </div>
               </div>
 
-              <div className="pt-2">
-                <div className="inline-flex items-center gap-2 px-3 py-2 rounded-card bg-white/5 border border-white/10 text-[11px] text-white hover:bg-white/10 transition-colors select-none">
+              <div className="pt-1">
+                <Link
+                  to="/libro-reclamaciones"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-card bg-white/5 border border-white/10 text-[11px] text-white hover:bg-white/10 hover:border-white/20 transition-colors"
+                >
                   <FileText className="w-4 h-4 text-accent flex-shrink-0" />
                   <div>
                     <span className="font-bold block">
@@ -194,17 +221,18 @@ export default function Footer({ onOpenSizeMatcher }) {
                       Conforme al Código de Protección al Consumidor
                     </span>
                   </div>
-                </div>
+                </Link>
               </div>
             </div>
           </div>
         </div>
 
         {/* Barra Inferior */}
-        <div className="pt-8 border-t border-border/20 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-brand-muted">
+        <div className="py-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-brand-muted">
           <div>
-            &copy; {new Date().getFullYear()} ERXIDI. Taller y Comercializadora
-            Textil. Todos los derechos reservados.
+            &copy; {new Date().getFullYear()} ERXIDI (YANQUI GUTIERREZ SONIA ·{" "}
+            <span className="font-mono">RUC: 10408393367</span>). Todos los
+            derechos reservados.
           </div>
           <div className="flex items-center gap-2">
             <Lock className="w-3 h-3 text-emerald-400" />
