@@ -4,6 +4,7 @@ import {
   Truck,
   User,
   CheckCircle2,
+  AlertCircle,
   AlertTriangle,
   Banknote,
   MapPin,
@@ -24,6 +25,8 @@ import { useAuth } from "../../context/AuthContext";
 import { useDeliveryOrders, MAX_ITEMS_PER_TRIP } from "./useDeliveryOrders";
 import { STATUS_CONFIG, CASH_METHODS } from "./deliveryStatus";
 import { calculateAzimuth, isRouteCompatible } from "../../utils/geoUtils";
+import { getStoreDeliverySettings } from "../admin/services/adminSettings.service";
+import DeliveryMapView from "./DeliveryMapView";
 
 const FALLBACK_STORE = [-12.1215, -77.0298];
 const BAG_STATUSES = ["asignado", "en_camino", "cerca"];
@@ -98,11 +101,21 @@ const itemCountOf = (o) =>
     0,
   );
 
+const cleanDeliveryAddress = (addr) =>
+  String(addr || "").replace(/\s*-\s*Miraflores\s*$/i, "").trim();
+
+const getFirstName = (fullName) => {
+  const clean = String(fullName || "").trim();
+  return clean ? clean.split(/\s+/)[0] : "Cliente";
+};
+
 const addressOf = (o) =>
-  o.delivery_address ??
-  (o.shipping_address
-    ? `${o.shipping_address.street_address}, ${o.shipping_address.district}`
-    : "Sin dirección registrada");
+  cleanDeliveryAddress(
+    o.delivery_address ??
+      (o.shipping_address
+        ? `${o.shipping_address.street_address}, ${o.shipping_address.district}`
+        : ""),
+  ) || "Sin dirección registrada";
 
 const coordOf = (o) =>
   o.delivery_latitude != null && o.delivery_longitude != null
@@ -287,12 +300,13 @@ function CapacityBar({ current, max = MAX_ITEMS_PER_TRIP }) {
   );
 }
 
-function PoolOrderCard({ order, compatible, exceedsLimit, onClaim, isUpdating }) {
+function PoolOrderCard({ order, blockReason, onClaim, isUpdating }) {
   const items = itemCountOf(order);
+  const blocked = Boolean(blockReason);
   return (
     <Card
       className={`!p-3 border border-border bg-surface-card ${
-        compatible ? "" : "opacity-60"
+        blocked ? "opacity-75" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -304,11 +318,24 @@ function PoolOrderCard({ order, compatible, exceedsLimit, onClaim, isUpdating })
             <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="truncate">{addressOf(order)}</span>
           </p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-brand-secondary mt-1">
+            <span className="font-semibold text-brand-primary">
+              {getFirstName(order.customer_name)}
+            </span>
+            {order.customer_email && (
+              <>
+                <span className="text-brand-muted">·</span>
+                <span className="truncate max-w-[210px] text-brand-muted">
+                  {order.customer_email}
+                </span>
+              </>
+            )}
+          </div>
         </div>
-        {compatible ? (
-          <Badge variant="success">En ruta compatible</Badge>
-        ) : (
-          <Badge variant="neutral">Ruta contraria</Badge>
+        {!blocked && (
+          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-badge border border-emerald-200 shrink-0">
+            En ruta
+          </span>
         )}
       </div>
       <div className="mt-3 pt-2 border-t border-border flex items-center justify-between gap-2">
@@ -318,15 +345,19 @@ function PoolOrderCard({ order, compatible, exceedsLimit, onClaim, isUpdating })
         <Button
           size="sm"
           variant="primary"
-          disabled={!compatible || exceedsLimit || isUpdating}
+          disabled={blocked || isUpdating}
           isLoading={isUpdating}
           onClick={() => onClaim(order.id)}
         >
-          {exceedsLimit && compatible
-            ? "Excede 30 prendas"
-            : `Tomar pedido (+${items} prendas)`}
+          {`Tomar pedido (+${items} prendas)`}
         </Button>
       </div>
+      {blockReason && (
+        <div className="mt-2 px-2.5 py-1.5 rounded-button bg-surface-subtle border border-border text-brand-secondary text-[11px] flex items-center gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5 text-brand-muted shrink-0" />
+          <span className="truncate">{blockReason}</span>
+        </div>
+      )}
     </Card>
   );
 }
@@ -392,6 +423,19 @@ function AssignedCard({
             <p className="text-brand-primary">{addressText}</p>
             {address?.reference && <p>Ref.: {address.reference}</p>}
             <p className="font-mono">{itemCountOf(order)} prendas</p>
+            <div className="space-y-1 text-xs">
+              <div className="font-semibold text-brand-primary">
+                Cliente: {getFirstName(order.customer_name)}
+              </div>
+              {order.customer_email && (
+                <a
+                  href={`mailto:${order.customer_email}`}
+                  className="block text-[11px] text-brand-secondary hover:text-accent truncate"
+                >
+                  {order.customer_email}
+                </a>
+              )}
+            </div>
             {phone && (
               <a
                 href={`tel:${phone}`}
@@ -798,10 +842,31 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
   const [subTab, setSubTab] = useState("pool");
   const [openId, setOpenId] = useState(null);
   const [incidentOrder, setIncidentOrder] = useState(null);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [dbStoreCoords, setDbStoreCoords] = useState(null);
 
   const isExpress = profile?.delivery_type === "express";
   const { signOut } = useAuth();
-  const base = storeLocation ?? FALLBACK_STORE;
+
+  useEffect(() => {
+    if (useMock || storeLocation) return undefined;
+    let active = true;
+    getStoreDeliverySettings()
+      .then(({ storeLocation: loc }) => {
+        if (!active || !loc) return;
+        const lat = Number(loc.lat);
+        const lng = Number(loc.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setDbStoreCoords([lat, lng]);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [useMock, storeLocation]);
+
+  const base = storeLocation ?? dbStoreCoords ?? FALLBACK_STORE;
 
   const bagOrders = orders.filter((o) => BAG_STATUSES.includes(o.status));
   const activeCount = bagOrders.length;
@@ -830,6 +895,16 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
 
   const handleIncident = async (id, payload) => {
     if (await reportIncident(id, payload)) setIncidentOrder(null);
+  };
+
+  const handleViewOrder = (order, kind) => {
+    setMapOpen(false);
+    if (kind === "assigned") {
+      setSubTab("mine");
+      setOpenId(order.id);
+    } else {
+      setSubTab("pool");
+    }
   };
 
   const navItems = [
@@ -932,6 +1007,38 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
 
             <CapacityBar current={currentTripItemsCount} />
 
+            <div className="rounded-card border border-border bg-surface-card overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setMapOpen((o) => !o)}
+                aria-expanded={mapOpen}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-xs font-semibold text-brand-primary outline-none"
+              >
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-brand-secondary" />
+                  Mapa de pedidos
+                </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-brand-secondary transition-transform ${
+                    mapOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+              {mapOpen && (
+                <div
+                  className="relative z-0 border-t border-border p-2"
+                  style={{ isolation: "isolate" }}
+                >
+                  <DeliveryMapView
+                    assigned={assigned}
+                    poolOrders={poolOrders}
+                    store={base}
+                    onViewOrder={handleViewOrder}
+                  />
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-1 p-1 rounded-button bg-surface-subtle border border-border">
               {[
                 { key: "pool", label: "Bolsa", count: poolOrders.length },
@@ -975,22 +1082,40 @@ export default function DeliveryDashboard({ useMock = false, storeLocation }) {
               ) : (
                 poolOrders.map((order) => {
                   const coord = coordOf(order);
-                  const compatible =
+                  const routeCompatible =
                     baseAzimuth == null || !coord
                       ? true
                       : isRouteCompatible(
                           baseAzimuth,
                           calculateAzimuth(base, coord),
                         );
+                  const driverType = profile?.delivery_type;
+                  const modalityMismatch =
+                    Boolean(driverType && order.delivery_type) &&
+                    driverType !== order.delivery_type;
+                  const exceedsLimit =
+                    currentTripItemsCount + itemCountOf(order) >
+                    MAX_ITEMS_PER_TRIP;
+
+                  let blockReason = null;
+                  if (operationalStatus === "paused") {
+                    blockReason = "Bloqueado: Tu estado actual está En Pausa.";
+                  } else if (modalityMismatch) {
+                    blockReason =
+                      "Bloqueado: Modalidad incompatible con tu perfil.";
+                  } else if (exceedsLimit) {
+                    blockReason =
+                      "Bloqueado: Supera la capacidad máxima de 30 prendas.";
+                  } else if (!routeCompatible) {
+                    blockReason =
+                      "Bloqueado: Ruta contraria a tus entregas asignadas.";
+                  }
+
                   return (
                     <PoolOrderCard
                       key={order.id}
                       order={order}
-                      compatible={compatible}
-                      exceedsLimit={
-                        currentTripItemsCount + itemCountOf(order) >
-                        MAX_ITEMS_PER_TRIP
-                      }
+                      blockReason={blockReason}
                       onClaim={handleClaim}
                       isUpdating={updatingId === order.id}
                     />

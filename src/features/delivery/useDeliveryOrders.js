@@ -64,6 +64,9 @@ function prepare(row) {
   const rawItems = row.items ?? row.order_items ?? [];
   return {
     ...row,
+    customer_name: row.customer_name || "",
+    customer_email: row.customer_email || "",
+    customer_phone: row.customer_phone || "",
     status: normalizeStatus(row.status),
     total_items: rawItems.reduce((n, i) => n + (Number(i.quantity) || 0), 0),
     order_items: rawItems,

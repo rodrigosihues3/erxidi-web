@@ -1154,10 +1154,7 @@ export default function CheckoutView() {
     const finalAddress =
       ctx.deliveryType === "pickup"
         ? pickupStoreInfo.address
-        : ctx.deliveryAddress.trim() +
-        refSegment +
-        " - " +
-        (ctx.selectedZone?.district_name || "Lima");
+        : ctx.deliveryAddress.trim() + refSegment;
 
     const isUsingSavedAddress =
       ctx.deliveryType !== "pickup" &&
