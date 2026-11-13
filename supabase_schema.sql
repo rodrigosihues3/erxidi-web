@@ -727,6 +727,8 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     CONSTRAINT "profiles_weight_kg_check" CHECK ((("weight_kg" >= 30) AND ("weight_kg" <= 250)))
 );
 
+ALTER TABLE ONLY "public"."profiles" REPLICA IDENTITY FULL;
+
 
 ALTER TABLE "public"."profiles" OWNER TO "postgres";
 
@@ -1422,6 +1424,10 @@ ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."product_variants"
 
 
 ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."products";
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."profiles";
 
 
 
