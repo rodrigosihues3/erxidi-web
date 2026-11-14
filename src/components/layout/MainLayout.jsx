@@ -6,6 +6,7 @@ import Navbar from "./Navbar";
 import Footer from "./Footer";
 import SizeMatcherModal from "../../features/catalog/components/SizeMatcherModal";
 import CartDrawer from "../../features/cart/CartDrawer";
+import SeasonalSnowOverlay from "../ui/SeasonalSnowOverlay";
 
 export default function MainLayout() {
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
@@ -21,6 +22,8 @@ export default function MainLayout() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface-app text-brand-primary">
+      {!isDelivery && <SeasonalSnowOverlay />}
+
       {!isDelivery && (
         <Navbar
           onOpenSizeMatcher={() => setIsSizeMatcherOpen(true)}
