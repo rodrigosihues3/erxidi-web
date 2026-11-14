@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Pipette, X, Palette, Check } from "lucide-react";
 import Button from "../../../components/ui/Button";
 
@@ -33,12 +33,19 @@ export default function VariantMatrix({
   onDropImageToColor,
   onChange,
 }) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddColorOpen, setIsAddColorOpen] = useState(false);
   const [colorName, setColorName] = useState("");
   const [colorHex, setColorHex] = useState("#E8C8B5");
   const [error, setError] = useState("");
   const [copiedHex, setCopiedHex] = useState(null);
   const [dragOverColor, setDragOverColor] = useState(null);
+  const colorNameInputRef = useRef(null);
+
+  useEffect(() => {
+    if (isAddColorOpen) {
+      colorNameInputRef.current?.focus();
+    }
+  }, [isAddColorOpen]);
 
   // 1. Filtrar tallas correspondientes al público seleccionado de forma estricta
   const audienceSizes = useMemo(() => {
@@ -191,17 +198,27 @@ export default function VariantMatrix({
 
     onChange([...variants, ...next]);
     handleSelectColor(cleanName);
-    setIsModalOpen(false);
+    setIsAddColorOpen(false);
     setColorName("");
     setColorHex("#E8C8B5");
     setError("");
   }
 
-  function handleModalKeyDown(e) {
+  function handleCloseAddColor() {
+    setIsAddColorOpen(false);
+    setColorName("");
+    setColorHex("#E8C8B5");
+    setError("");
+  }
+
+  function handlePanelKeyDown(e) {
     if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
       handleAddColorSubmit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      handleCloseAddColor();
     }
   }
 
@@ -323,13 +340,145 @@ export default function VariantMatrix({
           size="sm"
           onClick={() => {
             setError("");
-            setIsModalOpen(true);
+            setIsAddColorOpen((prev) => !prev);
           }}
           className="h-8 px-3 text-xs"
         >
           <Plus className="h-3.5 w-3.5 mr-1" /> Color
         </Button>
       </div>
+
+      {/* Panel Desplegable Inline para Registrar Nuevo Color */}
+      {isAddColorOpen && (
+        <div
+          className="mt-3 p-4 rounded-card border border-border bg-surface-subtle/70 space-y-3 animate-in fade-in duration-150"
+          onKeyDown={handlePanelKeyDown}
+        >
+          <div className="flex items-center justify-between border-b border-border pb-2">
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-accent" />
+              <span className="text-xs font-bold uppercase tracking-wider text-brand-primary">
+                Registrar Nuevo Color
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleCloseAddColor}
+              className="text-slate-400 hover:text-brand-primary p-1 rounded transition-colors"
+              title="Cerrar panel"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {error && (
+            <p className="text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-200 p-2 rounded">
+              {error}
+            </p>
+          )}
+
+          {/* Fila de Nombre y Selector Hex + Pipeta */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">
+                Nombre del Color
+              </label>
+              <input
+                ref={colorNameInputRef}
+                type="text"
+                placeholder="Ej. Nude, Rosado, Gris Jaspe"
+                value={colorName}
+                onChange={(e) => {
+                  setColorName(e.target.value);
+                  setError("");
+                }}
+                className="w-full h-9 px-3 border border-border rounded-button bg-white text-xs focus:outline-none focus:ring-1 focus:ring-brand-primary"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">
+                Tono Visual (Hexadecimal)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={colorHex}
+                  onChange={(e) => setColorHex(e.target.value.toUpperCase())}
+                  className="w-9 h-9 p-0 border border-border rounded-button cursor-pointer shrink-0 bg-white"
+                  title="Abrir paleta de colores"
+                />
+
+                <input
+                  type="text"
+                  value={colorHex}
+                  maxLength={7}
+                  onChange={(e) => setColorHex(e.target.value.toUpperCase())}
+                  className="flex-1 min-w-0 h-9 px-3 border border-border rounded-button bg-white text-xs font-mono uppercase focus:outline-none focus:ring-1 focus:ring-brand-primary"
+                  placeholder="#RRGGBB"
+                />
+
+                {hasEyeDropper && (
+                  <button
+                    type="button"
+                    onClick={handlePickFromScreen}
+                    className="h-9 px-2.5 rounded-button border border-border bg-white hover:bg-surface-subtle text-brand-primary flex items-center gap-1.5 shrink-0 transition-colors"
+                    title="Capturar color de la imagen o pantalla con pipeta"
+                  >
+                    <Pipette className="w-3.5 h-3.5 text-accent" />
+                    <span className="text-xs font-semibold">Pipeta</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Atajos rápidos de confección */}
+          <div>
+            <span className="block text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1.5">
+              Atajos rápidos de confección
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_PRESETS.map((preset) => (
+                <button
+                  key={preset.name}
+                  type="button"
+                  onClick={() => {
+                    setColorName(preset.name);
+                    setColorHex(preset.hex);
+                    setError("");
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-badge border border-border text-xs hover:border-brand-primary transition-colors bg-white"
+                >
+                  <span
+                    className="w-3 h-3 rounded-full border border-black/20"
+                    style={{ backgroundColor: preset.hex }}
+                  />
+                  <span>{preset.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Pie de acciones */}
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            <button
+              type="button"
+              onClick={handleCloseAddColor}
+              className="px-3 py-1.5 rounded-button border border-border bg-white text-xs font-semibold text-brand-primary hover:bg-surface-subtle transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleAddColorSubmit}
+              className="px-3.5 py-1.5 rounded-button bg-accent hover:bg-accent-hover text-white text-xs font-bold transition-colors"
+            >
+              Agregar a Matriz
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* C. Grilla de Tallas, SKU e Inventario del Color Activo */}
       {colors.length === 0 ? (
@@ -453,140 +602,6 @@ export default function VariantMatrix({
             </table>
           </div>
         )
-      )}
-
-      {/* Modal para Agregar Color */}
-      {isModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-100"
-          onKeyDown={handleModalKeyDown}
-        >
-          <div className="bg-white border border-border rounded-card p-6 w-full max-w-md shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <Palette className="w-5 h-5 text-accent" />
-                <h3 className="text-sm font-bold text-brand-primary">
-                  Registrar Nuevo Color
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="text-brand-muted hover:text-brand-primary p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {error && (
-              <p className="text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-200 p-2 rounded">
-                {error}
-              </p>
-            )}
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1">
-                  Nombre del Color
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej. Nude, Rosado, Gris Jaspe"
-                  value={colorName}
-                  onChange={(e) => {
-                    setColorName(e.target.value);
-                    setError("");
-                  }}
-                  className="w-full h-10 px-3 border border-border rounded-button text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1">
-                  Tono Visual (Hexadecimal)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={colorHex}
-                    onChange={(e) => setColorHex(e.target.value.toUpperCase())}
-                    className="w-10 h-10 p-0 border border-border rounded-button cursor-pointer shrink-0"
-                    title="Abrir paleta de colores"
-                  />
-
-                  <input
-                    type="text"
-                    value={colorHex}
-                    maxLength={7}
-                    onChange={(e) => setColorHex(e.target.value.toUpperCase())}
-                    className="flex-1 h-10 px-3 border border-border rounded-button text-sm font-mono uppercase"
-                    placeholder="#RRGGBB"
-                  />
-
-                  {hasEyeDropper && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="md"
-                      onClick={handlePickFromScreen}
-                      className="h-10 px-3 flex items-center gap-1.5 shrink-0"
-                      title="Capturar color de la imagen o pantalla con pipeta"
-                    >
-                      <Pipette className="w-4 h-4 text-accent" />
-                      <span className="text-xs">Pipeta</span>
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <span className="block text-[11px] font-semibold text-brand-muted mb-2">
-                  Atajos rápidos de confección:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {QUICK_PRESETS.map((preset) => (
-                    <button
-                      key={preset.name}
-                      type="button"
-                      onClick={() => {
-                        setColorName(preset.name);
-                        setColorHex(preset.hex);
-                        setError("");
-                      }}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-badge border border-border text-xs hover:border-brand-primary transition-colors bg-surface-subtle"
-                    >
-                      <span
-                        className="w-3 h-3 rounded-full border border-black/20"
-                        style={{ backgroundColor: preset.hex }}
-                      />
-                      <span>{preset.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsModalOpen(false)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={handleAddColorSubmit}
-                >
-                  Agregar a Matriz
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

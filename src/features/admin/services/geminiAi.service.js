@@ -17,6 +17,21 @@ function fileToBase64(file) {
   });
 }
 
+/**
+ * Convierte un File, Blob o URL (blob: / https:) a Base64 puro y su MIME type
+ */
+async function sourceToBase64(imageSource) {
+  if (typeof imageSource === "string") {
+    const res = await fetch(imageSource);
+    if (!res.ok) throw new Error("No se pudo leer la imagen seleccionada.");
+    const blob = await res.blob();
+    const base64 = await fileToBase64(blob);
+    return { base64, mimeType: blob.type || "image/jpeg" };
+  }
+  const base64 = await fileToBase64(imageSource);
+  return { base64, mimeType: imageSource.type || "image/jpeg" };
+}
+
 export async function enhanceDescriptionWithAi({
   rawText,
   mode = "redaccion",
@@ -40,7 +55,8 @@ REGLAS ESTRICTAS DE RESPUESTA:
 2. Prohibido incluir notas, comentarios sobre el borrador, saludos o introducciones en inglés o español.
 3. Prohibido dejar oraciones incompletas o cortar palabras.
 4. Prohibido usar comillas al inicio o al final.
-5. PROHIBIDO usar formato Markdown con asteriscos (**). Escribe únicamente texto limpio.`
+5. PROHIBIDO usar formato Markdown con asteriscos (**). Escribe únicamente texto limpio.
+6. No menciones colores específicos de la prenda para mantener compatibilidad con todas las variantes.`
     : `Eres el especialista en catálogo técnico y comercial de ERXIDI.
 Tu objetivo es transformar el borrador en una ficha estructurada y persuasiva en español:
 1. Una oración inicial contundente que resuma el beneficio de la prenda.
@@ -53,7 +69,8 @@ REGLAS ESTRICTAS DE RESPUESTA:
 1. Responde DIRECTAMENTE con la oración y las viñetas terminadas.
 2. Para listas estructuradas, utiliza exclusivamente el símbolo • seguido de un espacio al inicio de cada línea.
 3. PROHIBIDO usar formato Markdown con asteriscos (**). Escribe únicamente texto limpio.
-4. Prohibido incluir análisis, introducciones o textos explicativos.`;
+4. Prohibido incluir análisis, introducciones o textos explicativos.
+5. No menciones colores específicos de la prenda para mantener compatibilidad con todas las variantes.`;
 
   const prompt = `Prenda: "${productName || "Prenda íntima"}"
 Categoría: "${category || "Ropa interior"}"
@@ -104,6 +121,92 @@ ${rawText?.trim() || "Prenda cómoda de alta calidad confeccionada en algodón p
   }
 
   if (!text) return rawText;
+  return text;
+}
+
+export async function suggestDescriptionFromImage({
+  imageSource,
+  productName = "",
+  category = "",
+  material = "",
+  targetGender = "",
+}) {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      "No se ha configurado VITE_GEMINI_API_KEY en las variables de entorno.",
+    );
+  }
+
+  if (!imageSource) {
+    throw new Error("No se ha proporcionado una imagen de la prenda.");
+  }
+
+  const { base64, mimeType } = await sourceToBase64(imageSource);
+
+  const systemInstruction = `Eres el redactor comercial de ERXIDI, tienda peruana de ropa interior y calcetería.
+Analiza la imagen de la prenda y redacta una descripción general del modelo que sirva para TODAS sus variantes de color.
+REGLAS ESTRICTAS:
+1. Escribe exactamente 2 oraciones cortas y naturales en español (máximo 45 palabras en total).
+2. PROHIBIDO mencionar colores, tonos o combinaciones cromáticas (nunca escribas palabras como rosado, azul, negro, blanco, verde, gris, celeste, etc.).
+3. Enfócate exclusivamente en el tipo de prenda, corte o altura (ej. tobillera, talonera, bóxer clásico), diseño o estampado (sin indicar sus colores), suavidad del tejido y comodidad para el uso diario.
+4. Usa un lenguaje cotidiano, claro y directo; evita tecnicismos complejos.
+5. Prohibido usar comillas, saludos, introducciones o formato Markdown con asteriscos (**).`;
+
+  const prompt = `Prenda: ${productName || "Prenda íntima"}
+Categoría: ${category || "Ropa interior"}
+Material: ${material || "Algodón"}
+Público: ${targetGender || "General"}`;
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: systemInstruction },
+          { text: prompt },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: base64,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 1024,
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
+    },
+  };
+
+  const response = await fetch(GEMINI_TEXT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.error?.message || "Error de comunicación con Gemini AI",
+    );
+  }
+
+  const data = await response.json();
+  let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  // Limpieza estricta de salida y eliminación de asteriscos Markdown residuales
+  text = text
+    .replace(/^```[a-z]*\n?/i, "")
+    .replace(/\n?```$/i, "")
+    .replace(/\*\*/g, "")
+    .trim();
+  if (text.startsWith('"') && text.endsWith('"')) {
+    text = text.slice(1, -1).trim();
+  }
+
   return text;
 }
 

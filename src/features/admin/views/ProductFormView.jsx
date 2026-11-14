@@ -28,7 +28,10 @@ import {
   updateProduct,
   uploadProductImage,
 } from "../services/adminProducts.service";
-import { enhanceDescriptionWithAi } from "../services/geminiAi.service";
+import {
+  enhanceDescriptionWithAi,
+  suggestDescriptionFromImage,
+} from "../services/geminiAi.service";
 import { invalidateCatalogCache } from "../../../services/api/catalogService";
 
 const initial = {
@@ -86,6 +89,7 @@ export default function ProductFormView() {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhancingMode, setEnhancingMode] = useState(null);
   const [previousDescription, setPreviousDescription] = useState(null);
+  const [baselineDescription, setBaselineDescription] = useState("");
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [deleteImageModalOpen, setDeleteImageModalOpen] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
@@ -131,7 +135,7 @@ export default function ProductFormView() {
             brand_id: product.brand_id || "",
             name: product.name,
             slug: product.slug,
-            description: product.description,
+            description: product.description || "",
             price: product.price ? String(product.price) : "",
             main_image_url: mainUrl,
             gallery_urls: normalizedGallery,
@@ -141,6 +145,7 @@ export default function ProductFormView() {
             is_on_sale: Boolean(product.is_on_sale),
             target_gender: product.target_gender || "hombre",
           });
+          setBaselineDescription(product.description || "");
 
           const activeVariants = (product.product_variants || [])
             .filter((variant) => variant.is_active !== false)
@@ -312,6 +317,40 @@ export default function ProductFormView() {
     }
   }
 
+  async function handleSuggestDescription() {
+    if (!activeImage || isEnhancing) return;
+    setIsEnhancing(true);
+    setEnhancingMode("sugerir");
+    try {
+      const selectedCategory =
+        deps.categories.find((c) => String(c.id) === String(form.category_id))
+          ?.name || "";
+      const selectedMaterial =
+        deps.materials.find((m) => String(m.id) === String(form.material_id))
+          ?.name || "";
+
+      const suggested = await suggestDescriptionFromImage({
+        imageSource: activeImage,
+        productName: form.name,
+        category: selectedCategory,
+        material: selectedMaterial,
+        targetGender: form.target_gender,
+      });
+
+      if (suggested) {
+        setPreviousDescription(form.description);
+        update("description", suggested);
+        setBaselineDescription(suggested);
+        showToast("Descripción sugerida a partir de la imagen.");
+      }
+    } catch (err) {
+      showToast(err.message || "Error al sugerir descripción desde la imagen.");
+    } finally {
+      setIsEnhancing(false);
+      setEnhancingMode(null);
+    }
+  }
+
   async function handleEnhanceText(mode) {
     setIsEnhancing(true);
     setEnhancingMode(mode);
@@ -330,6 +369,7 @@ export default function ProductFormView() {
 
       setPreviousDescription(currentText);
       update("description", enhanced);
+      setBaselineDescription(enhanced);
       showToast(
         mode === "redaccion"
           ? "Redacción optimizada con IA."
@@ -1157,44 +1197,86 @@ export default function ProductFormView() {
                 Descripción de la prenda
               </label>
               <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  disabled={isEnhancing}
-                  onClick={() => handleEnhanceText("redaccion")}
-                  className="border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 transition-colors"
-                  title="Mejora la ortografía y persuasión del texto"
-                >
-                  {isEnhancing && enhancingMode === "redaccion" ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-                      <span>Mejorando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Mejorar redacción</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  disabled={isEnhancing}
-                  onClick={() => handleEnhanceText("estructura")}
-                  className="border border-border bg-surface-subtle text-brand-primary hover:border-brand-primary/40 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 transition-colors"
-                  title="Convierte la descripción en lista de características comerciales"
-                >
-                  {isEnhancing && enhancingMode === "estructura" ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-                      <span>Mejorando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Mejorar estructura</span>
-                    </>
-                  )}
-                </button>
+                {!Boolean(form.description && form.description.trim()) ? (
+                  <button
+                    type="button"
+                    disabled={!activeImage || isEnhancing}
+                    onClick={handleSuggestDescription}
+                    className="border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={
+                      !activeImage
+                        ? "Selecciona una imagen en el visor para sugerir descripción"
+                        : "Sugerir descripción comercial a partir de la foto activa"
+                    }
+                  >
+                    {isEnhancing && enhancingMode === "sugerir" ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                        <span>Generando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Sugerir descripción</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={
+                        form.description.trim() === baselineDescription.trim() ||
+                        isEnhancing
+                      }
+                      onClick={() => handleEnhanceText("redaccion")}
+                      className="border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title={
+                        form.description.trim() === baselineDescription.trim()
+                          ? "Edita el texto manualmente para habilitar la mejora"
+                          : "Mejora la ortografía y persuasión del texto"
+                      }
+                    >
+                      {isEnhancing && enhancingMode === "redaccion" ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                          <span>Mejorando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Mejorar redacción</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        form.description.trim() === baselineDescription.trim() ||
+                        isEnhancing
+                      }
+                      onClick={() => handleEnhanceText("estructura")}
+                      className="border border-border bg-surface-subtle text-brand-primary hover:border-brand-primary/40 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title={
+                        form.description.trim() === baselineDescription.trim()
+                          ? "Edita el texto manualmente para habilitar la mejora"
+                          : "Convierte la descripción en lista de características comerciales"
+                      }
+                    >
+                      {isEnhancing && enhancingMode === "estructura" ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                          <span>Mejorando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Mejorar estructura</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -1233,7 +1315,13 @@ export default function ProductFormView() {
                 ref={textareaRef}
                 rows={4}
                 value={form.description}
-                onChange={(e) => update("description", e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  update("description", val);
+                  if (!val.trim()) {
+                    setBaselineDescription("");
+                  }
+                }}
                 className={`w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed min-h-[140px] resize-y transition-colors focus:border-brand-primary focus:outline-none ${
                   isEnhancing
                     ? "ring-2 ring-accent/30 bg-amber-50/20 animate-pulse border-accent"
