@@ -889,11 +889,10 @@ export default function ProductFormView() {
                         <button
                           type="button"
                           onClick={() => handleSetGlobalCover(activeImage)}
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold shadow-xs transition-colors ${
-                            isCurrentGlobalCover
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold shadow-xs transition-colors ${isCurrentGlobalCover
                               ? "bg-amber-500 hover:bg-amber-600 text-white"
                               : "bg-black/50 hover:bg-black/75 text-white backdrop-blur-xs font-semibold"
-                          }`}
+                            }`}
                           title={
                             isCurrentGlobalCover
                               ? "Foto de portada global en catálogo"
@@ -901,9 +900,8 @@ export default function ProductFormView() {
                           }
                         >
                           <Star
-                            className={`w-3.5 h-3.5 ${
-                              isCurrentGlobalCover ? "fill-current" : ""
-                            }`}
+                            className={`w-3.5 h-3.5 ${isCurrentGlobalCover ? "fill-current" : ""
+                              }`}
                           />
                           <span>
                             {isCurrentGlobalCover
@@ -916,11 +914,10 @@ export default function ProductFormView() {
                         <button
                           type="button"
                           onClick={() => handleSetColorCover(activeImage)}
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold shadow-xs transition-colors ${
-                            isCurrentColorCover
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold shadow-xs transition-colors ${isCurrentColorCover
                               ? "bg-blue-600 hover:bg-blue-700 text-white"
                               : "bg-black/50 hover:bg-black/75 text-white backdrop-blur-xs font-semibold"
-                          }`}
+                            }`}
                           title={`Portada asignada a las variantes de color ${activeColor}`}
                         >
                           <Shirt className="w-3.5 h-3.5" />
@@ -988,11 +985,10 @@ export default function ProductFormView() {
                         e.dataTransfer.dropEffect = "move";
                       }}
                       onClick={() => setActiveImage(img.image_url)}
-                      className={`aspect-[4/5] w-16 rounded-button border overflow-hidden cursor-grab active:cursor-grabbing relative bg-slate-50 transition-all ${
-                        isSelected
+                      className={`aspect-[4/5] w-16 rounded-button border overflow-hidden cursor-grab active:cursor-grabbing relative bg-slate-50 transition-all ${isSelected
                           ? "border-brand-primary ring-2 ring-brand-primary/20 scale-105"
                           : "border-border hover:border-brand-primary/50"
-                      }`}
+                        }`}
                       title="Arrastra esta foto a otra pastilla de color para reasignarla"
                     >
                       <img
@@ -1225,17 +1221,10 @@ export default function ProductFormView() {
                   <>
                     <button
                       type="button"
-                      disabled={
-                        form.description.trim() === baselineDescription.trim() ||
-                        isEnhancing
-                      }
+                      disabled={isEnhancing}
                       onClick={() => handleEnhanceText("redaccion")}
                       className="border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title={
-                        form.description.trim() === baselineDescription.trim()
-                          ? "Edita el texto manualmente para habilitar la mejora"
-                          : "Mejora la ortografía y persuasión del texto"
-                      }
+                      title="Mejora la ortografía y persuasión del texto"
                     >
                       {isEnhancing && enhancingMode === "redaccion" ? (
                         <>
@@ -1251,17 +1240,10 @@ export default function ProductFormView() {
                     </button>
                     <button
                       type="button"
-                      disabled={
-                        form.description.trim() === baselineDescription.trim() ||
-                        isEnhancing
-                      }
+                      disabled={isEnhancing}
                       onClick={() => handleEnhanceText("estructura")}
                       className="border border-border bg-surface-subtle text-brand-primary hover:border-brand-primary/40 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title={
-                        form.description.trim() === baselineDescription.trim()
-                          ? "Edita el texto manualmente para habilitar la mejora"
-                          : "Convierte la descripción en lista de características comerciales"
-                      }
+                      title="Convierte la descripción en lista de características comerciales"
                     >
                       {isEnhancing && enhancingMode === "estructura" ? (
                         <>
@@ -1322,11 +1304,10 @@ export default function ProductFormView() {
                     setBaselineDescription("");
                   }
                 }}
-                className={`w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed min-h-[140px] resize-y transition-colors focus:border-brand-primary focus:outline-none ${
-                  isEnhancing
+                className={`w-full px-3.5 py-2.5 border border-border rounded-button text-xs leading-relaxed min-h-[140px] resize-y transition-colors focus:border-brand-primary focus:outline-none ${isEnhancing
                     ? "ring-2 ring-accent/30 bg-amber-50/20 animate-pulse border-accent"
                     : ""
-                }`}
+                  }`}
                 placeholder="Detalles de confección, suavidad y calce..."
               />
             ) : (
