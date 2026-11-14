@@ -7,12 +7,14 @@ import Footer from "./Footer";
 import SizeMatcherModal from "../../features/catalog/components/SizeMatcherModal";
 import CartDrawer from "../../features/cart/CartDrawer";
 import SeasonalSnowOverlay from "../ui/SeasonalSnowOverlay";
+import { useSeasonalSnow } from "../../hooks/useSeasonalSnow";
 
 export default function MainLayout() {
   const [isSizeMatcherOpen, setIsSizeMatcherOpen] = useState(false);
   const { isCartOpen, openCartDrawer, closeCartDrawer } = useCart();
   const { profile, role, isDelivery: authIsDelivery } = useAuth();
   const location = useLocation();
+  const isSnowEnabled = useSeasonalSnow();
 
   const isDelivery =
     authIsDelivery ||
@@ -22,7 +24,7 @@ export default function MainLayout() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface-app text-brand-primary">
-      {!isDelivery && <SeasonalSnowOverlay />}
+      {!isDelivery && isSnowEnabled && <SeasonalSnowOverlay />}
 
       {!isDelivery && (
         <Navbar

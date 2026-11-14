@@ -16,6 +16,7 @@ import {
     Upload,
     Loader2,
     Smartphone,
+    Snowflake,
 } from "lucide-react";
 import Button from "../../../components/ui/Button";
 import Input from "../../../components/ui/Input";
@@ -89,6 +90,8 @@ export default function SettingsView() {
     });
     const [savingEmergency, setSavingEmergency] = useState(false);
     const [savingHours, setSavingHours] = useState(false);
+    const [seasonalSnowEnabled, setSeasonalSnowEnabled] = useState(true);
+    const [savingSnow, setSavingSnow] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -116,6 +119,7 @@ export default function SettingsView() {
                     pause_scheduled: Boolean(data.emergencyFlags?.pause_scheduled ?? false),
                     pause_pickup: Boolean(data.emergencyFlags?.pause_pickup ?? false),
                 });
+                setSeasonalSnowEnabled(data.seasonalSnowEnabled ?? true);
             } catch (err) {
                 if (active) setStatusMessage({ type: "error", text: err.message || "Error al cargar configuraciones." });
             } finally {
@@ -233,6 +237,29 @@ export default function SettingsView() {
             setStatusMessage({ type: "success", text: "Razón Social autocompletada desde el padrón." });
         } else {
             setStatusMessage({ type: "warning", text: result.message });
+        }
+    };
+
+    const handleToggleSeasonalSnow = async () => {
+        const nextEnabled = !seasonalSnowEnabled;
+        setSavingSnow(true);
+        setStatusMessage({ type: "", text: "" });
+        try {
+            await updateStoreSetting("seasonal_snow", { enabled: nextEnabled });
+            setSeasonalSnowEnabled(nextEnabled);
+            setStatusMessage({
+                type: "success",
+                text: nextEnabled
+                    ? "Efecto de nieve activado en la tienda pública."
+                    : "Efecto de nieve desactivado en la tienda pública.",
+            });
+        } catch (err) {
+            setStatusMessage({
+                type: "error",
+                text: err.message || "Error al actualizar el efecto de nieve.",
+            });
+        } finally {
+            setSavingSnow(false);
         }
     };
 
@@ -452,67 +479,100 @@ export default function SettingsView() {
 
             {/* PESTAÑA 1: IDENTIDAD FISCAL */}
             {activeTab === "identity" && (
-                <form onSubmit={handleSaveIdentity} className="space-y-4 max-w-2xl">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Datos de Facturación y Contacto</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1">
-                                    RUC
-                                </label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        value={identity.ruc}
-                                        onChange={(e) => setIdentity({ ...identity, ruc: e.target.value })}
-                                        placeholder="20601234567"
-                                        maxLength={11}
-                                        required
-                                    />
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={handleSearchRuc}
-                                        isLoading={searchingRuc}
-                                        className="shrink-0 text-xs"
-                                    >
-                                        <Search className="w-3.5 h-3.5 mr-1" />
-                                        Consultar Decolecta
+                <div className="space-y-6 max-w-2xl">
+                    <form onSubmit={handleSaveIdentity} className="space-y-4">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Datos de Facturación y Contacto</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-semibold uppercase tracking-wider text-brand-secondary mb-1">
+                                        RUC
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            value={identity.ruc}
+                                            onChange={(e) => setIdentity({ ...identity, ruc: e.target.value })}
+                                            placeholder="20601234567"
+                                            maxLength={11}
+                                            required
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={handleSearchRuc}
+                                            isLoading={searchingRuc}
+                                            className="shrink-0 text-xs"
+                                        >
+                                            <Search className="w-3.5 h-3.5 mr-1" />
+                                            Consultar Decolecta
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <Input
+                                    label="Razón Social (Editable)"
+                                    value={identity.legal_name}
+                                    onChange={(e) => setIdentity({ ...identity, legal_name: e.target.value })}
+                                    required
+                                />
+
+                                <Input
+                                    label="Nombre Comercial"
+                                    value={identity.commercial_name}
+                                    onChange={(e) => setIdentity({ ...identity, commercial_name: e.target.value })}
+                                    required
+                                />
+
+                                <Input
+                                    label="Teléfono / WhatsApp de Soporte"
+                                    value={identity.support_phone}
+                                    onChange={(e) => setIdentity({ ...identity, support_phone: e.target.value })}
+                                    placeholder="+51987654321"
+                                    required
+                                />
+
+                                <div className="pt-2">
+                                    <Button type="submit" isLoading={saving}>
+                                        <Save className="w-4 h-4 mr-2" /> Guardar Identidad
                                     </Button>
                                 </div>
-                            </div>
+                            </CardContent>
+                        </Card>
+                    </form>
 
-                            <Input
-                                label="Razón Social (Editable)"
-                                value={identity.legal_name}
-                                onChange={(e) => setIdentity({ ...identity, legal_name: e.target.value })}
-                                required
-                            />
-
-                            <Input
-                                label="Nombre Comercial"
-                                value={identity.commercial_name}
-                                onChange={(e) => setIdentity({ ...identity, commercial_name: e.target.value })}
-                                required
-                            />
-
-                            <Input
-                                label="Teléfono / WhatsApp de Soporte"
-                                value={identity.support_phone}
-                                onChange={(e) => setIdentity({ ...identity, support_phone: e.target.value })}
-                                placeholder="+51987654321"
-                                required
-                            />
-
-                            <div className="pt-2">
-                                <Button type="submit" isLoading={saving}>
-                                    <Save className="w-4 h-4 mr-2" /> Guardar Identidad
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Snowflake className="w-4 h-4 text-brand-secondary" />
+                                Efectos de Temporada
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center justify-between gap-4 p-3.5 rounded-card border border-border bg-surface-subtle">
+                                <div className="space-y-0.5">
+                                    <p className="text-xs font-bold text-brand-primary">
+                                        Nieve ambiental en tienda pública
+                                    </p>
+                                    <p className="text-[11px] text-brand-secondary leading-snug">
+                                        Muestra u oculta el efecto sutil de nieve en el catálogo sin afectar el panel admin ni reparto.
+                                    </p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant={seasonalSnowEnabled ? "primary" : "outline"}
+                                    onClick={handleToggleSeasonalSnow}
+                                    isLoading={savingSnow}
+                                    aria-pressed={seasonalSnowEnabled}
+                                    className="shrink-0 text-xs"
+                                >
+                                    {seasonalSnowEnabled ? "Desactivar" : "Activar"}
                                 </Button>
                             </div>
                         </CardContent>
                     </Card>
-                </form>
+                </div>
             )}
 
             {/* PESTAÑA 2: CUENTAS BANCARIAS */}

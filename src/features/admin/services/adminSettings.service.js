@@ -227,6 +227,7 @@ export async function getAllStoreSettings() {
     fleetConfig: settings.fleet_config || {
       max_items_per_trip: 30,
     },
+    seasonalSnowEnabled: settings.seasonal_snow?.enabled ?? true,
   };
 }
 
