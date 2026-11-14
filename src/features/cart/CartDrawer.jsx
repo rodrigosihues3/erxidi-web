@@ -9,10 +9,13 @@ import {
   Plus,
   AlertCircle,
   Package,
+  ArrowRight,
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
+
+const MIN_DELIVERY_SUBTOTAL = 30;
 
 export default function CartDrawer({ isOpen, onClose }) {
   const navigate = useNavigate();
@@ -317,6 +320,20 @@ export default function CartDrawer({ isOpen, onClose }) {
               </div>
             )}
 
+            {subtotal > 0 && subtotal < MIN_DELIVERY_SUBTOTAL && (
+              <div className="mb-3 px-3 py-2 rounded-button bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-900 leading-snug">
+                Compra mínima de <strong>S/ 30.00</strong> para envío a domicilio (te faltan{" "}
+                <strong>S/ {(MIN_DELIVERY_SUBTOTAL - subtotal).toFixed(2)}</strong>). Pedidos menores aplican solo para{" "}
+                <strong>Recojo en Tienda</strong>.
+              </div>
+            )}
+
+            {subtotal >= MIN_DELIVERY_SUBTOTAL && (
+              <div className="mb-3 px-3 py-1.5 rounded-button bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 font-medium">
+                Tu pedido califica para envío a domicilio (Express o Programado).
+              </div>
+            )}
+
             <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-brand-secondary">
                 Subtotal ({totalUnits} {totalUnits === 1 ? 'prenda' : 'prendas'})
@@ -335,11 +352,16 @@ export default function CartDrawer({ isOpen, onClose }) {
                 onClose?.();
                 navigate('/checkout');
               }}
-              className="w-full bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-10 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full gap-2 bg-accent hover:bg-accent-hover text-white text-xs font-semibold h-10 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {outOfStockItems.length > 0
-                ? 'Elimina las prendas agotadas para continuar'
-                : 'Continuar al Checkout'}
+              {outOfStockItems.length > 0 ? (
+                'Elimina las prendas agotadas para continuar'
+              ) : (
+                <>
+                  <span>Continuar al pago</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </Button>
           </div>
         )}

@@ -367,8 +367,11 @@ export default function CheckoutView() {
   // -------------------------------------------------------------
   // PASO 2: Método de Entrega, SLA Dinámico y Direcciones
   // -------------------------------------------------------------
+  const MIN_DELIVERY_SUBTOTAL = 30;
+  const meetsDeliveryMinimum = Number(subtotal || 0) >= MIN_DELIVERY_SUBTOTAL;
+
   const [deliveryType, setDeliveryType] = useState(
-    totalUnits > 30 ? "pickup" : "scheduled"
+    totalUnits > 30 || !meetsDeliveryMinimum ? "pickup" : "scheduled"
   );
   const [deliveryZones, setDeliveryZones] = useState(defaultDeliveryZones);
   const [selectedZoneId, setSelectedZoneId] = useState(
@@ -723,6 +726,9 @@ export default function CheckoutView() {
     // Regla de capacidad física en moto
     if (totalUnits > 30 && deliveryType !== "pickup") return false;
 
+    // Regla de subtotal mínimo para envío a domicilio
+    if (!meetsDeliveryMinimum && deliveryType !== "pickup") return false;
+
     if (deliveryType === "pickup") return !isPickupPaused;
     if (deliveryType === "express" && !isExpressAvailable) return false;
     if (deliveryType === "scheduled" && isScheduledPaused) return false;
@@ -735,6 +741,7 @@ export default function CheckoutView() {
   }, [
     isStoreClosed,
     totalUnits,
+    meetsDeliveryMinimum,
     deliveryType,
     isPickupPaused,
     isExpressAvailable,
@@ -748,33 +755,34 @@ export default function CheckoutView() {
   useEffect(() => {
     if (isStoreClosed) return;
 
-    // Si supera 30 prendas, forzar a 'pickup' (recojo en tienda) de forma automática
-    if (totalUnits > 30 && deliveryType !== "pickup") {
+    // Si supera 30 prendas o no alcanza el mínimo de S/ 30.00, forzar a 'pickup' (recojo en tienda)
+    if ((totalUnits > 30 || !meetsDeliveryMinimum) && deliveryType !== "pickup") {
       setDeliveryType("pickup");
       return;
     }
 
     if (deliveryType === "express" && !isExpressAvailable) {
-      if (!isScheduledPaused) {
+      if (!isScheduledPaused && meetsDeliveryMinimum && totalUnits <= 30) {
         setDeliveryType("scheduled");
       } else if (!isPickupPaused) {
         setDeliveryType("pickup");
       }
     } else if (deliveryType === "scheduled" && isScheduledPaused) {
-      if (isExpressAvailable) {
+      if (isExpressAvailable && meetsDeliveryMinimum && totalUnits <= 30) {
         setDeliveryType("express");
       } else if (!isPickupPaused) {
         setDeliveryType("pickup");
       }
     } else if (deliveryType === "pickup" && isPickupPaused) {
-      if (!isScheduledPaused) {
+      if (!isScheduledPaused && meetsDeliveryMinimum && totalUnits <= 30) {
         setDeliveryType("scheduled");
-      } else if (isExpressAvailable) {
+      } else if (isExpressAvailable && meetsDeliveryMinimum && totalUnits <= 30) {
         setDeliveryType("express");
       }
     }
   }, [
     totalUnits,
+    meetsDeliveryMinimum,
     deliveryType,
     isStoreClosed,
     isExpressAvailable,
@@ -2109,12 +2117,13 @@ export default function CheckoutView() {
                       isExpressAvailable &&
                       !isExpressPaused &&
                       totalUnits <= 30 &&
+                      meetsDeliveryMinimum &&
                       setDeliveryType("express")
                     }
                     className={
                       "p-3.5 rounded-card border transition-all flex flex-col justify-between select-none " +
-                      (!isExpressAvailable || isExpressPaused || totalUnits > 30
-                        ? "opacity-50 cursor-not-allowed pointer-events-none border-border bg-surface-card"
+                      (!isExpressAvailable || isExpressPaused || totalUnits > 30 || !meetsDeliveryMinimum
+                        ? "opacity-60 cursor-not-allowed pointer-events-none border-border bg-surface-card"
                         : deliveryType === "express"
                           ? "cursor-pointer border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
                           : "cursor-pointer border-border bg-surface-card hover:border-border-strong")
@@ -2124,12 +2133,13 @@ export default function CheckoutView() {
                       type="radio"
                       name="delivery-type"
                       value="express"
-                      disabled={!isExpressAvailable || isExpressPaused || totalUnits > 30}
+                      disabled={!isExpressAvailable || isExpressPaused || totalUnits > 30 || !meetsDeliveryMinimum}
                       checked={deliveryType === "express"}
                       onChange={() =>
                         isExpressAvailable &&
                         !isExpressPaused &&
                         totalUnits <= 30 &&
+                        meetsDeliveryMinimum &&
                         setDeliveryType("express")
                       }
                       className="sr-only"
@@ -2137,7 +2147,11 @@ export default function CheckoutView() {
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Zap className="w-5 h-5 text-accent" />
-                        {totalUnits > 30 ? (
+                        {!meetsDeliveryMinimum ? (
+                          <Badge variant="warning" className="text-[10px]">
+                            Mínimo S/ 30.00
+                          </Badge>
+                        ) : totalUnits > 30 ? (
                           <Badge variant="warning" className="text-[10px]">
                             Excede cap. moto (&gt;30)
                           </Badge>
@@ -2168,12 +2182,13 @@ export default function CheckoutView() {
                     onClick={() =>
                       !isScheduledPaused &&
                       totalUnits <= 30 &&
+                      meetsDeliveryMinimum &&
                       setDeliveryType("scheduled")
                     }
                     className={
                       "p-3.5 rounded-card border transition-all flex flex-col justify-between select-none " +
-                      (isScheduledPaused || totalUnits > 30
-                        ? "opacity-50 cursor-not-allowed pointer-events-none border-border bg-surface-card"
+                      (isScheduledPaused || totalUnits > 30 || !meetsDeliveryMinimum
+                        ? "opacity-60 cursor-not-allowed pointer-events-none border-border bg-surface-card"
                         : deliveryType === "scheduled"
                           ? "cursor-pointer border-brand-primary bg-surface-subtle ring-1 ring-brand-primary"
                           : "cursor-pointer border-border bg-surface-card hover:border-border-strong")
@@ -2182,11 +2197,12 @@ export default function CheckoutView() {
                     <input
                       type="radio"
                       name="delivery-type"
-                      disabled={isScheduledPaused || totalUnits > 30}
+                      disabled={isScheduledPaused || totalUnits > 30 || !meetsDeliveryMinimum}
                       checked={deliveryType === "scheduled"}
                       onChange={() =>
                         !isScheduledPaused &&
                         totalUnits <= 30 &&
+                        meetsDeliveryMinimum &&
                         setDeliveryType("scheduled")
                       }
                       className="sr-only"
@@ -2194,7 +2210,11 @@ export default function CheckoutView() {
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Calendar className="w-5 h-5 text-accent" />
-                        {totalUnits > 30 ? (
+                        {!meetsDeliveryMinimum ? (
+                          <Badge variant="warning" className="text-[10px]">
+                            Mínimo S/ 30.00
+                          </Badge>
+                        ) : totalUnits > 30 ? (
                           <Badge variant="warning" className="text-[10px]">
                             Excede cap. moto (&gt;30)
                           </Badge>
@@ -2217,6 +2237,18 @@ export default function CheckoutView() {
                     </div>
                   </label>
                 </div>
+
+                {!meetsDeliveryMinimum && (
+                  <div className="mt-3 px-3.5 py-2.5 rounded-button bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      Los envíos a domicilio (Express y Programado) requieren un pedido mínimo de{" "}
+                      <strong>S/ 30.00</strong> en prendas. Tu subtotal actual es{" "}
+                      <strong>S/ {Number(subtotal || 0).toFixed(2)}</strong>, por lo que solo está
+                      habilitado <strong>Recojo en Tienda</strong>.
+                    </span>
+                  </div>
+                )}
 
                 {/* Banner Informativo de Proximidad (Propuesta 1B) */}
                 {deliveryType !== "pickup" &&
