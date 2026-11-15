@@ -721,6 +721,52 @@ export async function getDashboardAnalytics({ startDate, endDate } = {}) {
   return allOrders;
 }
 
+/**
+ * Obtiene el conteo diario de pedidos pagados (no cancelados) para un mes calendario.
+ * Retorna un mapa { "YYYY-MM-DD": number } en hora local.
+ */
+export async function getMonthlySalesActivity(year, monthIndex) {
+  const start = new Date(year, monthIndex, 1, 0, 0, 0, 0).toISOString();
+  const end = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999).toISOString();
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("created_at, payment_status, status")
+    .gte("created_at", start)
+    .lte("created_at", end);
+
+  if (error) {
+    console.error("Error al obtener actividad mensual de ventas:", error);
+    throw error;
+  }
+
+  const paidStatuses = ["paid", "pagado"];
+  const cancelledStatuses = ["cancelado", "cancelled"];
+  const countsByDate = {};
+
+  (data || []).forEach((order) => {
+    const isPaid = paidStatuses.includes(
+      String(order.payment_status || "").toLowerCase(),
+    );
+    const isCancelled = cancelledStatuses.includes(
+      String(order.status || "").toLowerCase(),
+    );
+
+    if (!isPaid || isCancelled || !order.created_at) return;
+
+    const d = new Date(order.created_at);
+    const key = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    countsByDate[key] = (countsByDate[key] || 0) + 1;
+  });
+
+  return countsByDate;
+}
+
 export {
   sendOrderNotificationEmail,
   AUTO_NOTIFICATION_STATUSES,

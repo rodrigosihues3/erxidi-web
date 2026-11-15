@@ -18,6 +18,8 @@ import {
   HelpCircle,
   Sparkles,
   X,
+  Calendar,
+  Pencil,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -49,8 +51,12 @@ import Skeleton from "../../../components/ui/Skeleton";
 import Button from "../../../components/ui/Button";
 import Badge from "../../../components/ui/Badge";
 
-import { getDashboardAnalytics } from "../services/adminOrders.service";
+import {
+  getDashboardAnalytics,
+  getMonthlySalesActivity,
+} from "../services/adminOrders.service";
 import { getCriticalStock } from "../services/adminInventory.service";
+import DateRangeCalendarModal from "../components/DateRangeCalendarModal";
 
 const PAID_STATUSES = ["paid", "pagado"];
 const CANCELLED_STATUSES = ["cancelado", "cancelled"];
@@ -58,7 +64,6 @@ const CANCELLED_STATUSES = ["cancelado", "cancelled"];
 const PERIOD_OPTIONS = [
   { value: "today", label: "Hoy" },
   { value: "week", label: "Esta semana" },
-  { value: "7days", label: "Últimos 7 días" },
   { value: "month", label: "Este mes" },
   { value: "30days", label: "Últimos 30 días" },
   { value: "3months", label: "Últimos 3 meses" },
@@ -286,11 +291,29 @@ function getCustomerName(order) {
   return order.customer_name || order.customer_email || "Cliente invitado";
 }
 
-function getPeriodDates(range) {
+function formatShortDate(date) {
+  const d = new Date(date);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+function getPeriodDates(range, customRange = null) {
   if (range === "all") {
     return {
       startDate: null,
       endDate: null,
+    };
+  }
+
+  if (range === "custom" && customRange?.startDate && customRange?.endDate) {
+    const start = new Date(customRange.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(customRange.endDate);
+    end.setHours(23, 59, 59, 999);
+    return {
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
     };
   }
 
@@ -307,8 +330,6 @@ function getPeriodDates(range) {
     const day = now.getDay();
     const diffToMonday = (day + 6) % 7;
     start.setDate(start.getDate() - diffToMonday);
-  } else if (range === "7days") {
-    start.setDate(start.getDate() - 6);
   } else if (range === "month") {
     start.setDate(1);
   } else if (range === "30days") {
@@ -327,6 +348,16 @@ function getPeriodDates(range) {
   };
 }
 
+function getActiveRangeDisplay(range, customRange = null) {
+  if (range === "all") return "Historial completo";
+  const { startDate, endDate } = getPeriodDates(range, customRange);
+  if (!startDate || !endDate) return "Historial completo";
+
+  const startStr = formatShortDate(startDate);
+  const endStr = formatShortDate(endDate);
+  return startStr === endStr ? startStr : `${startStr} – ${endStr}`;
+}
+
 function isPaidOrder(order) {
   return (
     PAID_STATUSES.includes(String(order.payment_status || "").toLowerCase()) &&
@@ -337,7 +368,16 @@ function isPaidOrder(order) {
 export default function DashboardView() {
   const navigate = useNavigate();
 
-  const [timeRange, setTimeRange] = useState("30days");
+  const [timeRange, setTimeRange] = useState("today");
+  const [customRange, setCustomRange] = useState(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarView, setCalendarView] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const [salesByDate, setSalesByDate] = useState({});
+  const [loadingCalendarActivity, setLoadingCalendarActivity] = useState(false);
+
   const [reportMenuOpen, setReportMenuOpen] = useState(false);
   const [criticalStockOpen, setCriticalStockOpen] = useState(false);
   const [activeHelpModal, setActiveHelpModal] = useState(null);
@@ -358,7 +398,7 @@ export default function DashboardView() {
       setError("");
 
       try {
-        const dates = getPeriodDates(timeRange);
+        const dates = getPeriodDates(timeRange, customRange);
 
         const [analytics, criticalStockData] = await Promise.all([
           getDashboardAnalytics(dates),
@@ -385,7 +425,35 @@ export default function DashboardView() {
     return () => {
       active = false;
     };
-  }, [timeRange, refreshKey]);
+  }, [timeRange, customRange, refreshKey]);
+
+  useEffect(() => {
+    if (!calendarOpen) return;
+    let active = true;
+
+    async function loadMonthActivity() {
+      setLoadingCalendarActivity(true);
+      try {
+        const activity = await getMonthlySalesActivity(
+          calendarView.year,
+          calendarView.month,
+        );
+        if (active) {
+          setSalesByDate(activity);
+        }
+      } catch (err) {
+        console.error("Error cargando actividad de ventas del mes:", err);
+      } finally {
+        if (active) setLoadingCalendarActivity(false);
+      }
+    }
+
+    loadMonthActivity();
+
+    return () => {
+      active = false;
+    };
+  }, [calendarOpen, calendarView.year, calendarView.month]);
 
   const paidOrders = useMemo(() => orders.filter(isPaidOrder), [orders]);
 
@@ -818,8 +886,11 @@ export default function DashboardView() {
     };
   }, [allCustomersList]);
 
+  const activeRangeDisplay = getActiveRangeDisplay(timeRange, customRange);
   const periodLabel =
-    PERIOD_OPTIONS.find((opt) => opt.value === timeRange)?.label || timeRange;
+    timeRange === "custom"
+      ? `Personalizado (${activeRangeDisplay})`
+      : `${PERIOD_OPTIONS.find((opt) => opt.value === timeRange)?.label || timeRange} (${activeRangeDisplay})`;
 
   const reportRows = [
     ["REPORTE COMERCIAL ERXIDI"],
@@ -1222,6 +1293,29 @@ export default function DashboardView() {
 
   const helpInfo = activeHelpModal ? KPI_EXPLANATIONS[activeHelpModal] : null;
 
+  function handleOpenCalendar() {
+    const { endDate } = getPeriodDates(timeRange, customRange);
+    const refDate = endDate ? new Date(endDate) : new Date();
+    setCalendarView({
+      year: refDate.getFullYear(),
+      month: refDate.getMonth(),
+    });
+    setCalendarOpen(true);
+  }
+
+  function handleApplyCustomRange(range) {
+    setCustomRange(range);
+    setTimeRange("custom");
+  }
+
+  const activePeriodDates = getPeriodDates(timeRange, customRange);
+  const modalInitialStart = activePeriodDates.startDate
+    ? new Date(activePeriodDates.startDate)
+    : null;
+  const modalInitialEnd = activePeriodDates.endDate
+    ? new Date(activePeriodDates.endDate)
+    : null;
+
   return (
     <div className="space-y-6">
       {/* 1. Barra de navegación superior fija (Sticky Navbar) */}
@@ -1234,9 +1328,27 @@ export default function DashboardView() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleOpenCalendar}
+              title="Seleccionar fecha o rango personalizado"
+              className={`inline-flex items-center gap-2 h-9 px-3 rounded-button border text-xs font-mono font-semibold transition-colors shadow-xs ${
+                timeRange === "custom"
+                  ? "border-accent bg-accent/10 text-brand-primary"
+                  : "border-border bg-surface-subtle text-brand-primary hover:border-border-strong"
+              }`}
+            >
+              <Calendar className="h-3.5 w-3.5 text-accent shrink-0" />
+              <span>{activeRangeDisplay}</span>
+              <Pencil className="h-3 w-3 text-brand-muted shrink-0" />
+            </button>
+
             <select
               value={timeRange}
-              onChange={(event) => setTimeRange(event.target.value)}
+              onChange={(event) => {
+                setTimeRange(event.target.value);
+                setCustomRange(null);
+              }}
               className="h-9 px-3 rounded-button border border-border bg-surface-card text-xs font-semibold text-brand-primary focus:outline-none focus:border-border-strong cursor-pointer shadow-xs"
             >
               {PERIOD_OPTIONS.map((opt) => (
@@ -1244,6 +1356,11 @@ export default function DashboardView() {
                   {opt.label}
                 </option>
               ))}
+              {timeRange === "custom" && (
+                <option value="custom" disabled>
+                  Personalizado
+                </option>
+              )}
             </select>
 
             <div className="relative">
@@ -2180,6 +2297,21 @@ export default function DashboardView() {
             </div>
           </div>
         </div>
+      )}
+
+      {calendarOpen && (
+        <DateRangeCalendarModal
+          open={calendarOpen}
+          onClose={() => setCalendarOpen(false)}
+          initialStartDate={modalInitialStart}
+          initialEndDate={modalInitialEnd}
+          viewYear={calendarView.year}
+          viewMonth={calendarView.month}
+          onMonthChange={(year, month) => setCalendarView({ year, month })}
+          salesByDate={salesByDate}
+          loadingActivity={loadingCalendarActivity}
+          onApply={handleApplyCustomRange}
+        />
       )}
     </div>
   );
