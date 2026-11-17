@@ -21,8 +21,8 @@ const NAV_GROUPS = [
   {
     title: "OPERACIÓN",
     items: [
-      { label: "Pedidos", path: "/admin/pedidos", icon: ShoppingBag },
-      { label: "Dashboard", path: "/admin", icon: LayoutDashboard, end: true },
+      { label: "Pedidos", path: "/admin/pedidos", icon: ShoppingBag, end: true },
+      { label: "Dashboard", path: "/admin", icon: LayoutDashboard },
     ],
   },
   {
@@ -87,15 +87,13 @@ export default function AdminSidebar({
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-50 bg-brand-primary text-white flex flex-col justify-between border-r border-white/10 transition-all duration-300 ease-in-out ${
-        mobileOpen ? "translate-x-0" : "-translate-x-full"
-      } lg:translate-x-0 ${collapsed ? "lg:w-20" : "lg:w-64"}`}
+      className={`fixed inset-y-0 left-0 z-50 bg-brand-primary text-white flex flex-col justify-between border-r border-white/10 transition-all duration-300 ease-in-out ${mobileOpen ? "translate-x-0" : "-translate-x-full"
+        } lg:translate-x-0 ${collapsed ? "lg:w-20" : "lg:w-64"}`}
     >
       {/* 1. Cabecera del Sidebar con Marca y Botón Colapsador */}
       <div
-        className={`h-16 px-4 flex items-center border-b border-white/10 flex-shrink-0 ${
-          collapsed ? "justify-center" : "justify-between"
-        }`}
+        className={`h-16 px-4 flex items-center border-b border-white/10 flex-shrink-0 ${collapsed ? "justify-center" : "justify-between"
+          }`}
       >
         {!collapsed && (
           <div className="overflow-hidden">
@@ -150,12 +148,10 @@ export default function AdminSidebar({
                   onClick={onCloseMobile}
                   title={collapsed ? label : undefined}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 px-3.5 py-2.5 rounded-button text-xs font-semibold transition-all ${
-                      collapsed ? "justify-center px-0 h-10 w-full" : ""
-                    } ${
-                      isActive
-                        ? "bg-white text-brand-primary shadow-sm"
-                        : "text-white/70 hover:bg-white/10 hover:text-white"
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-button text-xs font-semibold transition-all ${collapsed ? "justify-center px-0 h-10 w-full" : ""
+                    } ${isActive
+                      ? "bg-white text-brand-primary shadow-sm"
+                      : "text-white/70 hover:bg-white/10 hover:text-white"
                     }`
                   }
                 >
@@ -203,9 +199,8 @@ export default function AdminSidebar({
                 </p>
               </div>
               <ChevronRight
-                className={`h-3.5 w-3.5 text-white/70 shrink-0 transition-transform duration-200 ease-in-out ${
-                  popoverOpen ? "rotate-90" : ""
-                }`}
+                className={`h-3.5 w-3.5 text-white/70 shrink-0 transition-transform duration-200 ease-in-out ${popoverOpen ? "rotate-90" : ""
+                  }`}
               />
             </button>
           </div>
