@@ -1384,14 +1384,6 @@ export default function DashboardView() {
                     <FileText className="h-3.5 w-3.5 text-status-danger-text" />
                     <span>Exportar a PDF</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleExportExcel}
-                    className="flex w-full items-center gap-2.5 rounded-button px-3 py-2 text-xs font-semibold text-brand-primary hover:bg-surface-subtle transition-colors"
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5 text-status-success-text" />
-                    <span>Exportar a Excel</span>
-                  </button>
                 </div>
               )}
             </div>
