@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
+import { ADMIN_LAST_ROUTE_KEY } from "../features/admin/components/AdminLayout";
 
 const AuthContext = createContext(null);
 
@@ -144,6 +145,7 @@ export function AuthProvider({ children }) {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("erxidi_unconfirmed_user");
       sessionStorage.removeItem("erxidi_user_role");
+      localStorage.removeItem(ADMIN_LAST_ROUTE_KEY);
     }
     setUser(null);
     setProfile(null);

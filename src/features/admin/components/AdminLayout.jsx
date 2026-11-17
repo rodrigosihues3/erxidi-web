@@ -1,11 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Menu } from "lucide-react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import AdminSidebar from "./AdminSidebar";
+
+export const ADMIN_LAST_ROUTE_KEY = "erxidi_admin_last_route";
 
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/admin/")) {
+      localStorage.setItem(ADMIN_LAST_ROUTE_KEY, location.pathname);
+    }
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen bg-surface-app">

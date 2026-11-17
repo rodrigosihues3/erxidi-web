@@ -21,8 +21,8 @@ const NAV_GROUPS = [
   {
     title: "OPERACIÓN",
     items: [
-      { label: "Pedidos", path: "/admin/pedidos", icon: ShoppingBag, end: true },
-      { label: "Dashboard", path: "/admin", icon: LayoutDashboard },
+      { label: "Pedidos", path: "/admin/pedidos", icon: ShoppingBag },
+      { label: "Dashboard", path: "/admin/dashboard", icon: LayoutDashboard },
     ],
   },
   {

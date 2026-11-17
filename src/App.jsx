@@ -18,7 +18,9 @@ import MainLayout from "./components/layout/MainLayout";
 import Button from "./components/ui/Button";
 
 // Admin
-import AdminLayout from "./features/admin/components/AdminLayout";
+import AdminLayout, {
+  ADMIN_LAST_ROUTE_KEY,
+} from "./features/admin/components/AdminLayout";
 import AdminProtectedRoute from "./features/admin/components/ProtectedRoute";
 import DashboardView from "./features/admin/views/DashboardView";
 import OrdersListView from "./features/admin/views/OrdersListView";
@@ -146,6 +148,18 @@ function ProductDetailRouteWrapper() {
   );
 }
 
+function AdminIndexRedirect() {
+  const savedRoute =
+    typeof window !== "undefined"
+      ? localStorage.getItem(ADMIN_LAST_ROUTE_KEY)
+      : null;
+  const target =
+    savedRoute && savedRoute.startsWith("/admin/")
+      ? savedRoute
+      : "/admin/pedidos";
+  return <Navigate to={target} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -237,7 +251,8 @@ export default function App() {
             {/* Backoffice: Administrador / Owner */}
             <Route element={<AdminProtectedRoute />}>
               <Route element={<AdminLayout />}>
-                <Route path="/admin" element={<DashboardView />} />
+                <Route path="/admin" element={<AdminIndexRedirect />} />
+                <Route path="/admin/dashboard" element={<DashboardView />} />
                 <Route path="/admin/pedidos" element={<OrdersListView />} />
                 <Route
                   path="/admin/pedidos/:orderNumber"
