@@ -317,6 +317,10 @@ export default function ProductFormView() {
     }
   }
 
+  const hasDescription = Boolean(form.description && form.description.trim());
+  const hasManualEdits =
+    (form.description || "").trim() !== (baselineDescription || "").trim();
+
   async function handleSuggestDescription() {
     if (!activeImage || isEnhancing) return;
     setIsEnhancing(true);
@@ -1193,7 +1197,7 @@ export default function ProductFormView() {
                 Descripción de la prenda
               </label>
               <div className="flex items-center gap-2 flex-wrap">
-                {!Boolean(form.description && form.description.trim()) ? (
+                {!hasDescription ? (
                   <button
                     type="button"
                     disabled={!activeImage || isEnhancing}
@@ -1221,7 +1225,7 @@ export default function ProductFormView() {
                   <>
                     <button
                       type="button"
-                      disabled={isEnhancing}
+                      disabled={!hasManualEdits || isEnhancing}
                       onClick={() => handleEnhanceText("redaccion")}
                       className="border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       title="Mejora la ortografía y persuasión del texto"
@@ -1240,7 +1244,7 @@ export default function ProductFormView() {
                     </button>
                     <button
                       type="button"
-                      disabled={isEnhancing}
+                      disabled={!hasManualEdits || isEnhancing}
                       onClick={() => handleEnhanceText("estructura")}
                       className="border border-border bg-surface-subtle text-brand-primary hover:border-brand-primary/40 px-2.5 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       title="Convierte la descripción en lista de características comerciales"

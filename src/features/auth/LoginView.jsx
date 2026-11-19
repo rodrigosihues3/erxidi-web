@@ -9,6 +9,7 @@ import {
   CardContent,
 } from "../../components/ui/Card";
 import { lookupDni } from "../../services/api/dniService";
+import OtpVerificationPanel from "./components/OtpVerificationPanel";
 import {
   Mail,
   ShieldAlert,
@@ -116,7 +117,9 @@ function DevShortcutsDraggable({ onQuickLogin }) {
     };
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
-    } catch { }
+    } catch {
+      // Captura de puntero no soportada: el arrastre sigue funcionando.
+    }
   };
 
   const handlePointerMove = (e) => {
@@ -141,7 +144,9 @@ function DevShortcutsDraggable({ onQuickLogin }) {
     dragRef.current.isDragging = false;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch { }
+    } catch {
+      // Captura ya liberada.
+    }
 
     if (!dragRef.current.hasMoved) {
       setIsOpen((prev) => !prev);
@@ -207,14 +212,26 @@ function DevShortcutsDraggable({ onQuickLogin }) {
   );
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isEmailNotConfirmedError(error) {
+  return Boolean(error?.message?.toLowerCase().includes("email not confirmed"));
+}
+
 export default function LoginView() {
   const [searchParams] = RouterDom.useSearchParams();
   const initialTab =
     searchParams.get("tab") === "register" ? "register" : "login";
   const [activeTab, setActiveTab] = useState(initialTab);
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, verifySignupOtp, resendSignupOtp } = useAuth();
   const navigate = RouterDom.useNavigate();
   const location = RouterDom.useLocation();
+
+  // Paso condicional de verificación OTP: { email, notice } | null
+  const [pendingVerification, setPendingVerification] = useState(() => {
+    const email = location.state?.pendingVerificationEmail;
+    return email ? { email, notice: null } : null;
+  });
 
   useEffect(() => {
     const tabParam = searchParams.get("tab");
@@ -325,6 +342,63 @@ export default function LoginView() {
     }
   };
 
+  // Destino post-autenticación según el rol del perfil
+  async function resolveDestination(userId) {
+    let dest = redirectPath;
+    if (dest === "/catalogo" || dest === "/") {
+      const uid = userId || (await supabase.auth.getUser()).data?.user?.id;
+      if (uid) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", uid)
+          .maybeSingle();
+        if (prof?.role === "delivery") {
+          dest = "/reparto";
+        } else if (prof?.role === "owner") {
+          dest = "/admin";
+        }
+      }
+    }
+    return dest;
+  }
+
+  // Abre el paso OTP; con `resend` dispara un código vigente de inmediato.
+  async function openVerification(email, { resend = false } = {}) {
+    let notice = null;
+    if (resend) {
+      const { error } = await resendSignupOtp(email);
+      notice = error
+        ? "Tu cuenta aún no ha sido verificada. Ingresa el código que te enviamos a tu correo o solicita uno nuevo."
+        : "Tu cuenta aún no ha sido verificada. Te enviamos un nuevo código de 6 dígitos a tu correo.";
+    }
+    setPendingVerification({ email, notice });
+  }
+
+  async function handleVerifyOtp(code) {
+    const { data, error } = await verifySignupOtp(
+      pendingVerification.email,
+      code
+    );
+    if (error || !data?.session) {
+      throw error || new Error("Código inválido o expirado.");
+    }
+    navigate(await resolveDestination(data.user?.id), { replace: true });
+  }
+
+  async function handleResendOtp() {
+    const { error } = await resendSignupOtp(pendingVerification.email);
+    if (error) throw error;
+  }
+
+  function handleBackFromVerification() {
+    if (pendingVerification?.email) {
+      setLoginEmail(pendingVerification.email);
+    }
+    setPendingVerification(null);
+    setActiveTab("login");
+  }
+
   // Submit Login
   async function handleLoginSubmit(e) {
     e.preventDefault();
@@ -332,38 +406,22 @@ export default function LoginView() {
     setLoginLoading(true);
 
     try {
-      const { data: authData, error } = await signIn(
-        loginEmail.trim(),
-        loginPassword
-      );
+      const email = loginEmail.trim();
+      const { data: authData, error } = await signIn(email, loginPassword);
       if (error) {
+        if (isEmailNotConfirmedError(error)) {
+          await openVerification(email, { resend: true });
+          return;
+        }
         if (error.message.includes("Invalid login credentials")) {
           throw new Error("El correo o la contraseña son incorrectos.");
         }
-        if (!error.message.toLowerCase().includes("email not confirmed")) {
-          throw error;
-        }
+        throw error;
       }
 
-      let dest = redirectPath;
-      if (dest === "/catalogo" || dest === "/") {
-        const uid =
-          authData?.user?.id ||
-          (await supabase.auth.getUser()).data?.user?.id;
-        if (uid) {
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("role")
-            .eq("id", uid)
-            .maybeSingle();
-          if (prof?.role === "delivery") {
-            dest = "/reparto";
-          } else if (prof?.role === "owner") {
-            dest = "/admin";
-          }
-        }
-      }
-      navigate(dest, { replace: true });
+      navigate(await resolveDestination(authData?.user?.id), {
+        replace: true,
+      });
     } catch (err) {
       setLoginError(
         err.message || "No se pudo iniciar sesión. Verifica tus datos."
@@ -422,6 +480,10 @@ export default function LoginView() {
       );
       return;
     }
+    if (!EMAIL_REGEX.test(registerEmail.trim())) {
+      setRegisterError("Ingresa un correo electrónico válido.");
+      return;
+    }
     if (!passwordCheck.isAllValid) {
       setRegisterError(
         "La contraseña aún no cumple con todos los requisitos de seguridad."
@@ -444,22 +506,38 @@ export default function LoginView() {
     };
 
     try {
-      const { error } = await signUp(
-        registerEmail.trim(),
-        registerPassword,
-        metadata
-      );
+      const email = registerEmail.trim();
+      const { data, error } = await signUp(email, registerPassword, metadata);
 
       if (error) {
-        if (error.message.includes("User already registered")) {
+        if (error.message?.includes("User already registered")) {
           throw new Error(
-            "Este correo ya está registrado. Inicia sesión en su lugar."
+            "Este correo electrónico ya está registrado. Inicia sesión."
           );
         }
         throw error;
       }
 
-      navigate(redirectPath, { replace: true });
+      // Supabase devuelve identities vacías cuando el correo ya está confirmado.
+      if (data?.user?.identities?.length === 0) {
+        throw new Error(
+          "Este correo electrónico ya está registrado. Inicia sesión."
+        );
+      }
+
+      // Sesión inmediata (confirmación de correo desactivada en el proyecto).
+      if (data?.session) {
+        navigate(await resolveDestination(data.user?.id), { replace: true });
+        return;
+      }
+
+      // Registro pendiente de verificación: Paso 2 (código OTP).
+      if (data?.user) {
+        setPendingVerification({ email, notice: null });
+        return;
+      }
+
+      throw new Error("No se pudo completar el registro. Intenta nuevamente.");
     } catch (err) {
       setRegisterError(err.message || "Ocurrió un error al crear la cuenta.");
     } finally {
@@ -476,14 +554,38 @@ export default function LoginView() {
     setLoginLoading(true);
 
     try {
-      const { error } = await signIn(testEmail, testPassword);
-      if (error) throw error;
-      navigate(redirectPath, { replace: true });
+      const { data, error } = await signIn(testEmail, testPassword);
+      if (error) {
+        if (isEmailNotConfirmedError(error)) {
+          await openVerification(testEmail, { resend: true });
+          return;
+        }
+        throw error;
+      }
+      navigate(await resolveDestination(data?.user?.id), { replace: true });
     } catch (err) {
       setLoginError(err.message || "Error en inicio rápido");
     } finally {
       setLoginLoading(false);
     }
+  }
+
+  if (pendingVerification) {
+    return (
+      <div className="min-h-[85vh] flex flex-col items-center justify-center p-4 py-10">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-1">
+            <OtpVerificationPanel
+              email={pendingVerification.email}
+              notice={pendingVerification.notice}
+              onVerify={handleVerifyOtp}
+              onResend={handleResendOtp}
+              onBack={handleBackFromVerification}
+            />
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (

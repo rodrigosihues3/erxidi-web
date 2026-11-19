@@ -32,20 +32,13 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     // 1. Obtener la sesión activa al montar
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // Limpieza de residuos de la antigua sesión permisiva (sin verificar).
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("erxidi_unconfirmed_user");
+      }
       if (session?.user) {
         setUser(session.user);
         await fetchProfile(session.user.id);
-      } else if (typeof window !== "undefined") {
-        const cachedUnconfirmed = sessionStorage.getItem("erxidi_unconfirmed_user");
-        if (cachedUnconfirmed) {
-          try {
-            const parsed = JSON.parse(cachedUnconfirmed);
-            setUser(parsed);
-            await fetchProfile(parsed.id);
-          } catch (e) {
-            // Ignorar error de parseo
-          }
-        }
       }
       setLoading(false);
     });
@@ -59,14 +52,8 @@ export function AuthProvider({ children }) {
         setUser(currentUser);
         await fetchProfile(currentUser.id);
       } else {
-        const cachedUnconfirmed =
-          typeof window !== "undefined"
-            ? sessionStorage.getItem("erxidi_unconfirmed_user")
-            : null;
-        if (!cachedUnconfirmed) {
-          setUser(null);
-          setProfile(null);
-        }
+        setUser(null);
+        setProfile(null);
       }
       setLoading(false);
     });
@@ -77,45 +64,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Métodos de autenticación desacoplados
-  const signIn = async (email, password) => {
-    const res = await supabase.auth.signInWithPassword({ email, password });
-    if (res.error && res.error.message?.toLowerCase().includes("email not confirmed")) {
-      try {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("email", email)
-          .maybeSingle();
+  const signIn = (email, password) =>
+    supabase.auth.signInWithPassword({ email, password });
 
-        const unconfirmedUser = {
-          id: prof?.id || `unconfirmed-${email}`,
-          email,
-          email_confirmed_at: null,
-          user_metadata: {
-            first_name: prof?.first_name || email.split("@")[0],
-          },
-        };
-        setUser(unconfirmedUser);
-        if (prof) setProfile(prof);
-        else if (unconfirmedUser.id) fetchProfile(unconfirmedUser.id);
-
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(
-            "erxidi_unconfirmed_user",
-            JSON.stringify(unconfirmedUser)
-          );
-        }
-
-        return { data: { user: unconfirmedUser, session: null }, error: null };
-      } catch (e) {
-        console.warn("Error resolviendo usuario no verificado:", e);
-      }
-    }
-    return res;
-  };
-
-  const signUp = async (email, password, metadata = {}) => {
-    const res = await supabase.auth.signUp({
+  const signUp = (email, password, metadata = {}) =>
+    supabase.auth.signUp({
       email,
       password,
       options: {
@@ -123,23 +76,12 @@ export function AuthProvider({ children }) {
       },
     });
 
-    // Si se crea el usuario pero queda pendiente de confirmación, mantenerlo en sesión permisiva
-    if (res.data?.user && !res.data?.session) {
-      const unconfirmedUser = {
-        ...res.data.user,
-        email_confirmed_at: null,
-      };
-      setUser(unconfirmedUser);
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem(
-          "erxidi_unconfirmed_user",
-          JSON.stringify(unconfirmedUser)
-        );
-      }
-    }
+  // Verificación de correo mediante código OTP de 6 dígitos
+  const verifySignupOtp = (email, token) =>
+    supabase.auth.verifyOtp({ email, token: String(token).trim(), type: "signup" });
 
-    return res;
-  };
+  const resendSignupOtp = (email) =>
+    supabase.auth.resend({ type: "signup", email });
 
   const signOut = async () => {
     if (typeof window !== "undefined") {
@@ -168,6 +110,8 @@ export function AuthProvider({ children }) {
     loading,
     signIn,
     signUp,
+    verifySignupOtp,
+    resendSignupOtp,
     signOut,
     refreshProfile: () => user && fetchProfile(user.id),
   };
