@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { mockProducts } from "./data/mockCatalog";
 import VariantSelector from "./components/VariantSelector";
+import { getSockShoeRange, isSockProduct } from "./utils/sizeRanges";
 import SizeMatcherModal from "./components/SizeMatcherModal";
 import SizeCalculatorAccordion from "./components/SizeCalculatorAccordion";
 import Button from "../../components/ui/Button";
@@ -727,6 +728,7 @@ export default function ProductDetailView({
                   handleVariantChange(newVariant);
                 }}
                 selectionSource={selectionSource}
+                isSockProduct={isSockProduct(currentProduct)}
               />
 
               {/* Banner Informativo de Talla */}
@@ -737,7 +739,14 @@ export default function ProductDetailView({
                       <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
                       <span>
                         Según tus medidas, seleccionamos la talla{" "}
-                        <strong>{effectiveSizeRecommendation}</strong>.
+                        <strong>
+                          {effectiveSizeRecommendation}
+                          {isSockProduct(currentProduct) &&
+                          getSockShoeRange(effectiveSizeRecommendation)
+                            ? ` (Calzado ${getSockShoeRange(effectiveSizeRecommendation)})`
+                            : ""}
+                        </strong>
+                        .
                       </span>
                     </div>
                   ) : (

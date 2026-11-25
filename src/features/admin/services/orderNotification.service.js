@@ -42,6 +42,7 @@ export const INCIDENT_CODE_LABELS = {
   direccion_erronea: "Dirección errónea o inaccesible",
   averia_mecanica: "Avería mecánica en la unidad de reparto",
   reasignacion_entre_repartidores: "Reasignación de unidad motorizada en ruta",
+  solicitud_cancelacion_cliente: "Solicitud de cancelación enviada por el cliente",
   otro: "Novedad operativa en reparto",
 };
 
@@ -226,8 +227,8 @@ export function createOrderStatusTemplate(
       : refundStatus === "pending" || isPaid
         ? `
         <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:12px 14px;margin:14px 0;font-size:13px;color:#92400E;">
-          <div style="font-weight:700;margin-bottom:4px;">Devolución de dinero en gestión</div>
-          <div>Tu reembolso por <strong>S/ ${totalAmountFormatted}</strong> ya se encuentra registrado en administración. Te enviaremos la constancia con el número de operación tan pronto se ejecute el abono a tu medio de pago.</div>
+          <div style="font-weight:700;margin-bottom:4px;">Reembolso pendiente por parte de administración</div>
+          <div>Tu reembolso por <strong>S/ ${totalAmountFormatted}</strong> se encuentra pendiente de gestión por parte de nuestro equipo de administración. Una vez ejecutada la devolución a tu medio de pago, te enviaremos un nuevo correo con la confirmación y el número de operación.</div>
         </div>
       `
         : `

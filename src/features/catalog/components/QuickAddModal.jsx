@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { X, ShoppingBag, Loader2, Minus, Plus } from "lucide-react";
 import Button from "../../../components/ui/Button";
+import { getSockShoeRange, isSockProduct } from "../utils/sizeRanges";
 import { useCart } from "../../../context/CartContext";
 
 export default function QuickAddModal({ product, initialColor, isOpen, onClose }) {
@@ -221,6 +222,9 @@ export default function QuickAddModal({ product, initialColor, isOpen, onClose }
               const sizeName = variant.sizes?.name || variant.size || "M";
               const noStock = Number(variant.stock) <= 0;
               const isSelected = selectedVariantId === variant.id;
+              const shoeRange = isSockProduct(product)
+                ? getSockShoeRange(sizeName)
+                : null;
 
               return (
                 <button
@@ -231,16 +235,29 @@ export default function QuickAddModal({ product, initialColor, isOpen, onClose }
                     setSelectedVariantId(variant.id);
                     setQuantity(1);
                   }}
-                  className={`h-10 rounded-button border text-xs font-mono font-bold transition-all relative ${
+                  className={`${shoeRange ? "py-1.5 min-h-[42px]" : "h-10"} rounded-button border text-xs font-mono font-bold transition-all relative flex flex-col items-center justify-center ${
                     noStock
                       ? "opacity-35 border-border bg-surface-subtle text-brand-muted cursor-not-allowed line-through"
                       : isSelected
                       ? "border-brand-primary bg-brand-primary text-white shadow-xs"
                       : "border-border bg-surface-card text-brand-primary hover:border-brand-primary"
                   }`}
-                  title={noStock ? `${sizeName} - Sin stock` : `${sizeName} - Disponible`}
+                  title={
+                    noStock
+                      ? `${sizeName}${shoeRange ? ` (Calzado ${shoeRange})` : ""} - Sin stock`
+                      : `${sizeName}${shoeRange ? ` · Calzado ${shoeRange}` : ""} - Disponible`
+                  }
                 >
-                  {sizeName}
+                  <span className="leading-tight">{sizeName}</span>
+                  {shoeRange && (
+                    <span
+                      className={`text-[9px] font-normal leading-tight mt-0.5 ${
+                        isSelected ? "text-white/80" : "text-brand-muted"
+                      }`}
+                    >
+                      {shoeRange}
+                    </span>
+                  )}
                 </button>
               );
             })}

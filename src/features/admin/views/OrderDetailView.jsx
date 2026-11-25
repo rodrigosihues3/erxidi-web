@@ -1450,7 +1450,13 @@ export default function OrderDetailView() {
             </div>
 
             {/* Barra Horizontal Conectada con los Pasos Dinámicos */}
-            <div className="overflow-x-auto mt-5 pt-1.5 pb-1">
+            <div
+              className={`overflow-x-auto mt-5 pt-1.5 pb-1 transition-all ${
+                currentStepKey === "incidencia_transporte"
+                  ? "opacity-60 grayscale-[35%]"
+                  : ""
+              }`}
+            >
               <ol
                 className={`min-w-[560px] grid ${isPickup ? "grid-cols-4" : "grid-cols-8"
                   } gap-2`}
@@ -1539,11 +1545,13 @@ export default function OrderDetailView() {
               <p className="text-sm text-brand-secondary">
                 {isCancelled
                   ? "Este pedido fue cancelado y su flujo operativo se encuentra cerrado."
-                  : !isPickup && currentStepKey === "por_asignar"
-                    ? "Asigna un repartidor especializado para pasar a la fase de entrega."
-                    : nextStep
-                      ? `Siguiente: ${nextStep.sublabel}`
-                      : "El pedido ha completado todas las etapas del flujo."}
+                  : currentStepKey === "incidencia_transporte"
+                    ? "Flujo en pausa por incidencia operativa. Evalúa la situación para reencolar, regresar a preparación o cancelar la orden."
+                    : !isPickup && currentStepKey === "por_asignar"
+                      ? "Asigna un repartidor especializado para pasar a la fase de entrega."
+                      : nextStep
+                        ? `Siguiente: ${nextStep.sublabel}`
+                        : "El pedido ha completado todas las etapas del flujo."}
               </p>
 
               <div className="flex items-center gap-2 flex-wrap shrink-0">
@@ -1620,6 +1628,26 @@ export default function OrderDetailView() {
                 const sizeName = variant.sizes?.name || "U";
                 const colorName = variant.color || "—";
                 const colorHex = variant.color_hex;
+                const colorImages = Array.isArray(product.product_color_images)
+                  ? product.product_color_images
+                  : [];
+                const itemImageUrl =
+                  colorImages.find(
+                    (ci) =>
+                      ci.color?.toLowerCase() ===
+                        String(variant.color || "").toLowerCase() &&
+                      ci.is_cover &&
+                      ci.image_url,
+                  )?.image_url ||
+                  colorImages.find(
+                    (ci) =>
+                      ci.color?.toLowerCase() ===
+                        String(variant.color || "").toLowerCase() &&
+                      ci.image_url,
+                  )?.image_url ||
+                  variant.image_url ||
+                  product.main_image_url ||
+                  "";
 
                 return (
                   <li
@@ -1627,9 +1655,9 @@ export default function OrderDetailView() {
                     className="py-4 last:pb-0 flex items-center gap-4"
                   >
                     <div className="w-16 aspect-[4/5] shrink-0 rounded-button border border-border bg-slate-50 p-1 overflow-hidden flex items-center justify-center">
-                      {product.main_image_url ? (
+                      {itemImageUrl ? (
                         <img
-                          src={product.main_image_url}
+                          src={itemImageUrl}
                           alt={product.name || "Prenda"}
                           className="w-full h-full object-contain"
                         />

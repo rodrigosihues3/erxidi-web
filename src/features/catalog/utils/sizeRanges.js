@@ -19,6 +19,36 @@ export const SOCK_LIMITS = [
   { size: "M", foot: 26.5, inclusive: true },
   { size: "L", foot: 29.5, inclusive: true },
 ];
+export const SOCK_SHOE_RANGES = {
+  s: "35 - 37",
+  m: "38 - 40",
+  l: "41 - 43",
+  xl: "44 - 46",
+  "6-9 años": "26 - 30",
+  "10-13 años": "31 - 35",
+};
+
+export function getSockShoeRange(sizeName) {
+  if (!sizeName) return null;
+  const key = String(sizeName).trim().toLowerCase();
+  return SOCK_SHOE_RANGES[key] || null;
+}
+
+export function isSockProduct(product) {
+  if (!product) return false;
+  const text = [
+    product.categories?.name,
+    product.categories?.slug,
+    product.category?.name,
+    product.category?.slug,
+    product.categoryName,
+    product.name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /media|calcet|tobillera|talonera|soquete|pantimedia/.test(text);
+}
 export const IMC_LIMITS = [20, 25, 30];
 
 export function getBottomSize(waist, hip) {

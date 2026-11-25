@@ -1,10 +1,12 @@
 import React, { useMemo } from "react";
+import { getSockShoeRange } from "../utils/sizeRanges";
 
 export default function VariantSelector({
   variants = [],
   selectedVariant = null,
   onVariantChange,
   selectionSource = "manual",
+  isSockProduct = false,
 }) {
   // Filtrar estrictamente variantes activas (excluye bajas lógicas del Backoffice)
   const activeVariants = useMemo(
@@ -142,6 +144,11 @@ export default function VariantSelector({
               <span className="font-bold text-brand-primary">
                 {activeSizeName}
               </span>
+              {isSockProduct && getSockShoeRange(activeSizeName) && (
+                <span className="ml-1.5 font-mono text-[11px] font-medium text-brand-secondary">
+                  · Calzado {getSockShoeRange(activeSizeName)}
+                </span>
+              )}
             </span>
           </div>
 
@@ -159,6 +166,9 @@ export default function VariantSelector({
                 !variantForSize || Number(variantForSize.stock) <= 0;
 
               const isSelected = activeSizeName === size.name && !isOutOfStock;
+              const shoeRange = isSockProduct
+                ? getSockShoeRange(size.name)
+                : null;
 
               return (
                 <button
@@ -167,17 +177,18 @@ export default function VariantSelector({
                   disabled={isOutOfStock}
                   title={
                     isOutOfStock
-                      ? "Talla " + size.name + " agotada"
-                      : "Talla " + size.name
+                      ? `Talla ${size.name}${shoeRange ? ` (Calzado ${shoeRange})` : ""} agotada`
+                      : `Talla ${size.name}${shoeRange ? ` · Calzado ${shoeRange}` : ""}`
                   }
                   aria-label={
-                    "Talla " + size.name + (isOutOfStock ? " agotada" : "")
+                    `Talla ${size.name}${shoeRange ? `, calzado ${shoeRange}` : ""}` +
+                    (isOutOfStock ? " agotada" : "")
                   }
                   aria-checked={isSelected}
                   role="radio"
                   onClick={() => handleSizeSelect(size.name)}
                   className={
-                    "min-w-[40px] h-9 px-3 rounded-button font-mono text-xs font-semibold uppercase transition-colors duration-150 flex items-center justify-center border focus:outline-none " +
+                    `min-w-[44px] ${shoeRange ? "py-1.5 px-3" : "h-9 px-3"} rounded-button font-mono text-xs font-semibold uppercase transition-colors duration-150 flex flex-col items-center justify-center border focus:outline-none ` +
                     (isOutOfStock
                       ? "opacity-30 line-through cursor-not-allowed border-dashed border-border bg-surface-subtle text-brand-muted"
                       : isSelected
@@ -187,7 +198,16 @@ export default function VariantSelector({
                         : "border-border bg-surface-card text-brand-secondary hover:border-border-strong hover:text-brand-primary")
                   }
                 >
-                  {size.name}
+                  <span className="leading-tight">{size.name}</span>
+                  {shoeRange && (
+                    <span
+                      className={`text-[10px] font-normal normal-case leading-tight mt-0.5 ${
+                        isSelected ? "text-white/85" : "text-brand-muted"
+                      }`}
+                    >
+                      {shoeRange}
+                    </span>
+                  )}
                 </button>
               );
             })}

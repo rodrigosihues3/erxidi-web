@@ -137,9 +137,12 @@ const ORDER_SELECT = `
   order_items (
     id, quantity, unit_price, subtotal,
     product_variants:variant_id (
-      id, color, sku,
+      id, color, sku, image_url,
       sizes:size_id ( name ),
-      products:product_id ( name, main_image_url )
+      products:product_id (
+        name, main_image_url,
+        product_color_images ( color, image_url, is_cover )
+      )
     )
   )
 `;
@@ -208,9 +211,12 @@ export async function getOrderDetail(orderId) {
         .select(`
           id, order_id, variant_id, quantity, unit_price, subtotal,
           product_variants:variant_id (
-            id, color, color_hex, stock, sku, size_id,
+            id, color, color_hex, stock, sku, size_id, image_url,
             sizes:size_id (id, name, display_order),
-            products:product_id (id, name, slug, price, main_image_url)
+            products:product_id (
+              id, name, slug, price, main_image_url,
+              product_color_images ( color, image_url, is_cover )
+            )
           )
         `)
         .eq("order_id", orderId)
@@ -366,15 +372,8 @@ export function buildCancellationRefundPatch(paymentMethod, paymentStatus) {
     };
   }
 
-  if (["culqi_gateway", "tarjeta"].includes(method)) {
-    return {
-      refund_status: "completed",
-      refund_method: "culqi_extorno",
-      refund_reference: `REF-CLQ-${Date.now().toString().slice(-6)}`,
-      refunded_at: new Date().toISOString(),
-    };
-  }
-
+  // Todo pedido pagado (Culqi, Yape, Plin o Transferencia) queda pendiente
+  // hasta que administración apruebe y registre la devolución manualmente.
   return {
     refund_status: "pending",
     refund_method: method || "yape_plin",

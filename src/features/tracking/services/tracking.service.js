@@ -1,6 +1,4 @@
 import { supabase } from "../../../services/supabase";
-import { cancelOrderWithStockRestore } from "../../admin/services/adminOrders.service";
-import { sendOrderNotificationEmail } from "../../admin/services/orderNotification.service";
 import {
   Check,
   PackageCheck,
@@ -13,7 +11,7 @@ import {
   Store,
 } from "lucide-react";
 
-export const CUSTOMER_CANCELLABLE_STATUSES = [
+export const CUSTOMER_CANCEL_REQUEST_STATUSES = [
   "recibido",
   "received",
   "pendiente_pago",
@@ -24,62 +22,106 @@ export const CUSTOMER_CANCELLABLE_STATUSES = [
   "por_asignar",
   "asignado",
   "listo_recojo",
+  "incidencia_transporte",
 ];
 
-export function canCustomerCancelOrder(status) {
+export const IN_ROUTE_BLOCKED_CANCEL_STATUSES = [
+  "en_camino",
+  "en_ruta",
+  "dispatched",
+  "cerca",
+  "nearby",
+  "en_destino",
+  "en_ubicacion",
+  "arrived",
+];
+
+export const CUSTOMER_CANCELLABLE_STATUSES = CUSTOMER_CANCEL_REQUEST_STATUSES;
+
+export function getCustomerCancelPolicy(status) {
   const s = String(status || "").toLowerCase().trim();
-  return CUSTOMER_CANCELLABLE_STATUSES.includes(s);
+  if (["entregado", "delivered", "cancelado", "cancelled"].includes(s)) {
+    return "closed";
+  }
+  if (IN_ROUTE_BLOCKED_CANCEL_STATUSES.includes(s)) {
+    return "in_route_blocked";
+  }
+  if (CUSTOMER_CANCEL_REQUEST_STATUSES.includes(s)) {
+    return "request";
+  }
+  return "closed";
 }
 
-export async function cancelCustomerOrder(order, reason) {
+export function canCustomerCancelOrder(status) {
+  return getCustomerCancelPolicy(status) === "request";
+}
+
+export function hasCustomerCancelRequest(order) {
+  if (!order) return false;
+  if (order.incident_reason === "solicitud_cancelacion_cliente") return true;
+  return String(order.incident_comment || "")
+    .toLowerCase()
+    .includes("[solicitud de cancelación del cliente]");
+}
+
+/**
+ * Registra una solicitud de cancelación enviada por el cliente.
+ * No cancela ni ejecuta reembolso automáticamente: la dueña tiene la última decisión.
+ */
+export async function requestCustomerOrderCancellation(order, reason) {
   if (!order?.id) {
     throw new Error("No se encontró el identificador del pedido.");
   }
-  if (!canCustomerCancelOrder(order.status)) {
+
+  const policy = getCustomerCancelPolicy(order.status);
+  if (policy === "in_route_blocked") {
     throw new Error(
-      "Este pedido ya salió en ruta o fue finalizado y no puede ser cancelado.",
+      "Tu pedido ya se encuentra en camino con un repartidor y no puede cancelarse directamente.",
     );
   }
-
-  const finalReason =
-    String(reason || "").trim() || "Cancelado por solicitud del cliente";
-
-  const updated = await cancelOrderWithStockRestore(order.id, {
-    reason: finalReason,
-    comment: finalReason,
-    items: order.order_items || order.items || [],
-    previousStatus: order.status,
-    paymentMethod: order.payment_method,
-    paymentStatus: order.payment_status,
-  });
-
-  const mergedOrder = {
-    ...order,
-    ...updated,
-  };
-
-  let emailResult = null;
-  const email =
-    mergedOrder.customer_email ||
-    mergedOrder.client_email ||
-    mergedOrder.profiles?.email;
-
-  if (email) {
-    emailResult = await sendOrderNotificationEmail({
-      orderId: mergedOrder.id,
-      orderNumber: mergedOrder.order_number,
-      customerEmail: email,
-      customerName: mergedOrder.customer_name,
-      targetStatus: "cancelado",
-      status: "cancelado",
-      incidentReason: finalReason,
-      incidentComment: finalReason,
-      order: mergedOrder,
-    }).catch(() => null);
+  if (policy !== "request") {
+    throw new Error("Este pedido ya fue finalizado y no admite cancelación.");
   }
 
-  return { order: mergedOrder, emailResult };
+  const cleanReason =
+    String(reason || "").trim() || "Solicitado por el cliente";
+  const isAlreadyIncident =
+    String(order.status || "").toLowerCase() === "incidencia_transporte";
+
+  const nextReason = isAlreadyIncident
+    ? order.incident_reason || "solicitud_cancelacion_cliente"
+    : "solicitud_cancelacion_cliente";
+
+  const taggedComment = `[Solicitud de cancelación del cliente]: ${cleanReason}`;
+  const nextComment =
+    isAlreadyIncident && order.incident_comment
+      ? `${order.incident_comment} | ${taggedComment}`
+      : taggedComment;
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      incident_reason: nextReason,
+      incident_comment: nextComment,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", order.id)
+    .select(
+      "id, order_number, status, incident_reason, incident_comment, updated_at",
+    )
+    .single();
+
+  if (error) throw error;
+
+  return {
+    order: {
+      ...order,
+      ...data,
+    },
+  };
 }
+
+export const cancelCustomerOrder = requestCustomerOrderCancellation;
 
 export const DELIVERY_TRACKING_STEPS = [
   {
@@ -340,11 +382,25 @@ export function normalizeOrderData(rawOrder) {
     const quantity = Number(item.quantity || 1);
     const totalPrice = Number(item.subtotal || unitPrice * quantity);
 
+    const colorKey = String(variant.color || item.variant_color || "").toLowerCase();
+    const colorImages = Array.isArray(product.product_color_images)
+      ? product.product_color_images
+      : [];
+    const matchedColorImg =
+      colorImages.find(
+        (ci) => ci.color?.toLowerCase() === colorKey && ci.is_cover && ci.image_url,
+      )?.image_url ||
+      colorImages.find(
+        (ci) => ci.color?.toLowerCase() === colorKey && ci.image_url,
+      )?.image_url ||
+      null;
+
     const resolvedImageUrl =
+      matchedColorImg ||
+      variant.image_url ||
       item.image_url ||
       variant.products?.main_image_url ||
       product.main_image_url ||
-      variant.image_url ||
       "";
 
     return {
@@ -459,6 +515,7 @@ export async function fetchOrderForTracking(orderNumber) {
           sku,
           stock,
           is_active,
+          image_url,
           sizes:size_id (
             id,
             name
@@ -467,7 +524,12 @@ export async function fetchOrderForTracking(orderNumber) {
             id,
             name,
             slug,
-            main_image_url
+            main_image_url,
+            product_color_images (
+              color,
+              image_url,
+              is_cover
+            )
           )
         )
       )

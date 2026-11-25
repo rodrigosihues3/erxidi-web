@@ -224,9 +224,27 @@ function DeliveryBadge({ type }) {
   );
 }
 
+function resolveItemImageUrl(item) {
+  const variant = item.product_variants || {};
+  const product = variant.products || {};
+  const color = String(variant.color || "").toLowerCase();
+  const colorImages = Array.isArray(product.product_color_images)
+    ? product.product_color_images
+    : [];
+  const matchedColor =
+    colorImages.find(
+      (ci) => ci.color?.toLowerCase() === color && ci.is_cover && ci.image_url,
+    )?.image_url ||
+    colorImages.find((ci) => ci.color?.toLowerCase() === color && ci.image_url)
+      ?.image_url ||
+    null;
+
+  return matchedColor || variant.image_url || product.main_image_url || null;
+}
+
 function OrderItemSummary({ item }) {
   const product = item.product_variants?.products;
-  const imageUrl = product?.main_image_url;
+  const imageUrl = resolveItemImageUrl(item);
 
   return (
     <div className="flex items-start gap-2.5 mb-2 last:mb-0">
@@ -546,9 +564,12 @@ export default function OrderKanbanView({
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                             <div className="min-w-0">
                               <span className="font-bold block">
-                                {isIncident
-                                  ? "Incidencia activa"
-                                  : "Restituido por incidencia"}
+                                {order.incident_reason ===
+                                "solicitud_cancelacion_cliente"
+                                  ? "Solicitud de cancelación"
+                                  : isIncident
+                                    ? "Incidencia activa"
+                                    : "Restituido por incidencia"}
                               </span>
                               <span className="line-clamp-2 opacity-90">
                                 {formatIncidentReason(
