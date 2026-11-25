@@ -9,15 +9,17 @@ import {
   CardContent,
 } from "../../components/ui/Card";
 import { lookupDni } from "../../services/api/dniService";
-import OtpVerificationPanel from "./components/OtpVerificationPanel";
 import {
   Mail,
+  MailCheck,
   ShieldAlert,
   UserCheck,
   Search,
   Check,
   AlertCircle,
   ShieldCheck,
+  Send,
+  ArrowLeft,
 } from "lucide-react";
 
 function evaluatePasswordRules(password = "") {
@@ -223,15 +225,25 @@ export default function LoginView() {
   const initialTab =
     searchParams.get("tab") === "register" ? "register" : "login";
   const [activeTab, setActiveTab] = useState(initialTab);
-  const { signIn, signUp, verifySignupOtp, resendSignupOtp } = useAuth();
+  const { signIn, signUp, resendConfirmationEmail } = useAuth();
   const navigate = RouterDom.useNavigate();
   const location = RouterDom.useLocation();
 
-  // Paso condicional de verificación OTP: { email, notice } | null
-  const [pendingVerification, setPendingVerification] = useState(() => {
+  // Pantalla de enlace de confirmación enviado: { email } | null
+  const [confirmationEmailSent, setConfirmationEmailSent] = useState(() => {
     const email = location.state?.pendingVerificationEmail;
-    return email ? { email, notice: null } : null;
+    return email ? { email } : null;
   });
+  const [unconfirmedLoginEmail, setUnconfirmedLoginEmail] = useState(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [isResendingLink, setIsResendingLink] = useState(false);
+  const [resendFeedback, setResendFeedback] = useState(null);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined;
+    const timerId = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(timerId);
+  }, [resendCooldown]);
 
   useEffect(() => {
     const tabParam = searchParams.get("tab");
@@ -363,39 +375,38 @@ export default function LoginView() {
     return dest;
   }
 
-  // Abre el paso OTP; con `resend` dispara un código vigente de inmediato.
-  async function openVerification(email, { resend = false } = {}) {
-    let notice = null;
-    if (resend) {
-      const { error } = await resendSignupOtp(email);
-      notice = error
-        ? "Tu cuenta aún no ha sido verificada. Ingresa el código que te enviamos a tu correo o solicita uno nuevo."
-        : "Tu cuenta aún no ha sido verificada. Te enviamos un nuevo código de 6 dígitos a tu correo.";
+  async function handleManualResendLink(targetEmail) {
+    const email = String(targetEmail || "").trim();
+    if (!email || resendCooldown > 0 || isResendingLink) return;
+    setIsResendingLink(true);
+    setResendFeedback(null);
+    try {
+      const { error } = await resendConfirmationEmail(email);
+      if (error) throw error;
+      setResendCooldown(60);
+      setResendFeedback({
+        type: "success",
+        message:
+          "Enlace de confirmación reenviado. Revisa tu bandeja de entrada o carpeta de spam.",
+      });
+    } catch (err) {
+      setResendFeedback({
+        type: "error",
+        message:
+          err?.message ||
+          "No se pudo reenviar el enlace. Inténtalo nuevamente en unos segundos.",
+      });
+    } finally {
+      setIsResendingLink(false);
     }
-    setPendingVerification({ email, notice });
   }
 
-  async function handleVerifyOtp(code) {
-    const { data, error } = await verifySignupOtp(
-      pendingVerification.email,
-      code
-    );
-    if (error || !data?.session) {
-      throw error || new Error("Código inválido o expirado.");
+  function handleBackFromConfirmation() {
+    if (confirmationEmailSent?.email) {
+      setLoginEmail(confirmationEmailSent.email);
     }
-    navigate(await resolveDestination(data.user?.id), { replace: true });
-  }
-
-  async function handleResendOtp() {
-    const { error } = await resendSignupOtp(pendingVerification.email);
-    if (error) throw error;
-  }
-
-  function handleBackFromVerification() {
-    if (pendingVerification?.email) {
-      setLoginEmail(pendingVerification.email);
-    }
-    setPendingVerification(null);
+    setConfirmationEmailSent(null);
+    setResendFeedback(null);
     setActiveTab("login");
   }
 
@@ -403,6 +414,8 @@ export default function LoginView() {
   async function handleLoginSubmit(e) {
     e.preventDefault();
     setLoginError(null);
+    setUnconfirmedLoginEmail(null);
+    setResendFeedback(null);
     setLoginLoading(true);
 
     try {
@@ -410,7 +423,10 @@ export default function LoginView() {
       const { data: authData, error } = await signIn(email, loginPassword);
       if (error) {
         if (isEmailNotConfirmedError(error)) {
-          await openVerification(email, { resend: true });
+          setUnconfirmedLoginEmail(email);
+          setLoginError(
+            "Tu correo aún no ha sido confirmado. Abre el enlace de confirmación que te enviamos por correo electrónico (revisa también spam).",
+          );
           return;
         }
         if (error.message.includes("Invalid login credentials")) {
@@ -531,9 +547,11 @@ export default function LoginView() {
         return;
       }
 
-      // Registro pendiente de verificación: Paso 2 (código OTP).
+      // Registro pendiente de confirmación mediante enlace nativo de Supabase.
       if (data?.user) {
-        setPendingVerification({ email, notice: null });
+        setConfirmationEmailSent({ email });
+        setResendCooldown(60);
+        setResendFeedback(null);
         return;
       }
 
@@ -551,13 +569,18 @@ export default function LoginView() {
     setLoginEmail(testEmail);
     setLoginPassword(testPassword);
     setLoginError(null);
+    setUnconfirmedLoginEmail(null);
+    setResendFeedback(null);
     setLoginLoading(true);
 
     try {
       const { data, error } = await signIn(testEmail, testPassword);
       if (error) {
         if (isEmailNotConfirmedError(error)) {
-          await openVerification(testEmail, { resend: true });
+          setUnconfirmedLoginEmail(testEmail);
+          setLoginError(
+            "Esta cuenta aún no ha confirmado su correo electrónico. Revisa tu bandeja de entrada.",
+          );
           return;
         }
         throw error;
@@ -570,18 +593,67 @@ export default function LoginView() {
     }
   }
 
-  if (pendingVerification) {
+  if (confirmationEmailSent) {
     return (
       <div className="min-h-[85vh] flex flex-col items-center justify-center p-4 py-10">
         <Card className="max-w-md w-full">
-          <CardContent className="pt-1">
-            <OtpVerificationPanel
-              email={pendingVerification.email}
-              notice={pendingVerification.notice}
-              onVerify={handleVerifyOtp}
-              onResend={handleResendOtp}
-              onBack={handleBackFromVerification}
-            />
+          <CardContent className="pt-2 space-y-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-surface-subtle border border-border text-brand-primary flex items-center justify-center mx-auto">
+              <MailCheck className="w-6 h-6 text-accent" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h2 className="text-base font-bold text-brand-primary">
+                Revisa tu correo electrónico
+              </h2>
+              <p className="text-xs text-brand-secondary leading-relaxed">
+                Hemos enviado un enlace de confirmación a{" "}
+                <span className="font-semibold text-brand-primary break-all">
+                  {confirmationEmailSent.email}
+                </span>
+                . Haz clic en el botón del correo para activar tu cuenta e
+                ingresar automáticamente a ERXIDI.
+              </p>
+            </div>
+
+            {resendFeedback && (
+              <div
+                className={`p-3 rounded-button border text-xs text-left ${
+                  resendFeedback.type === "success"
+                    ? "bg-status-success-bg border-status-success-border text-status-success-text"
+                    : "bg-status-danger-bg border-status-danger-border text-status-danger-text"
+                }`}
+              >
+                {resendFeedback.message}
+              </div>
+            )}
+
+            <div className="space-y-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={resendCooldown > 0 || isResendingLink}
+                isLoading={isResendingLink}
+                onClick={() =>
+                  handleManualResendLink(confirmationEmailSent.email)
+                }
+              >
+                <Send className="w-3.5 h-3.5 mr-1.5" />
+                {resendCooldown > 0
+                  ? `Reenviar enlace en ${resendCooldown}s`
+                  : "Reenviar enlace de confirmación"}
+              </Button>
+
+              <button
+                type="button"
+                onClick={handleBackFromConfirmation}
+                className="w-full inline-flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-brand-secondary hover:text-brand-primary transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Ir a Iniciar Sesión
+              </button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -633,9 +705,43 @@ export default function LoginView() {
             {activeTab === "login" && (
               <div className="space-y-4">
                 {loginError && (
-                  <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 shrink-0" />
-                    <span>{loginError}</span>
+                  <div className="bg-rose-50 border border-status-danger-border text-status-danger-text p-3 rounded-button text-xs space-y-2.5">
+                    <div className="flex items-start gap-2">
+                      <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{loginError}</span>
+                    </div>
+                    {unconfirmedLoginEmail && (
+                      <div className="pt-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={resendCooldown > 0 || isResendingLink}
+                          isLoading={isResendingLink}
+                          onClick={() =>
+                            handleManualResendLink(unconfirmedLoginEmail)
+                          }
+                          className="w-full text-xs border-status-danger-border text-status-danger-text hover:bg-rose-100"
+                        >
+                          <Send className="w-3.5 h-3.5 mr-1.5" />
+                          {resendCooldown > 0
+                            ? `Reenviar enlace en ${resendCooldown}s`
+                            : "Reenviar enlace de confirmación"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {resendFeedback && (
+                  <div
+                    className={`p-3 rounded-button border text-xs ${
+                      resendFeedback.type === "success"
+                        ? "bg-status-success-bg border-status-success-border text-status-success-text"
+                        : "bg-status-danger-bg border-status-danger-border text-status-danger-text"
+                    }`}
+                  >
+                    {resendFeedback.message}
                   </div>
                 )}
 

@@ -63,6 +63,11 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  const getEmailRedirectUrl = () =>
+    typeof window !== "undefined"
+      ? `${window.location.origin}/catalogo`
+      : "https://erxidi-web.vercel.app/catalogo";
+
   // Métodos de autenticación desacoplados
   const signIn = (email, password) =>
     supabase.auth.signInWithPassword({ email, password });
@@ -73,15 +78,19 @@ export function AuthProvider({ children }) {
       password,
       options: {
         data: metadata, // Se mapea en el trigger handle_new_user()
+        emailRedirectTo: getEmailRedirectUrl(),
       },
     });
 
-  // Verificación de correo mediante código OTP de 6 dígitos
-  const verifySignupOtp = (email, token) =>
-    supabase.auth.verifyOtp({ email, token: String(token).trim(), type: "signup" });
-
-  const resendSignupOtp = (email) =>
-    supabase.auth.resend({ type: "signup", email });
+  // Reenvío del enlace nativo de confirmación de correo electrónico
+  const resendConfirmationEmail = (email) =>
+    supabase.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo: getEmailRedirectUrl(),
+      },
+    });
 
   const signOut = async () => {
     if (typeof window !== "undefined") {
@@ -110,8 +119,7 @@ export function AuthProvider({ children }) {
     loading,
     signIn,
     signUp,
-    verifySignupOtp,
-    resendSignupOtp,
+    resendConfirmationEmail,
     signOut,
     refreshProfile: () => user && fetchProfile(user.id),
   };

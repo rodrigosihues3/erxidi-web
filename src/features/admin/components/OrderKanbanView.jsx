@@ -8,9 +8,12 @@ import {
   CircleCheck,
   Clock,
   History,
+  AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
 import Badge from "../../../components/ui/Badge";
 import Button from "../../../components/ui/Button";
+import { formatIncidentReason } from "../services/orderNotification.service";
 
 const KANBAN_COLUMNS = [
   {
@@ -26,7 +29,7 @@ const KANBAN_COLUMNS = [
   {
     id: "en_preparacion",
     title: "En Preparación",
-    statuses: ["en_preparacion", "preparing"],
+    statuses: ["en_preparacion", "preparing", "incidencia_transporte"],
     bar: "bg-stage-prep-dot",
     headerBg: "bg-stage-prep-bg",
     dot: "bg-stage-prep-dot",
@@ -61,13 +64,7 @@ const KANBAN_COLUMNS = [
   {
     id: "finalizados",
     title: "Finalizados",
-    statuses: [
-      "entregado",
-      "delivered",
-      "cancelado",
-      "cancelled",
-      "incidencia_transporte",
-    ],
+    statuses: ["entregado", "delivered", "cancelado", "cancelled"],
     bar: "bg-status-success-text",
     headerBg: "bg-status-success-bg",
     dot: "bg-status-success-text",
@@ -270,6 +267,8 @@ export default function OrderKanbanView({
   onVerifyPayment,
   onSendToPreparation,
   onSendToPool,
+  onRequeueIncident,
+  onMarkDelivered,
   onNavigateDetail,
   onViewHistory,
   updatingOrderId,
@@ -298,7 +297,8 @@ export default function OrderKanbanView({
 
   function renderAction(col, order, isCashOnDelivery, isUpdating) {
     if (col.id === "por_validar") {
-      if (isCashOnDelivery) {
+      const isAlreadyPaid = order.payment_status === "paid";
+      if (isCashOnDelivery || isAlreadyPaid) {
         return (
           <Button
             type="button"
@@ -307,7 +307,7 @@ export default function OrderKanbanView({
             disabled={isUpdating}
             onClick={(e) => {
               e.stopPropagation();
-              onSendToPreparation(order.id);
+              onSendToPreparation(order);
             }}
             className="h-8 px-3 text-xs"
           >
@@ -337,6 +337,24 @@ export default function OrderKanbanView({
     if (col.id === "en_preparacion") {
       const isPickup =
         order.delivery_type === "pickup" || order.delivery_type === "recojo";
+      if (order.status === "incidencia_transporte" && onRequeueIncident) {
+        return (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={isUpdating}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequeueIncident(order);
+            }}
+            className="h-8 px-3 text-xs !bg-rose-600 hover:!bg-rose-700 !text-white !border-rose-600"
+          >
+            <RotateCcw className="w-3.5 h-3.5 mr-1" />
+            <span>{isPickup ? "A Recojo" : "Reencolar"}</span>
+          </Button>
+        );
+      }
       return (
         <Button
           type="button"
@@ -351,6 +369,29 @@ export default function OrderKanbanView({
         >
           <span>{isPickup ? "A Recojo" : "A Bolsa"}</span>
           <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Button>
+      );
+    }
+
+    if (
+      col.id === "en_ruta" &&
+      order.status === "listo_recojo" &&
+      onMarkDelivered
+    ) {
+      return (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={isUpdating}
+          onClick={(e) => {
+            e.stopPropagation();
+            onMarkDelivered(order);
+          }}
+          className="h-8 px-3 text-xs"
+        >
+          <CircleCheck className="w-3.5 h-3.5 mr-1" />
+          <span>Entregado</span>
         </Button>
       );
     }
@@ -373,6 +414,11 @@ export default function OrderKanbanView({
           );
 
           const sortedOrders = [...columnOrders].sort((a, b) => {
+            if (col.id === "en_preparacion") {
+              const aInc = a.status === "incidencia_transporte" ? 1 : 0;
+              const bInc = b.status === "incidencia_transporte" ? 1 : 0;
+              if (aInc !== bInc) return bInc - aInc;
+            }
             if (isFinalizados) {
               return (
                 new Date(b.updated_at || b.created_at) -
@@ -424,6 +470,17 @@ export default function OrderKanbanView({
                       recentOrderIds.includes(order.id) ||
                       isRecentlyCreatedReceived(order);
                     const isIncident = order.status === "incidencia_transporte";
+                    const isCancelledOrder = ["cancelado", "cancelled"].includes(
+                      order.status,
+                    );
+                    const isDeliveredOrder = ["entregado", "delivered"].includes(
+                      order.status,
+                    );
+                    const hasRestoredIncident =
+                      !isIncident &&
+                      !isCancelledOrder &&
+                      !isDeliveredOrder &&
+                      Boolean(order.incident_reason);
                     const isUpdating = updatingOrderId === order.id;
 
                     const rawName =
@@ -469,8 +526,40 @@ export default function OrderKanbanView({
                           isNewPulse
                             ? "ring-2 ring-status-success-text animate-pulse"
                             : ""
-                        } ${isIncident ? "border-l-4 border-l-rose-500" : ""}`}
+                        } ${
+                          isIncident
+                            ? "border-l-4 border-l-rose-500"
+                            : hasRestoredIncident
+                              ? "border-l-4 border-l-amber-500"
+                              : ""
+                        }`}
                       >
+                        {/* Alerta de incidencia activa o pedido restituido */}
+                        {(isIncident || hasRestoredIncident) && (
+                          <div
+                            className={`px-3 py-1.5 border-b flex items-start gap-1.5 text-[11px] leading-snug ${
+                              isIncident
+                                ? "bg-status-danger-bg border-status-danger-border text-status-danger-text"
+                                : "bg-status-warning-bg border-status-warning-border text-status-warning-text"
+                            }`}
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <span className="font-bold block">
+                                {isIncident
+                                  ? "Incidencia activa"
+                                  : "Restituido por incidencia"}
+                              </span>
+                              <span className="line-clamp-2 opacity-90">
+                                {formatIncidentReason(
+                                  order.incident_reason,
+                                  order.incident_comment,
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Nivel 1 - Identificación y antigüedad */}
                         <div className="px-3 pt-3 flex items-center justify-between gap-2">
                           <span className="font-mono font-bold text-brand-primary text-sm tracking-tight truncate">
@@ -508,6 +597,32 @@ export default function OrderKanbanView({
                           <div className="flex flex-wrap items-center gap-1.5">
                             <PaymentBadges order={order} />
                             <DeliveryBadge type={order.delivery_type} />
+                            {isCancelledOrder && (
+                              <Badge
+                                variant="danger"
+                                className="rounded-sm text-[11px] px-2 py-0.5 font-medium"
+                              >
+                                Cancelado
+                              </Badge>
+                            )}
+                            {isCancelledOrder &&
+                              order.refund_status === "pending" && (
+                                <Badge
+                                  variant="warning"
+                                  className="rounded-sm text-[11px] px-2 py-0.5 font-medium"
+                                >
+                                  Reembolso pendiente
+                                </Badge>
+                              )}
+                            {isCancelledOrder &&
+                              order.refund_status === "completed" && (
+                                <Badge
+                                  variant="success"
+                                  className="rounded-sm text-[11px] px-2 py-0.5 font-medium"
+                                >
+                                  Reembolsado
+                                </Badge>
+                              )}
                           </div>
 
                           {showDeliverySection && (

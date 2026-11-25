@@ -12,13 +12,21 @@ import {
 export const MAX_ITEMS_PER_TRIP = 30;
 
 // Pedidos actualmente tomados por el repartidor (cuentan para la capacidad)
-const BAG_STATUSES = ["asignado", "en_camino", "cerca"];
+const BAG_STATUSES = ["asignado", "en_camino", "cerca", "en_destino"];
 
-const POOL_ELIGIBLE_STATUSES = [
-  "por_asignar_repartidor",
-  "en_preparacion",
-  "preparando",
-];
+const POOL_ELIGIBLE_STATUSES = ["por_asignar_repartidor"];
+
+function buildDriverEmailInfo(profile) {
+  if (!profile) return null;
+  const clean = (v) => String(v || "").replace(/\[.*?\]/g, "").trim();
+  const fullName = [clean(profile.first_name), clean(profile.paternal_surname)]
+    .filter(Boolean)
+    .join(" ");
+  return {
+    name: fullName || "Repartidor ERXIDI",
+    phone: String(profile.phone || "").trim(),
+  };
+}
 
 // Misma forma que repartidor.json: pedido -> customer, shipping_address, items
 // Los nombres después de "!" son las llaves foráneas reales de la tabla orders.
@@ -313,7 +321,7 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
           customerName: order.customer_name,
           targetStatus: newStatus,
           status: newStatus,
-          driverInfo: profile,
+          driverInfo: buildDriverEmailInfo(profile),
         }).catch((err) => console.error(`Error al notificar ${newStatus}:`, err));
       }
     }
@@ -377,6 +385,18 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
         ...prev.filter((o) => o.id !== orderId),
       ]);
       setPoolOrders((prev) => prev.filter((o) => o.id !== orderId));
+
+      sendOrderNotificationEmail({
+        order: updatedOrder,
+        orderId: updatedOrder.id,
+        orderNumber: updatedOrder.order_number,
+        customerEmail: updatedOrder.customer_email || updatedOrder.client_email,
+        customerName: updatedOrder.customer_name,
+        targetStatus: "asignado",
+        status: "asignado",
+        driverInfo: buildDriverEmailInfo(profile),
+      }).catch((err) => console.error("Error al notificar asignado:", err));
+
       return true;
     } catch (err) {
       setActionError(err.message);
@@ -394,16 +414,20 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
     setActionError(null);
     setUpdatingId(orderId);
 
+    const resolvedReason = returnToPool
+      ? reason || "reasignacion_entre_repartidores"
+      : reason;
+
     const patch = returnToPool
       ? {
           status: "por_asignar_repartidor",
           assigned_delivery_id: null,
-          incident_reason: "reasignacion_entre_repartidores",
+          incident_reason: resolvedReason,
           incident_comment: comment,
         }
       : {
           status: "incidencia_transporte",
-          incident_reason: reason,
+          incident_reason: resolvedReason,
           incident_comment: comment,
         };
 
@@ -421,33 +445,45 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
       }
     }
 
+    const order = orders.find((o) => o.id === orderId);
+
     // Con incidencia el pedido sigue en `orders` (métricas); al devolver a bolsa sale
     setOrders((prev) =>
       returnToPool
         ? prev.filter((o) => o.id !== orderId)
         : prev.map((o) =>
             o.id === orderId
-              ? { ...o, status: "incidencia_transporte", incident_reason: reason }
+              ? {
+                  ...o,
+                  status: "incidencia_transporte",
+                  incident_reason: resolvedReason,
+                  incident_comment: comment,
+                }
               : o,
           ),
     );
     setUpdatingId(null);
 
-    if (!returnToPool) {
-      const order = orders.find((o) => o.id === orderId);
-      if (order) {
-        sendOrderNotificationEmail({
-          order: { ...order, status: "incidencia_transporte", incident_reason: reason },
-          orderId: order.id,
-          orderNumber: order.order_number,
-          customerEmail: order.customer_email || order.client_email,
-          customerName: order.customer_name,
-          targetStatus: "incidencia_transporte",
-          status: "incidencia_transporte",
-          incidentReason: reason,
-          driverInfo: profile,
-        }).catch((err) => console.error("Error al notificar incidencia_transporte:", err));
-      }
+    if (order) {
+      sendOrderNotificationEmail({
+        order: {
+          ...order,
+          status: patch.status,
+          incident_reason: resolvedReason,
+          incident_comment: comment,
+        },
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerEmail: order.customer_email || order.client_email,
+        customerName: order.customer_name,
+        targetStatus: "incidencia_transporte",
+        status: "incidencia_transporte",
+        incidentReason: resolvedReason,
+        incidentComment: comment,
+        driverInfo: buildDriverEmailInfo(profile),
+      }).catch((err) =>
+        console.error("Error al notificar incidencia_transporte:", err),
+      );
     }
 
     return true;
@@ -521,7 +557,7 @@ export function useDeliveryOrders({ useMock = false, userProfile = null } = {}) 
           customerName: targetOrder.customer_name,
           targetStatus: "en_camino",
           status: "en_camino",
-          driverInfo: profile,
+          driverInfo: buildDriverEmailInfo(profile),
         }).catch((err) => console.error("Error al notificar en_camino:", err));
       }
     });

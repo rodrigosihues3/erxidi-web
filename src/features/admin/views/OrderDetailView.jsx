@@ -46,6 +46,7 @@ import { handleDownloadFiscalReceipt } from "../services/fiscalReceipt.service";
 import {
   sendOrderNotificationEmail,
   AUTO_NOTIFICATION_STATUSES,
+  formatIncidentReason,
 } from "../services/orderNotification.service";
 import {
   getOrderDetail,
@@ -60,6 +61,7 @@ import {
   reportOrderIncident,
   cancelOrderWithStockRestore,
   resolveOrderIncident,
+  registerOrderRefund,
 } from "../services/adminOrders.service";
 
 export { DELIVERY_STEPS, PICKUP_STEPS, ORDER_LIFECYCLE_STEPS };
@@ -412,16 +414,124 @@ function CancelOrderModal({ isOpen, loading, onClose, onConfirm }) {
   );
 }
 
+function RegisterRefundModal({
+  isOpen,
+  order,
+  loading,
+  onClose,
+  onConfirm,
+}) {
+  const [refundMethod, setRefundMethod] = useState("yape_plin");
+  const [refundReference, setRefundReference] = useState("");
+
+  useEffect(() => {
+    if (isOpen) {
+      setRefundMethod(order?.payment_method || "yape_plin");
+      setRefundReference("");
+    }
+  }, [isOpen, order?.payment_method]);
+
+  if (!isOpen || !order) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-status-success-text" />
+            <h3 className="text-sm font-bold text-brand-primary">
+              Registrar Reembolso al Cliente
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-button text-brand-muted hover:text-brand-primary hover:bg-surface-subtle transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="p-3 rounded-button bg-surface-subtle border border-border flex items-center justify-between text-xs">
+            <span className="text-brand-secondary">Monto a reembolsar:</span>
+            <span className="font-mono font-bold text-sm text-brand-primary">
+              {money(order.total_amount)}
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-brand-primary">
+              Medio de devolución
+            </label>
+            <select
+              value={refundMethod}
+              onChange={(e) => setRefundMethod(e.target.value)}
+              className="w-full h-10 px-3 text-xs font-medium bg-surface-card border border-border rounded-button text-brand-primary focus:outline-none focus:border-brand-primary"
+            >
+              <option value="yape_plin">Yape / Plin</option>
+              <option value="transferencia">Transferencia bancaria</option>
+              <option value="culqi_extorno">Extorno de tarjeta (Culqi)</option>
+              <option value="efectivo">Devolución en efectivo</option>
+            </select>
+          </div>
+
+          <Input
+            label="N° de operación / código de constancia"
+            value={refundReference}
+            onChange={(e) => setRefundReference(e.target.value)}
+            placeholder="Ej: YP-982341 o EXT-451029"
+            autoFocus
+            required
+          />
+
+          <p className="text-[11px] text-brand-secondary leading-relaxed">
+            Al confirmar, el estado de reembolso pasará a completado en vivo y
+            se enviará automáticamente un correo al cliente con la constancia.
+          </p>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={onClose}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              isLoading={loading}
+              disabled={loading || !refundReference.trim()}
+              onClick={() =>
+                onConfirm({
+                  refundReference: refundReference.trim(),
+                  refundMethod,
+                })
+              }
+            >
+              Confirmar Reembolso
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReportIncidentModal({ isOpen, loading, onClose, onConfirm }) {
   const [selectedReason, setSelectedReason] = useState(INCIDENT_REASONS[0]);
   const [comment, setComment] = useState("");
-  const [returnToPool, setReturnToPool] = useState(true);
+  const [returnToPool, setReturnToPool] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setSelectedReason(INCIDENT_REASONS[0]);
       setComment("");
-      setReturnToPool(true);
+      setReturnToPool(false);
     }
   }, [isOpen]);
 
@@ -551,6 +661,7 @@ export default function OrderDetailView() {
   const [incidentModalOpen, setIncidentModalOpen] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
 
   function showToast(msg) {
     setToastMessage(msg);
@@ -805,6 +916,7 @@ export default function OrderDetailView() {
         targetOrder?.incident_reason ||
         targetOrder?.incident_comment ||
         null,
+      incidentComment: targetOrder?.incident_comment || null,
     };
   }
 
@@ -873,6 +985,8 @@ export default function OrderDetailView() {
         comment,
         items: order.items || [],
         previousStatus: order.status,
+        paymentMethod: order.payment_method,
+        paymentStatus: order.payment_status,
       });
       const nextOrderState = { ...order, ...updated };
       setOrder(nextOrderState);
@@ -891,13 +1005,49 @@ export default function OrderDetailView() {
             `Pedido cancelado y stock restituido. Aviso de correo: ${emailResult.error}`,
           );
         } else {
-          showToast("Pedido cancelado, stock restituido y cliente notificado.");
+          showToast(
+            updated.refund_status === "completed"
+              ? "Pedido cancelado, extorno registrado y cliente notificado."
+              : updated.refund_status === "pending"
+                ? "Pedido cancelado, reembolso pendiente registrado y cliente notificado."
+                : "Pedido cancelado, stock restituido y cliente notificado.",
+          );
         }
       } else {
         showToast("Pedido cancelado y stock restituido.");
       }
     } catch (err) {
       showToast(err.message || "Error al cancelar el pedido.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleConfirmRefund({ refundReference, refundMethod }) {
+    if (!order) return;
+    setSaving(true);
+    try {
+      const updated = await registerOrderRefund(order.id, {
+        refundReference,
+        refundMethod,
+      });
+      const nextOrderState = { ...order, ...updated };
+      setOrder(nextOrderState);
+      setRefundModalOpen(false);
+
+      const payload = buildEmailPayload(nextOrderState, "reembolso_completado");
+      if (payload.customerEmail) {
+        const emailResult = await sendOrderNotificationEmail(payload);
+        showToast(
+          emailResult?.success === false
+            ? `Reembolso registrado. Aviso de correo: ${emailResult.error}`
+            : "Reembolso registrado y constancia enviada al cliente.",
+        );
+      } else {
+        showToast("Reembolso registrado correctamente.");
+      }
+    } catch (err) {
+      showToast(err.message || "Error al registrar el reembolso.");
     } finally {
       setSaving(false);
     }
@@ -1000,14 +1150,24 @@ export default function OrderDetailView() {
     setSaving(true);
     try {
       const updated = await resolveOrderIncident(order.id, targetStatus);
-      setOrder((curr) => ({
-        ...curr,
+      const nextOrderState = {
+        ...order,
         ...updated,
-        incident_reason: null,
-        incident_comment: null,
         in_pool: targetStatus === "por_asignar_repartidor",
-      }));
-      showToast("Incidencia resuelta.");
+      };
+      setOrder(nextOrderState);
+
+      const payload = buildEmailPayload(nextOrderState, targetStatus);
+      if (payload.customerEmail) {
+        const emailResult = await sendOrderNotificationEmail(payload);
+        showToast(
+          emailResult?.success === false
+            ? `Incidencia resuelta. Aviso de correo: ${emailResult.error}`
+            : "Incidencia resuelta y cliente notificado.",
+        );
+      } else {
+        showToast("Incidencia resuelta.");
+      }
     } catch (err) {
       showToast(err.message || "Error al resolver incidencia.");
     } finally {
@@ -1101,6 +1261,9 @@ export default function OrderDetailView() {
     : null;
 
   const isPaid = order.payment_status === "paid";
+  const isCashOnDelivery = ["contraentrega", "efectivo", "cash_on_delivery"].includes(
+    String(order.payment_method || "").toLowerCase(),
+  );
   const hasIncident = Boolean(
     order.incident_reason ||
     order.incident_comment ||
@@ -1563,7 +1726,7 @@ export default function OrderDetailView() {
                   <div className="mt-3 p-3 rounded-card bg-status-warning-bg border border-status-warning-border">
                     <dl className="space-y-2">
                       <InfoRow wide label="Motivo tipificado">
-                        {order.incident_reason || "Incidencia operativa"}
+                        {formatIncidentReason(order.incident_reason, null)}
                       </InfoRow>
                       <InfoRow wide label="Repartidor involucrado">
                         {driverName || "Sin repartidor asignado"}
@@ -1700,9 +1863,67 @@ export default function OrderDetailView() {
                   </InfoRow>
                 </dl>
 
+                {/* Estado de Reembolso (Visible en pedidos cancelados) */}
+                {isCancelled && (
+                  <div className="mt-4">
+                    {order.refund_status === "completed" ? (
+                      <div className="p-3 rounded-card bg-status-success-bg border border-status-success-border text-xs text-status-success-text space-y-1">
+                        <p className="font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          Reembolso completado ({money(order.total_amount)})
+                        </p>
+                        {order.refund_reference && (
+                          <p className="font-mono text-[11px]">
+                            Op: {order.refund_reference}
+                          </p>
+                        )}
+                        {order.refunded_at && (
+                          <p className="text-[11px] opacity-90">
+                            Fecha: {formatDateTime(order.refunded_at)}
+                          </p>
+                        )}
+                      </div>
+                    ) : order.refund_status === "pending" || isPaid ? (
+                      <div className="p-3 rounded-card bg-status-warning-bg border border-status-warning-border text-xs text-status-warning-text space-y-2.5">
+                        <div>
+                          <p className="font-bold flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            Reembolso pendiente al cliente
+                          </p>
+                          <p className="text-[11px] mt-0.5 opacity-90">
+                            Orden pagada previamente por{" "}
+                            <span className="font-mono font-bold">
+                              {money(order.total_amount)}
+                            </span>
+                            . Registra la constancia una vez devuelto el dinero.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          disabled={saving}
+                          onClick={() => setRefundModalOpen(true)}
+                          className="w-full text-xs"
+                        >
+                          Registrar Reembolso Realizado
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-card bg-surface-subtle border border-border text-xs text-brand-secondary">
+                        Sin cobro previo registrado — no requiere devolución de
+                        dinero.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Botón Condicional: Validar Comprobante vs Descargar comprobante (PDF) */}
                 <div className="mt-5">
-                  {order.payment_status !== "paid" && currentStepIndex === 0 ? (
+                  {!isCashOnDelivery &&
+                  !isCancelled &&
+                  order.payment_status !== "paid" &&
+                  currentStepIndex === 0 ? (
                     <Button
                       type="button"
                       variant="primary"
@@ -1916,6 +2137,14 @@ export default function OrderDetailView() {
         onConfirm={handleConfirmCancel}
       />
 
+      <RegisterRefundModal
+        isOpen={refundModalOpen}
+        order={order}
+        loading={saving}
+        onClose={() => setRefundModalOpen(false)}
+        onConfirm={handleConfirmRefund}
+      />
+
       <ReportIncidentModal
         isOpen={incidentModalOpen}
         loading={saving}
@@ -1945,8 +2174,24 @@ export default function OrderDetailView() {
             updated?.payment_status === "failed" ||
             updated?.payment_status === "rejected"
           ) {
-            setOrder((curr) => ({ ...curr, ...updated }));
-            showToast("Comprobante de pago rechazado.");
+            const rejectedOrder = { ...order, ...updated };
+            setOrder(rejectedOrder);
+            const payload = buildEmailPayload(
+              rejectedOrder,
+              "cancelado",
+              null,
+              rejectedOrder.incident_reason || "Comprobante de pago no validado",
+            );
+            if (payload.customerEmail) {
+              const emailResult = await sendOrderNotificationEmail(payload);
+              showToast(
+                emailResult?.success === false
+                  ? `Comprobante rechazado y stock restituido. Aviso de correo: ${emailResult.error}`
+                  : "Comprobante rechazado, stock restituido y cliente notificado.",
+              );
+            } else {
+              showToast("Comprobante de pago rechazado y stock restituido.");
+            }
             return;
           }
 

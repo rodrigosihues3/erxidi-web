@@ -63,7 +63,7 @@ export default function OrderConfirmationView() {
   const whatsappMessage = encodeURIComponent(
     `Hola ERXIDI, confirmo mi pedido ${orderNumber} por S/ ${total.toFixed(2)}.`
   );
-  const whatsappUrl = `https://wa.me/51987654321?text=${whatsappMessage}`;
+  const whatsappUrl = `https://wa.me/51961211119?text=${whatsappMessage}`;
 
   if (loading) {
     return (

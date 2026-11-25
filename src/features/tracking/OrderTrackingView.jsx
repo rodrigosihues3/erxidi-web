@@ -21,6 +21,8 @@ import {
   Loader2,
   ShoppingBag,
   ExternalLink,
+  Ban,
+  X,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { generateReceiptPDF } from "../../utils/pdfReceiptGenerator";
@@ -28,6 +30,7 @@ import Badge from "../../components/ui/Badge";
 import Button from "../../components/ui/Button";
 import Input from "../../components/ui/Input";
 import { Card } from "../../components/ui/Card";
+import { formatIncidentReason } from "../admin/services/orderNotification.service";
 import {
   DELIVERY_TRACKING_STEPS,
   PICKUP_TRACKING_STEPS,
@@ -37,7 +40,25 @@ import {
   fetchOrderForTracking,
   fetchDeliveryProfileById,
   subscribeToOrderRealtime,
+  canCustomerCancelOrder,
+  cancelCustomerOrder,
 } from "./services/tracking.service";
+
+const CUSTOMER_CANCEL_REASONS = [
+  "Cambié de opinión / ya no necesito el pedido",
+  "Me equivoqué de talla, color o dirección de entrega",
+  "Demora en la preparación o despacho",
+  "Otro motivo",
+];
+
+const REFUND_METHOD_LABELS = {
+  culqi_extorno: "Extorno automático a tu tarjeta (Culqi)",
+  culqi_gateway: "Extorno a tu tarjeta (Culqi)",
+  tarjeta: "Extorno a tu tarjeta",
+  yape_plin: "Devolución vía Yape / Plin",
+  transferencia: "Transferencia bancaria",
+  efectivo: "Devolución en efectivo",
+};
 
 const digitsOnly = (value) => String(value || "").replace(/\D/g, "");
 
@@ -63,6 +84,11 @@ export default function OrderTrackingView() {
   const [isChecking, setIsChecking] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState(CUSTOMER_CANCEL_REASONS[0]);
+  const [cancelCustomReason, setCancelCustomReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
 
   // Auto-validación si el usuario ya está autenticado y es propietario del pedido
   useEffect(() => {
@@ -248,10 +274,48 @@ export default function OrderTrackingView() {
     return s === "cancelado" || s === "cancelled";
   }, [order?.status]);
 
-  const hasIncident = useMemo(() => {
+  const isActiveIncident = useMemo(() => {
     const s = String(order?.status || "").toLowerCase();
-    return Boolean(order?.incident_reason) || s === "incidencia_transporte";
-  }, [order?.incident_reason, order?.status]);
+    return s === "incidencia_transporte";
+  }, [order?.status]);
+
+  const hasReprogrammedIncident = useMemo(() => {
+    return (
+      !isActiveIncident &&
+      !isFinalDelivered &&
+      !isCancelled &&
+      Boolean(order?.incident_reason)
+    );
+  }, [isActiveIncident, isFinalDelivered, isCancelled, order?.incident_reason]);
+
+  const canCancel = useMemo(
+    () => canCustomerCancelOrder(order?.status),
+    [order?.status],
+  );
+
+  const handleConfirmCustomerCancel = async () => {
+    if (!order || isCancelling) return;
+    const isCustom = cancelReason === "Otro motivo";
+    const resolvedReason = isCustom
+      ? cancelCustomReason.trim() || "Cancelado por el cliente"
+      : cancelReason;
+
+    setIsCancelling(true);
+    setCancelError("");
+    try {
+      const { order: updatedOrder } = await cancelCustomerOrder(
+        order,
+        resolvedReason,
+      );
+      setOrder((prev) => ({ ...prev, ...updatedOrder }));
+      setCancelModalOpen(false);
+      setCancelCustomReason("");
+    } catch (err) {
+      setCancelError(err.message || "No se pudo cancelar tu pedido.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   // Ficha de Repartidor en ruta (solo en camino, cerca o en ubicación)
   const isDriverInTransit = useMemo(() => {
@@ -407,53 +471,83 @@ export default function OrderTrackingView() {
           </div>
         </div>
 
-        {/* Fila 2: Título y Código */}
-        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-          <h1 className="text-2xl font-bold text-brand-primary">
-            Seguimiento de Pedido
-          </h1>
-          <p className="font-mono text-sm font-bold text-brand-primary">
-            Código: <span className="text-accent">{order.order_number}</span>
-          </p>
+        {/* Fila 2: Título, Código y Cancelación */}
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div>
+            <h1 className="text-2xl font-bold text-brand-primary">
+              Seguimiento de Pedido
+            </h1>
+            <p className="font-mono text-sm font-bold text-brand-primary mt-1">
+              Código: <span className="text-accent">{order.order_number}</span>
+            </p>
+          </div>
+          {canCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCancelReason(CUSTOMER_CANCEL_REASONS[0]);
+                setCancelCustomReason("");
+                setCancelError("");
+                setCancelModalOpen(true);
+              }}
+              className="text-status-danger-text border-status-danger-border hover:bg-status-danger-bg self-start sm:self-auto"
+            >
+              <Ban className="h-3.5 w-3.5 mr-1.5" />
+              Cancelar Pedido
+            </Button>
+          )}
         </div>
       </header>
 
-      {/* Banner de Incidencia Operativa */}
-      {hasIncident && (
+      {/* Banner de Incidencia Operativa Activa */}
+      {isActiveIncident && (
         <section
           aria-label="Aviso de novedad operativa"
-          className="rounded-card border border-status-warning-border bg-status-warning-bg p-4 flex items-start gap-3 text-status-warning-text shadow-subtle"
+          className="rounded-card border border-status-danger-border bg-status-danger-bg p-4 flex items-start gap-3 text-status-danger-text shadow-subtle"
         >
-          <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 text-status-warning-text" />
+          <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 text-status-danger-text" />
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold uppercase tracking-wider">
                 Aviso de Novedad Operativa
               </span>
-              <Badge variant="warning" className="text-[10px] font-mono !rounded-sm">
-                En Gestión Logística
+              <Badge variant="danger" className="text-[10px] font-mono !rounded-sm">
+                En Revisión Logística
               </Badge>
             </div>
-            <p className="text-sm font-medium leading-relaxed text-amber-900">
-              Estamos experimentando una demora imprevista en la entrega:{" "}
+            <p className="text-sm font-medium leading-relaxed">
+              Registramos un inconveniente durante el despacho:{" "}
               <strong className="font-semibold">
-                {order.incident_reason ||
-                  order.incident_comment ||
-                  "Inconveniente en ruta"}
+                {formatIncidentReason(
+                  order.incident_reason,
+                  order.incident_comment,
+                )}
               </strong>
-              . Nuestro equipo de logística está solucionándolo.
+              . Nuestro equipo ya está gestionando la solución y reprogramación.
             </p>
-            {order.incident_comment &&
-              order.incident_comment !== order.incident_reason && (
-                <p className="text-xs text-amber-800/90 pt-0.5">
-                  Detalle operativo: {order.incident_comment}
-                </p>
-              )}
           </div>
         </section>
       )}
 
-      {/* Tarjeta de Pedido Cancelado */}
+      {/* Aviso suave si tuvo incidencia previa y ya fue reprogramado */}
+      {hasReprogrammedIncident && (
+        <section
+          aria-label="Aviso de pedido reprogramado"
+          className="rounded-card border border-status-warning-border bg-status-warning-bg p-3.5 flex items-start gap-3 text-status-warning-text shadow-subtle"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <p className="text-xs leading-relaxed">
+            <strong>Pedido reprogramado:</strong> Tu orden registró una novedad
+            previa (
+            {formatIncidentReason(order.incident_reason, order.incident_comment)}
+            ) y ya fue retomada para continuar con su entrega.
+          </p>
+        </section>
+      )}
+
+      {/* Tarjeta de Pedido Cancelado y Estado de Reembolso */}
       {isCancelled && (
         <section
           aria-label="Información de pedido cancelado"
@@ -472,11 +566,59 @@ export default function OrderTrackingView() {
               </p>
             </div>
           </div>
-          <p className="text-xs leading-relaxed text-rose-900">
-            Si ya realizaste el abono de tu compra o tienes consultas sobre el
-            reembolso y anulación, por favor comunícate de inmediato con nuestro
-            canal de atención al cliente.
-          </p>
+
+          {order.incident_reason && (
+            <div className="rounded-button bg-surface-card border border-status-danger-border px-3.5 py-2.5 text-xs text-brand-primary">
+              <span className="font-semibold text-brand-secondary">Motivo: </span>
+              {formatIncidentReason(order.incident_reason, order.incident_comment)}
+            </div>
+          )}
+
+          {/* Bloque de estado de devolución de dinero */}
+          {order.refund_status === "completed" ? (
+            <div className="rounded-card border border-status-success-border bg-status-success-bg p-4 text-status-success-text space-y-1.5">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>
+                  Reembolso completado ({formatCurrency(order.total_amount)})
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed">
+                Tu dinero ha sido reembolsado mediante{" "}
+                <strong>
+                  {REFUND_METHOD_LABELS[order.refund_method] ||
+                    "tu medio de pago original"}
+                </strong>
+                .
+              </p>
+              {order.refund_reference && (
+                <p className="text-xs font-mono font-semibold">
+                  Código de operación: {order.refund_reference}
+                </p>
+              )}
+            </div>
+          ) : order.refund_status === "pending" ||
+            order.payment_status === "paid" ? (
+            <div className="rounded-card border border-status-warning-border bg-status-warning-bg p-4 text-status-warning-text space-y-1">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <Clock3 className="h-4 w-4 shrink-0" />
+                <span>
+                  Reembolso en gestión ({formatCurrency(order.total_amount)})
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed">
+                Hemos registrado la devolución pendiente de tu pago. Nuestro
+                equipo de administración procesará el abono y te enviará la
+                constancia con el número de operación a tu correo.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs leading-relaxed text-rose-900">
+              No se registró ningún cobro previo sobre esta orden, por lo que no
+              corresponde devolución de dinero.
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <a
               href="mailto:soporte@erxidi.pe"
@@ -918,6 +1060,109 @@ export default function OrderTrackingView() {
           </Link>
         </div>
       </section>
+
+      {/* Modal de Cancelación del Cliente */}
+      {cancelModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Ban className="w-4 h-4 text-status-danger-text" />
+                <h3 className="text-sm font-bold text-brand-primary">
+                  Cancelar Pedido {order.order_number}
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={() => setCancelModalOpen(false)}
+                className="p-1 rounded-button text-brand-muted hover:text-brand-primary"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-brand-secondary leading-relaxed">
+                Puedes cancelar tu pedido porque aún no ha salido en ruta.{" "}
+                {order.payment_status === "paid"
+                  ? ["culqi_gateway", "tarjeta"].includes(order.payment_method)
+                    ? "Al confirmar, se procesará automáticamente el extorno a tu tarjeta."
+                    : "Al confirmar, tu reembolso quedará registrado para devolución en administración."
+                  : "No se aplicará ningún cargo."}
+              </p>
+
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-brand-primary">
+                  Motivo de cancelación:
+                </p>
+                {CUSTOMER_CANCEL_REASONS.map((r) => (
+                  <label
+                    key={r}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-button border text-xs cursor-pointer ${
+                      cancelReason === r
+                        ? "border-rose-400 bg-rose-50/40 text-brand-primary font-semibold"
+                        : "border-border bg-surface-card text-brand-secondary hover:bg-surface-subtle"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="tracking_cancel_reason"
+                      value={r}
+                      checked={cancelReason === r}
+                      onChange={() => setCancelReason(r)}
+                      className="accent-rose-600"
+                    />
+                    <span>{r}</span>
+                  </label>
+                ))}
+              </div>
+
+              {cancelReason === "Otro motivo" && (
+                <Input
+                  label="Especificar motivo"
+                  value={cancelCustomReason}
+                  onChange={(e) => setCancelCustomReason(e.target.value)}
+                  placeholder="Cuéntanos brevemente el motivo..."
+                  autoFocus
+                />
+              )}
+
+              {cancelError && (
+                <div className="p-2.5 rounded-button bg-status-danger-bg border border-status-danger-border text-status-danger-text text-xs">
+                  {cancelError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isCancelling}
+                  onClick={() => setCancelModalOpen(false)}
+                >
+                  Volver
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  isLoading={isCancelling}
+                  disabled={
+                    isCancelling ||
+                    (cancelReason === "Otro motivo" &&
+                      !cancelCustomReason.trim())
+                  }
+                  onClick={handleConfirmCustomerCancel}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                >
+                  Confirmar Cancelación
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

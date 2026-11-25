@@ -17,7 +17,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  Ban,
+  X,
+  CheckCircle2,
 } from "lucide-react";
+import {
+  canCustomerCancelOrder,
+  cancelCustomerOrder,
+} from "../tracking/services/tracking.service";
+
+const CUSTOMER_CANCEL_REASONS = [
+  "Cambié de opinión / ya no necesito el pedido",
+  "Me equivoqué de talla, color o dirección de entrega",
+  "Demora en la preparación o despacho",
+  "Otro motivo",
+];
 
 const PAGE_SIZE = 5;
 
@@ -82,6 +96,51 @@ export default function OrdersHistoryView() {
   const [deliveryFilter, setDeliveryFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState(CUSTOMER_CANCEL_REASONS[0]);
+  const [cancelCustomReason, setCancelCustomReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelFeedback, setCancelFeedback] = useState(null);
+
+  const handleConfirmCancel = async () => {
+    if (!cancelTarget || isCancelling) return;
+    const isCustom = cancelReason === "Otro motivo";
+    const resolvedReason = isCustom
+      ? cancelCustomReason.trim() || "Cancelado por el cliente"
+      : cancelReason;
+
+    setIsCancelling(true);
+    setCancelFeedback(null);
+    try {
+      const { order: updatedOrder } = await cancelCustomerOrder(
+        cancelTarget,
+        resolvedReason,
+      );
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === cancelTarget.id ? { ...o, ...updatedOrder } : o,
+        ),
+      );
+      setCancelTarget(null);
+      setCancelCustomReason("");
+      setCancelFeedback({
+        type: "success",
+        message:
+          updatedOrder.refund_status === "completed"
+            ? `Pedido ${updatedOrder.order_number} cancelado. Tu extorno (${updatedOrder.refund_reference}) fue procesado a tu tarjeta.`
+            : updatedOrder.refund_status === "pending"
+              ? `Pedido ${updatedOrder.order_number} cancelado. Tu reembolso quedó registrado en gestión.`
+              : `Pedido ${updatedOrder.order_number} cancelado correctamente.`,
+      });
+    } catch (err) {
+      setCancelFeedback({
+        type: "error",
+        message: err.message || "No se pudo cancelar el pedido.",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   const fetchUserOrders = useCallback(async () => {
     if (!user) return;
@@ -213,6 +272,23 @@ export default function OrdersHistoryView() {
           </Button>
         </Link>
       </div>
+
+      {cancelFeedback && (
+        <div
+          className={`p-3.5 rounded-card border text-xs flex items-center gap-2 ${
+            cancelFeedback.type === "success"
+              ? "bg-status-success-bg border-status-success-border text-status-success-text"
+              : "bg-status-danger-bg border-status-danger-border text-status-danger-text"
+          }`}
+        >
+          {cancelFeedback.type === "success" ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 shrink-0" />
+          )}
+          <span>{cancelFeedback.message}</span>
+        </div>
+      )}
 
       {/* Barra de Filtros y Búsqueda */}
       {!loading && !error && orders.length > 0 && (
@@ -379,6 +455,25 @@ export default function OrdersHistoryView() {
                     <Badge variant={statusInfo.variant} className="text-[10px]">
                       {statusInfo.label}
                     </Badge>
+                    {["cancelado", "cancelled"].includes(
+                      order.status?.toLowerCase(),
+                    ) &&
+                      order.refund_status === "completed" && (
+                        <Badge variant="success" className="text-[10px]">
+                          Reembolsado
+                          {order.refund_reference
+                            ? ` · ${order.refund_reference}`
+                            : ""}
+                        </Badge>
+                      )}
+                    {["cancelado", "cancelled"].includes(
+                      order.status?.toLowerCase(),
+                    ) &&
+                      order.refund_status === "pending" && (
+                        <Badge variant="warning" className="text-[10px]">
+                          Reembolso en gestión
+                        </Badge>
+                      )}
                     <span className="text-xs text-brand-secondary flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5 text-brand-muted" />
                       {formatDate(order.created_at)}
@@ -432,17 +527,35 @@ export default function OrdersHistoryView() {
                         : "Contra Entrega"}
                   </span>
 
-                  <Link to={`/seguimiento/${order.order_number}`}>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="gap-1.5 text-xs bg-accent hover:bg-accent-hover text-white h-8 px-4"
-                    >
-                      <Truck className="w-3.5 h-3.5" />
-                      Rastrear Pedido
-                      <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
-                    </Button>
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    {canCustomerCancelOrder(order.status) && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCancelTarget(order);
+                          setCancelReason(CUSTOMER_CANCEL_REASONS[0]);
+                          setCancelCustomReason("");
+                        }}
+                        className="gap-1.5 text-xs text-status-danger-text border-status-danger-border hover:bg-status-danger-bg h-8 px-3"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        Cancelar
+                      </Button>
+                    )}
+                    <Link to={`/seguimiento/${order.order_number}`}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="gap-1.5 text-xs bg-accent hover:bg-accent-hover text-white h-8 px-4"
+                      >
+                        <Truck className="w-3.5 h-3.5" />
+                        Rastrear Pedido
+                        <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
               </Card>
             );
@@ -503,6 +616,104 @@ export default function OrdersHistoryView() {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {/* Modal de Cancelación del Cliente */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-surface-card border border-border rounded-card shadow-dropdown overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Ban className="w-4 h-4 text-status-danger-text" />
+                <h3 className="text-sm font-bold text-brand-primary">
+                  Cancelar Pedido {cancelTarget.order_number}
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={() => setCancelTarget(null)}
+                className="p-1 rounded-button text-brand-muted hover:text-brand-primary"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-brand-secondary leading-relaxed">
+                Puedes cancelar tu pedido porque aún no ha salido en ruta.{" "}
+                {cancelTarget.payment_status === "paid"
+                  ? ["culqi_gateway", "tarjeta"].includes(
+                      cancelTarget.payment_method,
+                    )
+                    ? "Al confirmar, se procesará automáticamente el extorno a tu tarjeta."
+                    : "Al confirmar, tu reembolso quedará registrado para devolución en administración."
+                  : "No se aplicará ningún cargo."}
+              </p>
+
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-brand-primary">
+                  Motivo de cancelación:
+                </p>
+                {CUSTOMER_CANCEL_REASONS.map((r) => (
+                  <label
+                    key={r}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-button border text-xs cursor-pointer ${
+                      cancelReason === r
+                        ? "border-rose-400 bg-rose-50/40 text-brand-primary font-semibold"
+                        : "border-border bg-surface-card text-brand-secondary hover:bg-surface-subtle"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="history_cancel_reason"
+                      value={r}
+                      checked={cancelReason === r}
+                      onChange={() => setCancelReason(r)}
+                      className="accent-rose-600"
+                    />
+                    <span>{r}</span>
+                  </label>
+                ))}
+              </div>
+
+              {cancelReason === "Otro motivo" && (
+                <input
+                  type="text"
+                  value={cancelCustomReason}
+                  onChange={(e) => setCancelCustomReason(e.target.value)}
+                  placeholder="Cuéntanos brevemente el motivo..."
+                  className="w-full h-10 px-3 text-xs border border-border rounded-button bg-surface-card text-brand-primary focus:outline-none focus:border-brand-primary"
+                />
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isCancelling}
+                  onClick={() => setCancelTarget(null)}
+                >
+                  Volver
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  isLoading={isCancelling}
+                  disabled={
+                    isCancelling ||
+                    (cancelReason === "Otro motivo" &&
+                      !cancelCustomReason.trim())
+                  }
+                  onClick={handleConfirmCancel}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                >
+                  Confirmar Cancelación
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

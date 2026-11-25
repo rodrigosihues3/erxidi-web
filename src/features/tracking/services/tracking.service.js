@@ -1,4 +1,6 @@
 import { supabase } from "../../../services/supabase";
+import { cancelOrderWithStockRestore } from "../../admin/services/adminOrders.service";
+import { sendOrderNotificationEmail } from "../../admin/services/orderNotification.service";
 import {
   Check,
   PackageCheck,
@@ -10,6 +12,74 @@ import {
   CheckCircle2,
   Store,
 } from "lucide-react";
+
+export const CUSTOMER_CANCELLABLE_STATUSES = [
+  "recibido",
+  "received",
+  "pendiente_pago",
+  "pending",
+  "en_preparacion",
+  "preparing",
+  "por_asignar_repartidor",
+  "por_asignar",
+  "asignado",
+  "listo_recojo",
+];
+
+export function canCustomerCancelOrder(status) {
+  const s = String(status || "").toLowerCase().trim();
+  return CUSTOMER_CANCELLABLE_STATUSES.includes(s);
+}
+
+export async function cancelCustomerOrder(order, reason) {
+  if (!order?.id) {
+    throw new Error("No se encontró el identificador del pedido.");
+  }
+  if (!canCustomerCancelOrder(order.status)) {
+    throw new Error(
+      "Este pedido ya salió en ruta o fue finalizado y no puede ser cancelado.",
+    );
+  }
+
+  const finalReason =
+    String(reason || "").trim() || "Cancelado por solicitud del cliente";
+
+  const updated = await cancelOrderWithStockRestore(order.id, {
+    reason: finalReason,
+    comment: finalReason,
+    items: order.order_items || order.items || [],
+    previousStatus: order.status,
+    paymentMethod: order.payment_method,
+    paymentStatus: order.payment_status,
+  });
+
+  const mergedOrder = {
+    ...order,
+    ...updated,
+  };
+
+  let emailResult = null;
+  const email =
+    mergedOrder.customer_email ||
+    mergedOrder.client_email ||
+    mergedOrder.profiles?.email;
+
+  if (email) {
+    emailResult = await sendOrderNotificationEmail({
+      orderId: mergedOrder.id,
+      orderNumber: mergedOrder.order_number,
+      customerEmail: email,
+      customerName: mergedOrder.customer_name,
+      targetStatus: "cancelado",
+      status: "cancelado",
+      incidentReason: finalReason,
+      incidentComment: finalReason,
+      order: mergedOrder,
+    }).catch(() => null);
+  }
+
+  return { order: mergedOrder, emailResult };
+}
 
 export const DELIVERY_TRACKING_STEPS = [
   {
@@ -158,6 +228,10 @@ export function getTrackingStepIndex(status, isPickup = false) {
   if (["en_ubicacion", "en_destino", "arrived"].includes(s)) {
     return 6;
   }
+  if (s === "incidencia_transporte") {
+    return isPickup ? 1 : 4;
+  }
+
   if (["entregado", "delivered"].includes(s)) {
     return 7;
   }
@@ -335,6 +409,10 @@ export async function fetchOrderForTracking(orderNumber) {
       delivery_longitude,
       incident_reason,
       incident_comment,
+      refund_status,
+      refund_method,
+      refund_reference,
+      refunded_at,
       profiles:customer_id (
         id,
         dni,

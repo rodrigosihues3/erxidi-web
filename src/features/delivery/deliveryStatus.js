@@ -18,6 +18,9 @@ export const STATUS_ALIASES = {
   en_camino: "en_camino",
   nearby: "cerca",
   cerca: "cerca",
+  en_destino: "en_destino",
+  en_ubicacion: "en_destino",
+  arrived: "en_destino",
   incidencia_transporte: "incidencia_transporte",
   delivered: "entregado",
   entregado: "entregado",
@@ -46,6 +49,7 @@ export const STATUS_CONFIG = {
   en_preparacion: { label: "Por entregar", variant: "neutral", icon: Package },
   en_camino: { label: "En camino", variant: "warning", icon: Truck },
   cerca: { label: "Cerca", variant: "warning", icon: MapPin },
+  en_destino: { label: "En ubicación", variant: "warning", icon: MapPin },
   incidencia_transporte: {
     label: "Incidencia en Ruta",
     variant: "danger",
@@ -79,6 +83,15 @@ export const NEXT_ACTIONS = {
     },
   ],
   cerca: [
+    { to: "en_destino", label: "Llegué a la dirección", variant: "outline" },
+    {
+      to: "incidencia_transporte",
+      action: "REPORT_INCIDENT",
+      label: "Reportar incidencia",
+      variant: "outline",
+    },
+  ],
+  en_destino: [
     { to: "entregado", label: "Confirmar entrega" },
     {
       to: "incidencia_transporte",

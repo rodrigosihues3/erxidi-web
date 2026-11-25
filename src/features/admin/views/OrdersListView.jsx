@@ -18,6 +18,7 @@ import {
   Play,
   PackageCheck,
   AlertOctagon,
+  AlertTriangle,
   Calendar,
   Zap,
   Store,
@@ -31,7 +32,10 @@ import OrderStatusBadge from "../components/OrderStatusBadge";
 import OrderPaymentModal from "../components/OrderPaymentModal";
 import OrderKanbanView from "../components/OrderKanbanView";
 import { useAdminOrders } from "../hooks/useAdminOrders";
-import { sendOrderNotificationEmail } from "../services/orderNotification.service";
+import {
+  sendOrderNotificationEmail,
+  formatIncidentReason,
+} from "../services/orderNotification.service";
 import {
   getDeliveryStaff,
   getOrderDetail,
@@ -146,6 +150,8 @@ export default function OrdersListView() {
       ];
     if (statusFilter === "finalizado")
       return ["entregado", "delivered"];
+    if (statusFilter === "incidencia")
+      return ["incidencia_transporte"];
     if (statusFilter === "cancelado")
       return ["cancelado", "cancelled"];
     return statusFilter;
@@ -157,6 +163,8 @@ export default function OrdersListView() {
       return ["scheduled", "programado"];
     if (shippingFilter === "express")
       return ["express"];
+    if (shippingFilter === "pickup")
+      return ["pickup", "recojo"];
     return shippingFilter;
   }, [shippingFilter]);
 
@@ -219,7 +227,6 @@ export default function OrdersListView() {
     "delivered",
     "cancelado",
     "cancelled",
-    "incidencia_transporte",
   ];
   const FINALIZED_LIMIT = 10;
 
@@ -392,6 +399,10 @@ export default function OrdersListView() {
 
   async function handleStartPreparing(orderOrId) {
     const orderId = typeof orderOrId === "object" ? orderOrId.id : orderOrId;
+    const baseOrder =
+      typeof orderOrId === "object"
+        ? orderOrId
+        : localOrders.find((o) => o.id === orderId) || null;
     setUpdatingOrderId(orderId);
     try {
       const updated = await updateOrderStatus(orderId, "en_preparacion");
@@ -400,6 +411,41 @@ export default function OrdersListView() {
           o.id === orderId ? { ...o, ...updated, status: "en_preparacion" } : o,
         ),
       );
+
+      let fullOrder = baseOrder
+        ? { ...baseOrder, ...updated, status: "en_preparacion" }
+        : null;
+      let customerEmail =
+        fullOrder?.customer_email ||
+        fullOrder?.client_email ||
+        fullOrder?.profiles?.email;
+
+      if (!customerEmail || !fullOrder?.order_number) {
+        const fetched = await getOrderDetail(orderId);
+        if (fetched) {
+          fullOrder = { ...fetched, ...updated, status: "en_preparacion" };
+          customerEmail =
+            fullOrder.customer_email ||
+            fullOrder.client_email ||
+            fullOrder.profiles?.email;
+        }
+      }
+
+      if (customerEmail && fullOrder) {
+        const emailResult = await sendOrderNotificationEmail({
+          orderId,
+          status: "en_preparacion",
+          customerEmail,
+          order: fullOrder,
+        });
+        showToast(
+          emailResult?.success === false
+            ? `Pedido en preparación. Aviso de correo: ${emailResult.error}`
+            : "Pedido trasladado a preparación y cliente notificado.",
+        );
+      } else {
+        showToast("Pedido trasladado a preparación.");
+      }
     } catch (err) {
       window.alert(err.message || "Error al iniciar preparación.");
     } finally {
@@ -475,27 +521,89 @@ export default function OrdersListView() {
   }
 
   async function handleRequeueIncident(order) {
+    const isPickup =
+      order.delivery_type === "pickup" || order.delivery_type === "recojo";
+    const targetStatus = isPickup ? "listo_recojo" : "por_asignar_repartidor";
     if (
       !window.confirm(
-        `¿Reenviar el pedido #${order.order_number} a la bolsa de repartidores?`,
+        isPickup
+          ? `¿Marcar el pedido #${order.order_number} como listo para recojo?`
+          : `¿Reenviar el pedido #${order.order_number} a la bolsa de repartidores?`,
       )
     )
       return;
     setUpdatingOrderId(order.id);
     try {
-      const updated = await resolveOrderIncident(
-        order.id,
-        "por_asignar_repartidor",
-      );
+      const updated = await resolveOrderIncident(order.id, targetStatus);
+      const mergedOrder = { ...order, ...updated, status: targetStatus };
       setLocalOrders((prev) =>
-        prev.map((o) =>
-          o.id === order.id
-            ? { ...o, ...updated, status: "por_asignar_repartidor" }
-            : o,
-        ),
+        prev.map((o) => (o.id === order.id ? mergedOrder : o)),
       );
+
+      const customerEmail =
+        mergedOrder.customer_email ||
+        mergedOrder.client_email ||
+        mergedOrder.profiles?.email;
+      if (customerEmail) {
+        const emailResult = await sendOrderNotificationEmail({
+          orderId: order.id,
+          status: targetStatus,
+          customerEmail,
+          order: mergedOrder,
+        });
+        showToast(
+          emailResult?.success === false
+            ? `Incidencia resuelta. Aviso de correo: ${emailResult.error}`
+            : isPickup
+              ? "Pedido marcado listo para recojo y cliente notificado."
+              : "Pedido reencolado a bolsa y cliente notificado.",
+        );
+      } else {
+        showToast("Incidencia resuelta y pedido reencolado.");
+      }
     } catch (err) {
       window.alert(err.message || "Error al reencolar el pedido.");
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }
+
+  async function handleMarkDelivered(order) {
+    if (
+      !window.confirm(
+        `¿Confirmar que el pedido #${order.order_number} fue entregado al cliente?`,
+      )
+    )
+      return;
+    setUpdatingOrderId(order.id);
+    try {
+      const updated = await updateOrderStatus(order.id, "entregado");
+      const mergedOrder = { ...order, ...updated, status: "entregado" };
+      setLocalOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? mergedOrder : o)),
+      );
+
+      const customerEmail =
+        mergedOrder.customer_email ||
+        mergedOrder.client_email ||
+        mergedOrder.profiles?.email;
+      if (customerEmail) {
+        const emailResult = await sendOrderNotificationEmail({
+          orderId: order.id,
+          status: "entregado",
+          customerEmail,
+          order: mergedOrder,
+        });
+        showToast(
+          emailResult?.success === false
+            ? `Pedido marcado como entregado. Aviso de correo: ${emailResult.error}`
+            : "Pedido marcado como entregado y cliente notificado.",
+        );
+      } else {
+        showToast("Pedido marcado como entregado.");
+      }
+    } catch (err) {
+      window.alert(err.message || "Error al marcar pedido como entregado.");
     } finally {
       setUpdatingOrderId(null);
     }
@@ -772,9 +880,31 @@ export default function OrdersListView() {
       );
     }
 
+    if (order.status === "listo_recojo") {
+      return (
+        <Button
+          size="sm"
+          disabled={isUpdating}
+          onClick={() => handleMarkDelivered(order)}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+          <span>Entregado</span>
+        </Button>
+      );
+    }
+
     if (isCompletedOrCancelled) {
       return (
-        <span className="text-[11px] text-brand-muted">Pedido completado</span>
+        <span className="text-[11px] text-brand-muted">
+          {order.status === "cancelado" || order.status === "cancelled"
+            ? order.refund_status === "pending"
+              ? "Reembolso pendiente"
+              : order.refund_status === "completed"
+                ? "Reembolsado"
+                : "Cancelado"
+            : "Pedido completado"}
+        </span>
       );
     }
 
@@ -894,6 +1024,7 @@ export default function OrdersListView() {
               <option value="todos">Estado: Todos</option>
               <option value="por_validar">Por Validar</option>
               <option value="en_preparacion">En Preparación</option>
+              <option value="incidencia">Con Incidencia</option>
               <option value="en_bolsa">En Bolsa</option>
               <option value="en_ruta">En Ruta</option>
               <option value="finalizado">Finalizados</option>
@@ -910,6 +1041,7 @@ export default function OrdersListView() {
             <option value="todos">Despacho: Todos</option>
             <option value="express">Express</option>
             <option value="programado">Programado</option>
+            <option value="pickup">Recojo en Tienda</option>
           </select>
 
           {/* Filtro por Método de Pago */}
@@ -958,6 +1090,7 @@ export default function OrdersListView() {
           onSendToPreparation={handleStartPreparing}
           onSendToPool={handleSendToPool}
           onRequeueIncident={handleRequeueIncident}
+          onMarkDelivered={handleMarkDelivered}
           onNavigateDetail={(orderNumber) =>
             navigate(`/admin/pedidos/${orderNumber}`)
           }
@@ -980,16 +1113,33 @@ export default function OrdersListView() {
               "Cliente";
             const phone = order.customer_phone || order.profiles?.phone || "";
             const isIncident = order.status === "incidencia_transporte";
+            const isCancelledRow = ["cancelado", "cancelled"].includes(
+              order.status,
+            );
+            const isDeliveredRow = ["entregado", "delivered"].includes(
+              order.status,
+            );
+            const hasRestoredIncident =
+              !isIncident &&
+              !isCancelledRow &&
+              !isDeliveredRow &&
+              Boolean(order.incident_reason);
             const isRecent = recentOrderIds.includes(order.id);
 
             return (
               <Card
                 key={order.id}
-                className={`p-4 flex flex-col justify-between border border-border bg-surface-card hover:border-brand-primary/40 transition-colors ${isIncident ? "border-l-4 border-l-rose-500 bg-rose-50/20" : ""
-                  } ${isRecent
+                className={`p-4 flex flex-col justify-between border border-border bg-surface-card hover:border-brand-primary/40 transition-colors ${
+                  isIncident
+                    ? "border-l-4 border-l-rose-500 bg-rose-50/20"
+                    : hasRestoredIncident
+                      ? "border-l-4 border-l-amber-500 bg-amber-50/20"
+                      : ""
+                } ${
+                  isRecent
                     ? "ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.35)] animate-pulse"
                     : ""
-                  }`}
+                }`}
               >
                 {/* Header Card */}
                 <div className="space-y-3">
@@ -997,6 +1147,9 @@ export default function OrdersListView() {
                     <div className="flex items-center gap-1.5 min-w-0">
                       {isIncident && (
                         <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      {hasRestoredIncident && (
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                       )}
                       <span className="font-bold font-mono text-base text-accent truncate">
                         #{order.order_number}
@@ -1017,6 +1170,50 @@ export default function OrdersListView() {
                       </button>
                     </div>
                   </div>
+
+                  {(isIncident || hasRestoredIncident) && (
+                    <div
+                      className={`px-2.5 py-1.5 rounded-button border text-[11px] flex items-start gap-1.5 ${
+                        isIncident
+                          ? "bg-status-danger-bg border-status-danger-border text-status-danger-text"
+                          : "bg-status-warning-bg border-status-warning-border text-status-warning-text"
+                      }`}
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="font-bold block">
+                          {isIncident
+                            ? "Incidencia activa"
+                            : "Restituido por incidencia"}
+                        </span>
+                        <span className="line-clamp-2">
+                          {formatIncidentReason(
+                            order.incident_reason,
+                            order.incident_comment,
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {isCancelledRow &&
+                    (order.refund_status === "pending" ||
+                      order.refund_status === "completed") && (
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant={
+                            order.refund_status === "completed"
+                              ? "success"
+                              : "warning"
+                          }
+                          className="text-[10px]"
+                        >
+                          {order.refund_status === "completed"
+                            ? `Reembolsado${order.refund_reference ? ` · ${order.refund_reference}` : ""}`
+                            : "Reembolso pendiente"}
+                        </Badge>
+                      </div>
+                    )}
 
                   {/* Cuerpo Card */}
                   <div className="space-y-2 text-xs">
@@ -1117,6 +1314,17 @@ export default function OrdersListView() {
               <tbody className="divide-y divide-border">
                 {displayedOrders.map((order) => {
                   const isIncident = order.status === "incidencia_transporte";
+                  const isCancelledRow = ["cancelado", "cancelled"].includes(
+                    order.status,
+                  );
+                  const isDeliveredRow = ["entregado", "delivered"].includes(
+                    order.status,
+                  );
+                  const hasRestoredIncident =
+                    !isIncident &&
+                    !isCancelledRow &&
+                    !isDeliveredRow &&
+                    Boolean(order.incident_reason);
                   const isRecent = recentOrderIds.includes(order.id);
                   const customerName =
                     order.customer_name ||
@@ -1133,15 +1341,21 @@ export default function OrdersListView() {
                   return (
                     <tr
                       key={order.id}
-                      className={`hover:bg-surface-subtle/50 transition-colors ${isIncident
-                        ? "bg-rose-50/70 border-l-4 border-l-rose-500"
-                        : ""
-                        } ${isRecent ? "bg-emerald-50/40 animate-pulse" : ""}`}
+                      className={`hover:bg-surface-subtle/50 transition-colors ${
+                        isIncident
+                          ? "bg-rose-50/70 border-l-4 border-l-rose-500"
+                          : hasRestoredIncident
+                            ? "bg-amber-50/40 border-l-4 border-l-amber-500"
+                            : ""
+                      } ${isRecent ? "bg-emerald-50/40 animate-pulse" : ""}`}
                     >
                       <td className="p-4">
                         <div className="flex items-center gap-1.5">
                           {isIncident && (
                             <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                          )}
+                          {hasRestoredIncident && (
+                            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                           )}
                           <p className="font-bold font-mono text-accent">
                             #{order.order_number}
@@ -1151,6 +1365,21 @@ export default function OrdersListView() {
                           {customerName}
                           {phone ? ` · ${phone}` : ""}
                         </p>
+                        {(isIncident || hasRestoredIncident) && (
+                          <p
+                            className={`text-[11px] mt-1 font-medium ${
+                              isIncident
+                                ? "text-status-danger-text"
+                                : "text-status-warning-text"
+                            }`}
+                          >
+                            {isIncident ? "Incidencia: " : "Restituido: "}
+                            {formatIncidentReason(
+                              order.incident_reason,
+                              order.incident_comment,
+                            )}
+                          </p>
+                        )}
                       </td>
 
                       <td className="p-4 text-xs font-mono text-brand-secondary whitespace-nowrap">
@@ -1249,6 +1478,26 @@ export default function OrdersListView() {
             updatedOrder?.status === "cancelado" ||
             updatedOrder?.payment_status === "failed"
           ) {
+            const rejectedOrder = { ...baseOrder, ...updatedOrder };
+            const email =
+              rejectedOrder.customer_email ||
+              rejectedOrder.client_email ||
+              rejectedOrder.profiles?.email;
+            if (email) {
+              void sendOrderNotificationEmail({
+                orderId: rejectedOrder.id,
+                status: "cancelado",
+                customerEmail: email,
+                incidentReason:
+                  rejectedOrder.incident_reason ||
+                  "Comprobante de pago no validado",
+                incidentComment: rejectedOrder.incident_comment,
+                order: rejectedOrder,
+              });
+            }
+            showToast(
+              "Pago rechazado, pedido cancelado, stock restituido y cliente notificado.",
+            );
             return;
           }
           void notifyPaymentVerified(baseOrder, updatedOrder);

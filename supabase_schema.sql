@@ -13,36 +13,30 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 
+CREATE SCHEMA IF NOT EXISTS "public";
+
+
+ALTER SCHEMA "public" OWNER TO "pg_database_owner";
+
+
 COMMENT ON SCHEMA "public" IS 'standard public schema';
 
 
 
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements" WITH SCHEMA "extensions";
+CREATE OR REPLACE FUNCTION "public"."auto_confirm_staff_users"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
+    AS $$
+BEGIN
+  IF COALESCE(NEW.raw_user_meta_data->>'role', 'customer') IN ('delivery', 'owner') THEN
+    NEW.email_confirmed_at := COALESCE(NEW.email_confirmed_at, NOW());
+  END IF;
+  RETURN NEW;
+END;
+$$;
 
 
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
-
-
-
-
-
-
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
-
-
-
-
+ALTER FUNCTION "public"."auto_confirm_staff_users"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."decrement_variant_stock"("p_variant_id" bigint, "p_quantity" integer) RETURNS "void"
@@ -77,7 +71,33 @@ ALTER FUNCTION "public"."decrement_variant_stock"("p_variant_id" bigint, "p_quan
 
 CREATE OR REPLACE FUNCTION "public"."handle_new_user"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
-    AS $$ BEGIN   INSERT INTO public.profiles (     id,     first_name,     paternal_surname,     maternal_surname,     dni,     email,     phone,     role   )   VALUES (     new.id,     COALESCE(new.raw_user_meta_data->>'first_name', 'Usuario'),     COALESCE(new.raw_user_meta_data->>'paternal_surname', ''),     new.raw_user_meta_data->>'maternal_surname',     new.raw_user_meta_data->>'dni',     new.email,     COALESCE(new.raw_user_meta_data->>'phone', ''),     COALESCE(new.raw_user_meta_data->>'role', 'customer')   );   RETURN new; END; $$;
+    AS $$
+BEGIN
+  INSERT INTO public.profiles (
+    id,
+    first_name,
+    paternal_surname,
+    maternal_surname,
+    dni,
+    email,
+    phone,
+    role,
+    email_verified
+  )
+  VALUES (
+    new.id,
+    COALESCE(new.raw_user_meta_data->>'first_name', 'Usuario'),
+    COALESCE(new.raw_user_meta_data->>'paternal_surname', ''),
+    new.raw_user_meta_data->>'maternal_surname',
+    new.raw_user_meta_data->>'dni',
+    new.email,
+    COALESCE(new.raw_user_meta_data->>'phone', ''),
+    COALESCE(new.raw_user_meta_data->>'role', 'customer'),
+    (new.email_confirmed_at IS NOT NULL)
+  );
+  RETURN new;
+END;
+$$;
 
 
 ALTER FUNCTION "public"."handle_new_user"() OWNER TO "postgres";
@@ -239,6 +259,25 @@ $$;
 
 
 ALTER FUNCTION "public"."rls_auto_enable"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."sync_profile_email_verified"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
+    AS $$
+BEGIN
+  IF NEW.email_confirmed_at IS NOT NULL AND OLD.email_confirmed_at IS NULL THEN
+    UPDATE public.profiles
+    SET email_verified = true,
+        updated_at = timezone('utc'::text, now())
+    WHERE id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."sync_profile_email_verified"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid" DEFAULT NULL::"uuid", "p_delivery_type" "text" DEFAULT 'scheduled'::"text", "p_total_items" integer DEFAULT 1, "p_scheduled_time_slot" "text" DEFAULT NULL::"text") RETURNS "jsonb"
@@ -586,11 +625,16 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "incident_reason" character varying(100),
     "incident_comment" "text",
     "shipping_type" "text",
+    "refund_status" character varying(20) DEFAULT 'none'::character varying NOT NULL,
+    "refund_method" character varying(30),
+    "refund_reference" character varying(100),
+    "refunded_at" timestamp with time zone,
     CONSTRAINT "orders_check" CHECK (("total_amount" = ("subtotal" + "delivery_cost"))),
     CONSTRAINT "orders_delivery_cost_check" CHECK (("delivery_cost" >= (0)::numeric)),
     CONSTRAINT "orders_delivery_type_check" CHECK ((("delivery_type")::"text" = ANY ((ARRAY['express'::character varying, 'programado'::character varying, 'scheduled'::character varying, 'recojo'::character varying, 'pickup'::character varying])::"text"[]))),
     CONSTRAINT "orders_invoice_type_check" CHECK (((("invoice_type")::"text" = ANY ((ARRAY['none'::character varying, 'boleta'::character varying, 'factura'::character varying, 'sin_comprobante'::character varying, ''::character varying])::"text"[])) OR ("invoice_type" IS NULL))),
     CONSTRAINT "orders_payment_method_check" CHECK ((("payment_method")::"text" = ANY ((ARRAY['yape_plin'::character varying, 'culqi_gateway'::character varying, 'transferencia'::character varying, 'tarjeta'::character varying, 'contraentrega'::character varying, 'efectivo'::character varying])::"text"[]))),
+    CONSTRAINT "orders_refund_status_check" CHECK ((("refund_status")::"text" = ANY ((ARRAY['none'::character varying, 'pending'::character varying, 'completed'::character varying])::"text"[]))),
     CONSTRAINT "orders_status_check" CHECK ((("status")::"text" = ANY (ARRAY[('recibido'::character varying)::"text", ('received'::character varying)::"text", ('pendiente_pago'::character varying)::"text", ('pending'::character varying)::"text", ('en_preparacion'::character varying)::"text", ('preparing'::character varying)::"text", ('por_asignar_repartidor'::character varying)::"text", ('asignado'::character varying)::"text", ('listo_recojo'::character varying)::"text", ('en_camino'::character varying)::"text", ('dispatched'::character varying)::"text", ('cerca'::character varying)::"text", ('nearby'::character varying)::"text", ('en_destino'::character varying)::"text", ('arrived'::character varying)::"text", ('entregado'::character varying)::"text", ('delivered'::character varying)::"text", ('cancelado'::character varying)::"text", ('cancelled'::character varying)::"text", ('incidencia_transporte'::character varying)::"text"]))),
     CONSTRAINT "orders_subtotal_check" CHECK (("subtotal" > (0)::numeric))
 );
@@ -720,6 +764,7 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "is_on_duty" boolean DEFAULT true NOT NULL,
     "operational_status" character varying(20) DEFAULT 'available'::character varying,
     "delivery_type" character varying(20) DEFAULT 'express'::character varying,
+    "email_verified" boolean DEFAULT false NOT NULL,
     CONSTRAINT "profiles_dni_check" CHECK ((("dni")::"text" ~ '^[0-9]{8}$'::"text")),
     CONSTRAINT "profiles_fit_preference_check" CHECK ((("fit_preference")::"text" = ANY ((ARRAY['tight'::character varying, 'regular'::character varying, 'loose'::character varying])::"text"[]))),
     CONSTRAINT "profiles_height_cm_check" CHECK ((("height_cm" >= 100) AND ("height_cm" <= 250))),
@@ -1199,10 +1244,6 @@ CREATE POLICY "Permitir a administradores crear perfiles" ON "public"."profiles"
 
 
 
-CREATE POLICY "Permitir crear ordenes a invitados y usuarios" ON "public"."orders" FOR INSERT TO "authenticated", "anon" WITH CHECK (true);
-
-
-
 CREATE POLICY "Permitir gestion completa a administradores" ON "public"."product_color_images" USING (true) WITH CHECK (true);
 
 
@@ -1220,10 +1261,6 @@ CREATE POLICY "Permitir lectura cache identidades" ON "public"."identity_cache" 
 
 
 CREATE POLICY "Permitir lectura publica de fotos por color" ON "public"."product_color_images" FOR SELECT USING (true);
-
-
-
-CREATE POLICY "Permitir lectura publica de ordenes" ON "public"."orders" FOR SELECT TO "authenticated", "anon" USING (true);
 
 
 
@@ -1319,12 +1356,6 @@ CREATE POLICY "materials_select_public" ON "public"."materials" FOR SELECT USING
 ALTER TABLE "public"."order_items" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "order_items_insert_customer" ON "public"."order_items" FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
-   FROM "public"."orders"
-  WHERE (("orders"."id" = "order_items"."order_id") AND ("orders"."customer_id" = "auth"."uid"())))));
-
-
-
 CREATE POLICY "order_items_select_policy" ON "public"."order_items" FOR SELECT USING (("public"."is_owner"() OR (EXISTS ( SELECT 1
    FROM "public"."orders"
   WHERE (("orders"."id" = "order_items"."order_id") AND (("orders"."customer_id" = "auth"."uid"()) OR ("orders"."assigned_delivery_id" = "auth"."uid"()) OR ("public"."is_delivery"() AND ("orders"."assigned_delivery_id" IS NULL))))))));
@@ -1334,15 +1365,7 @@ CREATE POLICY "order_items_select_policy" ON "public"."order_items" FOR SELECT U
 ALTER TABLE "public"."orders" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "orders_insert_customer" ON "public"."orders" FOR INSERT WITH CHECK (("auth"."uid"() = "customer_id"));
-
-
-
-CREATE POLICY "orders_select_policy" ON "public"."orders" FOR SELECT TO "authenticated", "anon" USING (("public"."is_owner"() OR ("auth"."uid"() = "customer_id") OR ("auth"."uid"() = "assigned_delivery_id") OR ("public"."is_delivery"() AND ("assigned_delivery_id" IS NULL) AND (("status")::"text" = ANY ((ARRAY['por_asignar_repartidor'::character varying, 'en_preparacion'::character varying, 'preparando'::character varying])::"text"[])))));
-
-
-
-CREATE POLICY "orders_update_policy" ON "public"."orders" FOR UPDATE TO "authenticated" USING (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" IS NULL) OR ("assigned_delivery_id" = "auth"."uid"()))))) WITH CHECK (("public"."is_owner"() OR ("public"."is_delivery"() AND (("assigned_delivery_id" = "auth"."uid"()) OR ("assigned_delivery_id" IS NULL)))));
+CREATE POLICY "orders_all_permissive" ON "public"."orders" TO "authenticated", "anon" USING (true) WITH CHECK (true);
 
 
 
@@ -1402,35 +1425,6 @@ ALTER TABLE "public"."stock_reservations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."store_settings" ENABLE ROW LEVEL SECURITY;
 
 
-
-
-ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
-
-
-
-
-
-
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."orders";
-
-
-
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."product_color_images";
-
-
-
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."product_variants";
-
-
-
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."products";
-
-
-
-ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."profiles";
-
-
-
 GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
@@ -1438,150 +1432,9 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+GRANT ALL ON FUNCTION "public"."auto_confirm_staff_users"() TO "anon";
+GRANT ALL ON FUNCTION "public"."auto_confirm_staff_users"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."auto_confirm_staff_users"() TO "service_role";
 
 
 
@@ -1627,24 +1480,15 @@ GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."sync_profile_email_verified"() TO "anon";
+GRANT ALL ON FUNCTION "public"."sync_profile_email_verified"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."sync_profile_email_verified"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."verify_checkout_preflight"("p_reservation_token" "uuid", "p_delivery_type" "text", "p_total_items" integer, "p_scheduled_time_slot" "text") TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1828,12 +1672,6 @@ GRANT ALL ON TABLE "public"."v_product_variants_available" TO "service_role";
 
 
 
-
-
-
-
-
-
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
@@ -1858,34 +1696,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

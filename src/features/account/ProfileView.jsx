@@ -151,6 +151,12 @@ export default function ProfileView() {
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: user.email,
+        options: {
+          emailRedirectTo:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/catalogo`
+              : "https://erxidi-web.vercel.app/catalogo",
+        },
       });
 
       if (error) throw error;

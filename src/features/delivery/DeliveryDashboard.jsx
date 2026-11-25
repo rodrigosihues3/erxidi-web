@@ -34,7 +34,7 @@ import {
 import DeliveryMapView from "./DeliveryMapView";
 
 const FALLBACK_STORE = [-12.1215, -77.0298];
-const BAG_STATUSES = ["asignado", "en_camino", "cerca"];
+const BAG_STATUSES = ["asignado", "en_camino", "cerca", "en_destino"];
 
 const INCIDENT_OPTIONS = [
   { value: "cliente_ausente", label: "Cliente ausente" },
@@ -395,7 +395,10 @@ function AssignedCard({
           `${addressText}, Lima, Perú`,
         )}`;
   const inBase = order.status === "asignado";
-  const inRoute = order.status === "en_camino" || order.status === "cerca";
+  const inRoute =
+    order.status === "en_camino" ||
+    order.status === "cerca" ||
+    order.status === "en_destino";
 
   return (
     <Card className="!p-0 overflow-hidden">
@@ -578,6 +581,15 @@ function AssignedCard({
                   className="flex-1"
                 >
                   Estoy Cerca
+                </Button>
+              ) : order.status === "cerca" ? (
+                <Button
+                  variant="primary"
+                  isLoading={isUpdating}
+                  onClick={() => onChangeStatus(order.id, "en_destino")}
+                  className="flex-1"
+                >
+                  Llegué a la dirección
                 </Button>
               ) : (
                 <Button

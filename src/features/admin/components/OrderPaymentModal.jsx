@@ -68,7 +68,11 @@ export default function OrderPaymentModal({ order, isOpen, onClose, onSuccess })
     setLoading(true);
     setError("");
     try {
-      const updated = await rejectOrderPayment(order.id, rejectReason.trim());
+      const updated = await rejectOrderPayment(
+        order.id,
+        rejectReason.trim(),
+        order.order_items || order.items || [],
+      );
       onSuccess?.(updated);
       onClose();
     } catch (err) {

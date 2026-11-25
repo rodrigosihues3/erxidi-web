@@ -123,6 +123,7 @@ const ORDER_SELECT = `
   total_amount, payment_method, payment_gateway_tx_id, status, payment_status,
   invoice_type, invoice_data, created_at, updated_at, assigned_delivery_id,
   incident_reason, incident_comment,
+  refund_status, refund_method, refund_reference, refunded_at,
   profiles:customer_id (
     id, dni, first_name, paternal_surname, maternal_surname, email, phone
   ),
@@ -317,37 +318,108 @@ export async function reportOrderIncident(
   };
 }
 
+async function restoreOrderItemsStock(orderId, providedItems = []) {
+  let items = Array.isArray(providedItems) ? providedItems : [];
+  if (items.length === 0) {
+    const { data: fetchedItems } = await supabase
+      .from("order_items")
+      .select("variant_id, quantity")
+      .eq("order_id", orderId);
+    items = fetchedItems || [];
+  }
+
+  for (const item of items) {
+    const variantId = item.variant_id || item.product_variants?.id;
+    const qty = Number(item.quantity || 0);
+    if (!variantId || qty <= 0) continue;
+
+    const { data: variantRow } = await supabase
+      .from("product_variants")
+      .select("id, stock")
+      .eq("id", variantId)
+      .single();
+
+    if (variantRow) {
+      await supabase
+        .from("product_variants")
+        .update({
+          stock: Number(variantRow.stock || 0) + qty,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", variantId);
+    }
+  }
+}
+
+export function buildCancellationRefundPatch(paymentMethod, paymentStatus) {
+  const method = String(paymentMethod || "").toLowerCase();
+  const paid = ["paid", "pagado"].includes(
+    String(paymentStatus || "").toLowerCase(),
+  );
+
+  if (!paid) {
+    return {
+      refund_status: "none",
+      refund_method: null,
+      refund_reference: null,
+      refunded_at: null,
+    };
+  }
+
+  if (["culqi_gateway", "tarjeta"].includes(method)) {
+    return {
+      refund_status: "completed",
+      refund_method: "culqi_extorno",
+      refund_reference: `REF-CLQ-${Date.now().toString().slice(-6)}`,
+      refunded_at: new Date().toISOString(),
+    };
+  }
+
+  return {
+    refund_status: "pending",
+    refund_method: method || "yape_plin",
+    refund_reference: null,
+    refunded_at: null,
+  };
+}
+
 export async function cancelOrderWithStockRestore(
   orderId,
-  { reason, comment, items = [], previousStatus },
+  {
+    reason,
+    comment,
+    items = [],
+    previousStatus,
+    paymentMethod,
+    paymentStatus,
+  },
 ) {
   const alreadyCancelled = ["cancelado", "cancelled"].includes(
     (previousStatus || "").toLowerCase(),
   );
 
-  if (!alreadyCancelled && items.length > 0) {
-    for (const item of items) {
-      const variantId = item.variant_id || item.product_variants?.id;
-      const qty = Number(item.quantity || 0);
-      if (!variantId || qty <= 0) continue;
-
-      const { data: variantRow } = await supabase
-        .from("product_variants")
-        .select("id, stock")
-        .eq("id", variantId)
-        .single();
-
-      if (variantRow) {
-        await supabase
-          .from("product_variants")
-          .update({
-            stock: Number(variantRow.stock || 0) + qty,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", variantId);
-      }
-    }
+  if (!alreadyCancelled) {
+    await restoreOrderItemsStock(orderId, items);
   }
+
+  let resolvedPaymentMethod = paymentMethod;
+  let resolvedPaymentStatus = paymentStatus;
+  if (!resolvedPaymentMethod || !resolvedPaymentStatus) {
+    const { data: currentOrder } = await supabase
+      .from("orders")
+      .select("payment_method, payment_status")
+      .eq("id", orderId)
+      .maybeSingle();
+    resolvedPaymentMethod =
+      resolvedPaymentMethod || currentOrder?.payment_method;
+    resolvedPaymentStatus =
+      resolvedPaymentStatus || currentOrder?.payment_status;
+  }
+
+  const refundPatch = buildCancellationRefundPatch(
+    resolvedPaymentMethod,
+    resolvedPaymentStatus,
+  );
 
   const { data, error } = await supabase
     .from("orders")
@@ -356,16 +428,44 @@ export async function cancelOrderWithStockRestore(
       assigned_delivery_id: null,
       incident_reason: reason || "Pedido cancelado",
       incident_comment: comment || null,
+      ...refundPatch,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
     .select(
-      "id, order_number, status, assigned_delivery_id, incident_reason, incident_comment, updated_at",
+      "id, order_number, status, assigned_delivery_id, incident_reason, incident_comment, refund_status, refund_method, refund_reference, refunded_at, updated_at",
     )
     .single();
 
   if (error) throw error;
   return { ...data, in_pool: false };
+}
+
+/**
+ * Registra la devolución/reembolso manual completado (Yape, Plin, Transferencia)
+ * con el número de operación o constancia.
+ */
+export async function registerOrderRefund(
+  orderId,
+  { refundReference, refundMethod = "yape_plin" },
+) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      refund_status: "completed",
+      refund_method: refundMethod,
+      refund_reference: String(refundReference || "").trim() || null,
+      refunded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .select(
+      "id, order_number, status, refund_status, refund_method, refund_reference, refunded_at, updated_at",
+    )
+    .single();
+
+  if (error) throw error;
+  return data;
 }
 
 /**
@@ -389,19 +489,41 @@ export async function verifyOrderPayment(orderId) {
 }
 
 /**
- * Rechaza un voucher no válido o pago fraudulento.
+ * Rechaza un voucher no válido o pago fraudulento, cancela la orden y restituye stock.
  */
-export async function rejectOrderPayment(orderId, reasonComment) {
+export async function rejectOrderPayment(orderId, reasonComment, items = []) {
+  const { data: currentOrder } = await supabase
+    .from("orders")
+    .select("status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  const alreadyCancelled = ["cancelado", "cancelled"].includes(
+    String(currentOrder?.status || "").toLowerCase(),
+  );
+
+  if (!alreadyCancelled) {
+    await restoreOrderItemsStock(orderId, items);
+  }
+
+  const finalComment =
+    reasonComment || "Voucher o transferencia no verificada por administración";
+
   const { data, error } = await supabase
     .from("orders")
     .update({
       payment_status: "failed",
       status: "cancelado",
-      incident_comment: reasonComment || "Voucher o transferencia no verificada por administración",
+      assigned_delivery_id: null,
+      refund_status: "none",
+      incident_reason: "Comprobante de pago no validado",
+      incident_comment: finalComment,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
-    .select("id, order_number, status, payment_status, updated_at")
+    .select(
+      "id, order_number, status, payment_status, refund_status, incident_reason, incident_comment, updated_at",
+    )
     .single();
 
   if (error) throw error;
@@ -428,7 +550,8 @@ export async function markOrderReadyForDelivery(orderId, targetStatus = "por_asi
 }
 
 /**
- * Resuelve una incidencia de transporte (reencolar a la bolsa o devolver a preparación).
+ * Resuelve una incidencia de transporte (reencolar a la bolsa o devolver a preparación)
+ * conservando incident_reason/incident_comment como trazabilidad visual e histórica.
  */
 export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_repartidor") {
   const { data, error } = await supabase
@@ -436,12 +559,12 @@ export async function resolveOrderIncident(orderId, targetStatus = "por_asignar_
     .update({
       status: targetStatus,
       assigned_delivery_id: null,
-      incident_reason: null,
-      incident_comment: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
-    .select("id, order_number, status, assigned_delivery_id, updated_at")
+    .select(
+      "id, order_number, status, assigned_delivery_id, incident_reason, incident_comment, updated_at",
+    )
     .single();
 
   if (error) throw error;

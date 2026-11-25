@@ -812,15 +812,16 @@ export default function DashboardView() {
     orders.forEach((order) => {
       const st = String(order.status || "").toLowerCase().trim();
       const paySt = String(order.payment_status || "").toLowerCase().trim();
+      const isCancelledRow =
+        CANCELLED_STATUSES.includes(st) || CANCELLED_STATUSES.includes(paySt);
       const hasIncident =
-        st === "con_incidencia" || Boolean(order.incident_reason);
+        st === "incidencia_transporte" ||
+        st === "con_incidencia" ||
+        (!isCancelledRow && Boolean(order.incident_reason));
 
       if (hasIncident) {
         incidents += 1;
-      } else if (
-        CANCELLED_STATUSES.includes(st) ||
-        CANCELLED_STATUSES.includes(paySt)
-      ) {
+      } else if (isCancelledRow) {
         cancelled += 1;
       } else if (
         isPaidOrder(order) ||

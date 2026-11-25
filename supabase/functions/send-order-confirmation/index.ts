@@ -104,30 +104,15 @@ serve(async (req) => {
         );
       }
 
-      // Validar rol de usuario administrativo u operativo (owner / delivery)
+      // Validar rol de usuario (owner / delivery, o customer propietario de la orden)
       const { data: profile, error: profileError } = await supabaseAdmin
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .maybeSingle();
 
-      if (
-        profileError ||
-        !profile ||
-        !["owner", "delivery"].includes(profile.role)
-      ) {
-        return new Response(
-          JSON.stringify({
-            sent: false,
-            mode: "status_update",
-            error: "Acceso denegado: se requiere rol 'owner' o 'delivery'.",
-          }),
-          {
-            status: 403,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
-      }
+      const userRole = profile?.role || "customer";
+      const isStaff = !profileError && ["owner", "delivery"].includes(userRole);
 
       // 1.2 Validación y Coincidencia de Destinatario con la Base de Datos
       const targetEmail = (
@@ -185,6 +170,26 @@ serve(async (req) => {
       )
         .toLowerCase()
         .trim();
+
+      const isOrderOwner =
+        dbOrder.customer_id === user.id ||
+        (Boolean(expectedEmail) &&
+          expectedEmail === (user.email || "").toLowerCase().trim());
+
+      if (!isStaff && !isOrderOwner) {
+        return new Response(
+          JSON.stringify({
+            sent: false,
+            mode: "status_update",
+            error:
+              "Acceso denegado: se requiere rol operativo o ser titular de la orden.",
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
 
       if (!expectedEmail || expectedEmail !== targetEmail.toLowerCase()) {
         return new Response(
@@ -341,6 +346,37 @@ serve(async (req) => {
          </div>`
       : "";
 
+    const rawPaymentMethod = String(order.payment_method || "").toLowerCase();
+    const rawPaymentStatus = String(order.payment_status || "").toLowerCase();
+    const isCashOnDelivery = [
+      "contraentrega",
+      "efectivo",
+      "cash_on_delivery",
+    ].includes(rawPaymentMethod);
+    const isPaidAlready = ["paid", "pagado"].includes(rawPaymentStatus);
+
+    const checkoutHeading = isPaidAlready
+      ? "¡Hemos recibido tu pedido y confirmado tu pago!"
+      : isCashOnDelivery
+        ? "¡Hemos recibido tu pedido!"
+        : "¡Hemos recibido tu pedido! (Pago en verificación)";
+
+    const checkoutIntro = isPaidAlready
+      ? `Hola <strong>${safeCustomerName}</strong>, hemos recibido tu compra con el código de seguimiento <strong>${safeOrderNumber}</strong>. Nuestro equipo revisará tu orden para iniciar la preparación.`
+      : isCashOnDelivery
+        ? `Hola <strong>${safeCustomerName}</strong>, registramos tu pedido <strong>${safeOrderNumber}</strong> con modalidad de pago contra entrega. Nuestro equipo revisará tu orden para iniciar la preparación.`
+        : `Hola <strong>${safeCustomerName}</strong>, registramos tu pedido <strong>${safeOrderNumber}</strong>. Estamos verificando tu comprobante de pago y te avisaremos apenas pase a preparación.`;
+
+    const totalAmountLabel = isPaidAlready
+      ? "Total Pagado"
+      : isCashOnDelivery
+        ? "Total a Pagar Contra Entrega"
+        : "Total del Pedido (Por Validar)";
+
+    const checkoutSubject = isPaidAlready
+      ? `Pedido ${order.order_number} Recibido y Pagado - ERXIDI`
+      : `Pedido ${order.order_number} Recibido - ERXIDI`;
+
     const htmlBody = `
       <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;border-radius:8px;padding:24px;color:#0f172a;background:#ffffff;">
         <div style="border-bottom:2px solid #0f172a;padding-bottom:12px;margin-bottom:16px;">
@@ -348,9 +384,9 @@ serve(async (req) => {
           <p style="font-size:12px;color:#64748b;margin:2px 0 0 0;">Comercio y Distribución Minorista</p>
         </div>
 
-        <h2 style="font-size:16px;margin:0 0 8px 0;">¡Tu pedido ha sido confirmado!</h2>
+        <h2 style="font-size:16px;margin:0 0 8px 0;">${checkoutHeading}</h2>
         <p style="font-size:14px;color:#334155;margin:0 0 16px 0;">
-          Hola <strong>${safeCustomerName}</strong>, hemos recibido tu compra con el código de seguimiento <strong>${safeOrderNumber}</strong>.
+          ${checkoutIntro}
         </p>
 
         <div style="text-align:center;margin:24px 0;">
@@ -389,7 +425,7 @@ serve(async (req) => {
 
         <div style="text-align:right;font-size:13px;color:#334155;line-height:1.6;">
           Costo de Envío: S/ ${Number(order.delivery_cost || 0).toFixed(2)}<br/>
-          <strong style="font-size:16px;color:#0f172a;">Total Pagado: S/ ${Number(order.total_amount || 0).toFixed(2)}</strong>
+          <strong style="font-size:16px;color:#0f172a;">${totalAmountLabel}: S/ ${Number(order.total_amount || 0).toFixed(2)}</strong>
         </div>
 
         <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:12px;font-size:11px;color:#94a3b8;line-height:1.4;">
@@ -409,7 +445,7 @@ serve(async (req) => {
           name: order.customer_name || "Cliente",
         },
       ],
-      subject: `Pedido ${order.order_number} Confirmado - ERXIDI`,
+      subject: checkoutSubject,
       htmlContent: htmlBody,
     };
 
