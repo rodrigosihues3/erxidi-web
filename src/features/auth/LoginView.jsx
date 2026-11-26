@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import * as RouterDom from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
@@ -13,7 +13,6 @@ import {
   Mail,
   MailCheck,
   ShieldAlert,
-  UserCheck,
   Search,
   Check,
   AlertCircle,
@@ -56,162 +55,6 @@ function evaluatePasswordRules(password = "") {
   const isAllValid = passedCount === rules.length;
 
   return { rules, passedCount, isAllValid };
-}
-
-const DEMO_SHORTCUTS = [
-  {
-    label: "Cliente",
-    email: "cliente@erxidi.pe",
-    password: "Demo#1234",
-    className:
-      "bg-surface-subtle text-brand-primary border-border hover:bg-slate-200",
-  },
-  {
-    label: "Dueña",
-    email: "duena@erxidi.pe",
-    password: "Password123*",
-    className: "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100",
-  },
-  {
-    label: "Repartidor · Express",
-    email: "express@erxidi.pe",
-    password: "Demo#1234",
-    className: "bg-slate-900 text-white border-slate-900 hover:bg-slate-950",
-  },
-  {
-    label: "Repartidor · Programado",
-    email: "programado@erxidi.pe",
-    password: "Demo#1234",
-    className: "bg-slate-800 text-white border-slate-700 hover:bg-slate-900",
-  },
-];
-
-function DevShortcutsDraggable({ onQuickLogin }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState(() => {
-    if (typeof window !== "undefined") {
-      return {
-        x: 24,
-        y: Math.max(0, window.innerHeight - 24 - 48),
-      };
-    }
-    return { x: 24, y: 500 };
-  });
-
-  const dragRef = useRef({
-    isDragging: false,
-    startX: 0,
-    startY: 0,
-    elemX: 0,
-    elemY: 0,
-    hasMoved: false,
-  });
-
-  const handlePointerDown = (e) => {
-    if (e.button !== 0) return;
-    dragRef.current = {
-      isDragging: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      elemX: position.x,
-      elemY: position.y,
-      hasMoved: false,
-    };
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // Captura de puntero no soportada: el arrastre sigue funcionando.
-    }
-  };
-
-  const handlePointerMove = (e) => {
-    if (!dragRef.current.isDragging) return;
-    const dx = e.clientX - dragRef.current.startX;
-    const dy = e.clientY - dragRef.current.startY;
-
-    if (Math.hypot(dx, dy) > 5) {
-      dragRef.current.hasMoved = true;
-    }
-
-    const maxX = Math.max(0, window.innerWidth - 50);
-    const maxY = Math.max(0, window.innerHeight - 50);
-    const newX = Math.min(Math.max(0, dragRef.current.elemX + dx), maxX);
-    const newY = Math.min(Math.max(0, dragRef.current.elemY + dy), maxY);
-
-    setPosition({ x: newX, y: newY });
-  };
-
-  const handlePointerUp = (e) => {
-    if (!dragRef.current.isDragging) return;
-    dragRef.current.isDragging = false;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // Captura ya liberada.
-    }
-
-    if (!dragRef.current.hasMoved) {
-      setIsOpen((prev) => !prev);
-    }
-  };
-
-  useEffect(() => {
-    const handleResize = () => {
-      setPosition((pos) => ({
-        x: Math.min(pos.x, Math.max(0, window.innerWidth - 50)),
-        y: Math.min(pos.y, Math.max(0, window.innerHeight - 50)),
-      }));
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  return (
-    <div
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      className="fixed z-50 select-none touch-none"
-    >
-      {isOpen && (
-        <div
-          className="absolute bottom-14 left-0 mb-2 w-56 min-w-[220px] bg-surface-card border border-border rounded-card shadow-lg p-3 space-y-2 z-50"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between pb-1 border-b border-border">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-brand-secondary flex items-center gap-1">
-              <UserCheck className="w-3.5 h-3.5 text-accent" />
-              Atajos de Testing
-            </span>
-          </div>
-          <div className="flex flex-col gap-1.5 pt-1">
-            {DEMO_SHORTCUTS.map((shortcut) => (
-              <button
-                key={shortcut.email}
-                type="button"
-                onClick={() => {
-                  onQuickLogin(shortcut.email, shortcut.password);
-                  setIsOpen(false);
-                }}
-                className={`text-xs py-1.5 px-2.5 text-left border rounded font-semibold whitespace-nowrap transition-colors ${shortcut.className}`}
-              >
-                {shortcut.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <button
-        type="button"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        className="w-12 h-12 rounded-full bg-surface-card border border-border shadow-md flex items-center justify-center text-brand-primary hover:text-accent hover:border-accent/40 active:cursor-grabbing cursor-grab transition-colors focus:outline-none"
-        title="Atajos de desarrollo (arrastrable)"
-      >
-        <UserCheck className="w-5 h-5 pointer-events-none" />
-      </button>
-    </div>
-  );
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -560,36 +403,6 @@ export default function LoginView() {
       setRegisterError(err.message || "Ocurrió un error al crear la cuenta.");
     } finally {
       setRegisterLoading(false);
-    }
-  }
-
-  async function handleQuickLogin(testEmail, testPassword) {
-    setActiveTab("login");
-    setForgotPasswordMode(false);
-    setLoginEmail(testEmail);
-    setLoginPassword(testPassword);
-    setLoginError(null);
-    setUnconfirmedLoginEmail(null);
-    setResendFeedback(null);
-    setLoginLoading(true);
-
-    try {
-      const { data, error } = await signIn(testEmail, testPassword);
-      if (error) {
-        if (isEmailNotConfirmedError(error)) {
-          setUnconfirmedLoginEmail(testEmail);
-          setLoginError(
-            "Esta cuenta aún no ha confirmado su correo electrónico. Revisa tu bandeja de entrada.",
-          );
-          return;
-        }
-        throw error;
-      }
-      navigate(await resolveDestination(data?.user?.id), { replace: true });
-    } catch (err) {
-      setLoginError(err.message || "Error en inicio rápido");
-    } finally {
-      setLoginLoading(false);
     }
   }
 
@@ -1128,8 +941,6 @@ export default function LoginView() {
           </div>
         </CardContent>
       </Card>
-
-      <DevShortcutsDraggable onQuickLogin={handleQuickLogin} />
     </div>
   );
 }
